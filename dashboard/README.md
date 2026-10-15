@@ -23,6 +23,14 @@ statistics. The app needs exported runs in `data/raw` and the temporary model in
 - Decision timeline with active alerts; optional evaluation-truth overlay (off by
   default, loaded separately, never passed to the engine)
 - Three largest robust deviations from the training normal reference
+- "Hold out this run's engine" (training engines only): replays with a model
+  refitted without that engine (`fit_holdout_model`, version suffix
+  `-without-<engine>`), so a fault on an unseen engine can be watched live.
+  Needs `data/processed/integration_v1_features.parquet`; refitting takes about a
+  second and is cached per engine
+- Cross-engine check: per-engine and pooled leave-one-engine-out macro-F1 and
+  recall for fused and waveform-only features, plus the pooled fused confusion
+  matrix, read from `reports/generated/temporary_model_report.json`
 
 Predictions are computed live by `ReplayEngine` from replayed 40 ms packets.
 

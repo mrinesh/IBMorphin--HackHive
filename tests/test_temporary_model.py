@@ -96,3 +96,10 @@ def test_leave_one_engine_out_holds_out_only_training_engines():
     for part in report["results"].values():
         assert sorted(part["engines"]) == report["source_engines"]
         assert part["pooled"]["windows"] == len(T.trainable(synthetic_table(), "train"))
+
+
+def test_holdout_model_never_trains_on_the_held_out_engine():
+    model = T.fit_holdout_model(synthetic_table(), "engine_001")
+    assert model.trained_on and not any(r.startswith("engine_001") for r in model.trained_on)
+    assert model.model_version == f"{T.MODEL_VERSION}-without-engine_001"
+    assert model.notes["held_out_engine"] == "engine_001"

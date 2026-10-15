@@ -6,9 +6,12 @@ Run from the repository root:
 Predictions come from ReplayEngine (shared features, temporary model, alerts) as
 packets are replayed; nothing is precomputed. Display traces are decimated;
 analysis uses full-rate samples. The optional truth overlay is evaluation data
-and is never passed to the engine.
+and is never passed to the engine. "Hold out this run's engine" replays with a
+model refitted without that engine, and the cross-engine panel shows the
+leave-one-engine-out report written by train-temporary.
 """
 
+import json
 import time
 from pathlib import Path
 
@@ -22,6 +25,7 @@ from scipy.signal import welch
 
 from engine_diagnostics.config import load_config
 from engine_diagnostics.data.run_io import find_runs, load_run, validate_run
+from engine_diagnostics.models.temporary import fit_holdout_model
 from engine_diagnostics.pipeline.features import MODALITIES
 from engine_diagnostics.runtime.replay import ReplayEngine, packets
 
@@ -29,6 +33,8 @@ ROOT = Path(__file__).resolve().parents[1]
 RAW_DIR = ROOT / "data/raw"
 TRUTH_DIR = ROOT / "evaluation_truth"
 MODEL_PATH = ROOT / "artifacts/models/temporary.joblib"
+FEATURES_PATH = ROOT / "data/processed/integration_v1_features.parquet"
+REPORT_PATH = ROOT / "reports/generated/temporary_model_report.json"
 DISPLAY_DECIMATION = 8
 TICK_S = 0.5
 CONTEXT_SIGNALS = ("rpm", "load", "throttle")
@@ -52,10 +58,29 @@ def load_bundle(run_id: str):
     return bundle, issues, list(packets(bundle, config["runtime"]["packet_s"]))
 
 
-def start_run(run_id: str) -> None:
+@st.cache_resource
+def load_features():
+    return pd.read_parquet(FEATURES_PATH) if FEATURES_PATH.is_file() else None
+
+
+@st.cache_resource
+def load_holdout_model(engine_id: str):
+    return fit_holdout_model(load_features(), engine_id)
+
+
+def source_engines() -> set[str]:
+    """Training engines that can be held out (needs the offline feature table)."""
+    table = load_features()
+    return set() if table is None else set(table.loc[table["split"] == "train", "engine_id"])
+
+
+def start_run(run_id: str, held_out: str | None = None) -> None:
     config, model = load_project()
     bundle, _, _ = load_bundle(run_id)
-    st.session_state.update(run_id=run_id, engine=ReplayEngine(model, config, bundle.metadata),
+    if held_out is not None:
+        model = load_holdout_model(held_out)
+    st.session_state.update(run_id=run_id, held_out=held_out, model=model,
+                            engine=ReplayEngine(model, config, bundle.metadata),
                             next_packet=0, records=[], stream_t=0.0, playing=False)
 
 
@@ -73,7 +98,7 @@ def advance_to(target_s: float) -> None:
 
 def seek(target_s: float) -> None:
     """Reset buffers and alerts, then re-process from the start (warm-up included)."""
-    start_run(st.session_state.run_id)
+    start_run(st.session_state.run_id, st.session_state.held_out)
     advance_to(target_s)
 
 
@@ -93,9 +118,17 @@ if model is None or not run_ids:
 with st.sidebar:
     st.header("Replay")
     run_id = st.selectbox("Run", run_ids)
-    if st.session_state.get("run_id") != run_id:
-        start_run(run_id)
     bundle, issues, run_packets = load_bundle(run_id)
+    run_engine = bundle.metadata["engine_id"]
+    holdable = run_engine in source_engines()
+    hold_out = st.checkbox(
+        "Hold out this run's engine", disabled=not holdable,
+        help="Replay with a model refitted without this engine, so the engine is unseen. "
+             "Only training engines can be held out; test engines are already unseen.")
+    held_out = run_engine if hold_out and holdable else None
+    if (st.session_state.get("run_id"), st.session_state.get("held_out")) != (run_id, held_out):
+        start_run(run_id, held_out)
+    model = st.session_state.model
     duration = bundle.metadata["duration_s"]
     speed = st.select_slider("Speed", options=[0.5, 1.0, 2.0, 4.0], value=1.0)
     play_col, restart_col = st.columns(2)
@@ -103,7 +136,7 @@ with st.sidebar:
         st.session_state.playing = not st.session_state.playing
         st.session_state.anchor = time.monotonic() - st.session_state.stream_t / speed
     if restart_col.button("Restart", width="stretch"):
-        start_run(run_id)
+        start_run(run_id, held_out)
     target = st.slider("Seek (s)", 0.0, float(duration), 0.0, step=0.5)
     if st.button("Seek", width="stretch"):
         seek(target)
@@ -116,6 +149,10 @@ with st.sidebar:
                f"step {config['analysis']['step_s']:g} s")
     if issues:
         st.error("Run failed validation:\n" + "\n".join(issues))
+
+if held_out:
+    st.warning(f"Unseen-engine replay: the model was refitted without {held_out}, so "
+               f"this run's engine is new to it. Synthetic check, not a real-world claim.")
 
 
 def evidence_table(record) -> pd.DataFrame:
@@ -223,3 +260,32 @@ def live_view():
 
 
 live_view()
+
+
+def cross_engine_panel():
+    st.subheader("Cross-engine check (leave-one-engine-out)")
+    report = (json.loads(REPORT_PATH.read_text(encoding="utf-8"))
+              if REPORT_PATH.is_file() else {})
+    cross = report.get("cross_domain")
+    if cross is None:
+        st.info("No cross-engine results. Run `engine-diagnostics train-temporary`.")
+        return
+    st.caption(f"{cross['status']}. Protocol: {cross['protocol']}.")
+    rows = []
+    for protocol, part in cross["results"].items():
+        for engine_id, metrics in [*part["engines"].items(), ("pooled", part["pooled"])]:
+            rows.append({"features": protocol, "held-out engine": engine_id,
+                         "windows": metrics["windows"],
+                         "macro-F1": round(metrics["macro_f1"], 3),
+                         **{f"recall {c}": round(v, 2) for c, v in metrics["recall"].items()}})
+    st.dataframe(pd.DataFrame(rows), hide_index=True)
+    pooled = cross["results"]["fused"]["pooled"]
+    labels = pooled["confusion_labels"]
+    st.dataframe(pd.DataFrame(pooled["confusion"], index=[f"true {c}" for c in labels],
+                              columns=[f"predicted {c}" for c in labels]))
+    st.caption("Pooled confusion of the fused SVM over all held-out engines. Report from "
+               f"model {report['model_version']}; regenerate with train-temporary after "
+               "changing data.")
+
+
+cross_engine_panel()

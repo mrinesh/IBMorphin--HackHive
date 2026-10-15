@@ -45,3 +45,37 @@ def test_play_advances_stream_time_in_real_time():
     assert 1.0 <= app.session_state["stream_t"] <= 2.5  # 1x pacing, 40 ms packets
     if app.session_state["stream_t"] < 2.0:  # no decision before a full 2 s window
         assert app.session_state["records"] == []
+
+
+def checkbox(app, label):
+    return next(c for c in app.sidebar.checkbox if c.label == label)
+
+
+def test_hold_out_replays_a_training_engine_with_a_model_that_never_saw_it():
+    app = AppTest.from_file(str(APP), default_timeout=120).run()
+    app.sidebar.selectbox[0].set_value("run_00014").run()  # engine_001, valve-clearance-like
+    checkbox(app, "Hold out this run's engine").check().run()
+    app.sidebar.slider[0].set_value(12.0).run()
+    app.sidebar.button[2].click().run()  # Seek
+    assert not app.exception
+    state = app.session_state
+    assert state["held_out"] == "engine_001"
+    assert state["records"][-1]["model_version"] == "temporary-0.2.0-without-engine_001"
+    assert any("Unseen-engine replay" in w.value for w in app.warning)
+
+
+def test_test_engine_runs_cannot_be_held_out():
+    app = AppTest.from_file(str(APP), default_timeout=60).run()
+    app.sidebar.selectbox[0].set_value("run_00012").run()  # engine_004 is never trained on
+    hold_out = checkbox(app, "Hold out this run's engine")
+    assert hold_out.disabled
+    assert app.session_state["held_out"] is None
+
+
+def test_cross_engine_panel_shows_leave_one_engine_out_report():
+    app = AppTest.from_file(str(APP), default_timeout=60).run()
+    assert not app.exception
+    assert any("Cross-engine check" in s.value for s in app.subheader)
+    table = app.dataframe[-2].value
+    assert set(table["features"]) == {"fused", "waveform_only"}
+    assert "pooled" in set(table["held-out engine"])

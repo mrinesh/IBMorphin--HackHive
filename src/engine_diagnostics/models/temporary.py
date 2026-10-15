@@ -119,6 +119,14 @@ def fit_temporary_model(table: pd.DataFrame, anomaly_quantile: float = 0.99,
     return model
 
 
+def fit_holdout_model(table: pd.DataFrame, engine_id: str) -> TemporaryModel:
+    """Temporary model refitted without one engine, so replay sees that engine unseen."""
+    model = fit_temporary_model(table[table["engine_id"] != engine_id])
+    model.model_version = f"{MODEL_VERSION}-without-{engine_id}"
+    model.notes["held_out_engine"] = engine_id
+    return model
+
+
 def classification_metrics(truth: np.ndarray, predicted: np.ndarray,
                            classes: list[str]) -> dict[str, Any]:
     return {
