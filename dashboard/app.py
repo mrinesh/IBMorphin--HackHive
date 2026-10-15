@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:  # `dashboard` package (theme, explain) for `streamlit run`
     sys.path.insert(0, str(ROOT))
 
-from dashboard import explain, theme  # noqa: E402
+from dashboard import engine3d, explain, theme  # noqa: E402
 from engine_diagnostics.config import load_config  # noqa: E402
 from engine_diagnostics.data.run_io import find_runs, load_run, validate_run  # noqa: E402
 from engine_diagnostics.models.temporary import fit_holdout_model  # noqa: E402
@@ -343,13 +343,15 @@ def live_view():
                    f"{latest['processing_ms']:.0f} / {state.get('render_ms', 0):.0f} ms"
                    if latest else "-")
 
+    cards = telemetry_cards(t_now)
     view_col, diag_col = st.columns([3, 2], gap="medium")
     with view_col, st.container(key="viewport"):
-        st.caption("3D engine view")
+        engine3d.render({"t": t_now, "playing": bool(state.playing),
+                         "rpm": next(c["value"] for c in cards if c["label"] == "RPM")})
     with diag_col:
         st.html(theme.status_card_html(explain.diagnose(latest, model, confirm)))
 
-    st.html(theme.telemetry_cards_html(telemetry_cards(t_now)))
+    st.html(theme.telemetry_cards_html(cards))
 
     signals_tab, frequency_tab, telemetry_tab, timeline_tab = st.tabs([
         ":material/show_chart: Signals", ":material/equalizer: Frequency · FFT / STFT",
