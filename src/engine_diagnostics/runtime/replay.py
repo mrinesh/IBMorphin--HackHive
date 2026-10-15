@@ -17,6 +17,7 @@ import pandas as pd
 from engine_diagnostics.data.run_io import RunBundle
 from engine_diagnostics.pipeline.features import (
     MODALITIES,
+    all_feature_names,
     extract_window,
     telemetry_context,
     window_ends,
@@ -54,6 +55,9 @@ class ReplayEngine:
         if any(metadata["streams"][m]["t0_s"] != 0 for m in MODALITIES):
             raise ValueError("replay currently requires t0_s = 0 for every stream")
         self.model = model
+        # The window vector holds every extracted feature; each model uses its own names.
+        extracted = all_feature_names()
+        self.columns = [extracted.index(n) for n in model.feature_names]
         self.config = config
         self.rates = {m: metadata["streams"][m]["fs_hz"] for m in MODALITIES}
         self.scales = {m: metadata["streams"][m]["full_scale"] for m in MODALITIES}
@@ -117,8 +121,9 @@ class ReplayEngine:
             waves[m] = self.buffers[m][max(first, 0):last]
         context, fresh = telemetry_context(self.telemetry, t, self.config)
         window = extract_window(waves, self.rates, context, fresh, self.scales, t, self.config)
+        features = window.features[self.columns]
         if window.quality == "ok":
-            result = self.model.predict(window.features)[0]
+            result = self.model.predict(features)[0]
         else:
             result = {"predicted": None, "margin": float("nan"),
                       "anomaly_score": float("nan"), "anomalous": False,
@@ -133,7 +138,7 @@ class ReplayEngine:
             "processing_ms": 1000 * (time.perf_counter() - started),
             "model_version": self.model.model_version,
             "feature_version": self.model.feature_version,
-            "features": window.features, "context": context,
+            "features": features, "context": context,
         }
 
 

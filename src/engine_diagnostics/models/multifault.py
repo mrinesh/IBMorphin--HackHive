@@ -2,9 +2,11 @@
 
 Each fault (misfire, knock_like, valve_clearance_like) has its own RBF SVM,
 fault present vs absent, so any combination can be reported in one window.
+Each detector also chooses its input set (base features, stroke-synchronous
+features, or combinations) on the tuning engines, with C and gamma.
 Partitions are used strictly by role, as in v1:
   train        SVM fits and the operating-bin normal baseline
-  tuning       per-fault SVM hyperparameters, thresholds, alert persistence
+  tuning       per-fault feature set, SVM hyperparameters, thresholds, alert persistence
   calibration  sigmoid probability calibration of each frozen SVM
   test         final evaluation only (see engine_diagnostics.cli evaluate-multi)
 A window's label for one fault is NaN near that fault's changes and is then
@@ -26,24 +28,39 @@ from sklearn.metrics import f1_score
 from engine_diagnostics.evaluation import alert_sequence, score_run, summarize
 from engine_diagnostics.models.diagnostic import (
     FALSE_ALERT_LIMIT,
-    SVM_GRID,
     DiagnosticModel,
     _baseline,
     run_sequences,
     thin,
 )
 from engine_diagnostics.models.temporary import NORMAL, UNCERTAIN, fit_svm
-from engine_diagnostics.pipeline.features import FEATURE_VERSION, feature_names
+from engine_diagnostics.pipeline.features import (
+    SYNC_FEATURE_VERSION,
+    all_feature_names,
+    feature_names,
+    sync_feature_names,
+)
 from engine_diagnostics.pipeline.labels import FAULTS, fault_intervals
 
 MODEL_VERSION = "v2.0.0"
 ABSENT = "absent"
 FAULT, CLEAR = "fault", "normal"  # per-fault decisions fed to MultiAlertState
 ANOMALY_QUANTILE = 0.99
+SVM_GRID = {"C": (1.0, 10.0, 30.0, 100.0), "gamma": ("scale", 0.03, 0.01)}
+
+
+def feature_sets() -> dict[str, list[str]]:
+    """Candidate detector inputs, chosen per fault on the tuning engines."""
+    base, sync = feature_names(), sync_feature_names()
+    context = [n for n in base if n.startswith("ctx_")]
+    vibration = [n for n in base if n.startswith("vibration_")]
+    return {"base": base, "base+sync": base + sync, "sync": sync,
+            "vibration+sync": vibration + sync + context}
+
 DECISION_GRID = {
-    "threshold": (0.3, 0.4, 0.5, 0.6, 0.7, 0.8),
+    "threshold": (0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95),
     "band": (0.0, 0.1, 0.2),  # below threshold by less than this: uncertain, not clear
-    "confirm_updates": (2, 3),
+    "confirm_updates": (2, 3, 4),
 }
 
 
@@ -53,6 +70,7 @@ class MultiFaultModel:
     fault_classes: list[str]
     detectors: dict[str, Any]
     svms: dict[str, Any]
+    detector_features: dict[str, list[str]]
     baseline_names: list[str]
     bin_stats: dict[tuple[int, int], tuple[np.ndarray, np.ndarray]]
     global_stats: tuple[np.ndarray, np.ndarray]
@@ -64,7 +82,7 @@ class MultiFaultModel:
     clear_updates: int = 3
     trained_on: list[str] = field(default_factory=list)
     model_version: str = MODEL_VERSION
-    feature_version: str = FEATURE_VERSION
+    feature_version: str = SYNC_FEATURE_VERSION
     notes: dict[str, Any] = field(default_factory=dict)
 
     # Same operating-bin normal baseline as v1.
@@ -77,7 +95,9 @@ class MultiFaultModel:
         columns = []
         for fault in self.fault_classes:
             detector = self.detectors[fault]
-            columns.append(detector.predict_proba(x)[:, list(detector.classes_).index(fault)])
+            idx = [self.feature_names.index(n) for n in self.detector_features[fault]]
+            present = list(detector.classes_).index(fault)
+            columns.append(detector.predict_proba(x[:, idx])[:, present])
         return np.column_stack(columns)
 
     def fault_decisions(self, proba_row: np.ndarray) -> dict[str, str]:
@@ -166,8 +186,8 @@ def fault_episode_summary(model: MultiFaultModel, fault: str, cache: list[dict[s
 
 def fit_multifault_model(table: pd.DataFrame, truths: dict[str, dict], config: dict,
                          max_train_windows: int = 6000) -> MultiFaultModel:
-    names = feature_names()
-    detectors, svms, search, svm_selected = {}, {}, {}, {}
+    names = all_feature_names()
+    detectors, svms, search, svm_selected, inputs = {}, {}, {}, {}, {}
     counts = {}
     for fault in FAULTS:
         train = fault_rows(table, "train", fault)
@@ -178,22 +198,26 @@ def fit_multifault_model(table: pd.DataFrame, truths: dict[str, dict], config: d
                          "train_present": int((train["label"] == fault).sum()),
                          "tuning": len(tuning), "calibration": len(calibration)}
 
-        # 1. SVM hyperparameters by this fault's F1 on tuning engines.
+        # 1. Input set and SVM hyperparameters by this fault's F1 on tuning engines.
         trials = []
-        for c, gamma in itertools.product(SVM_GRID["C"], SVM_GRID["gamma"]):
-            svm = fit_svm(thinned, names, C=c, gamma=gamma)
-            score = f1_score(tuning["label"], svm.predict(tuning[names].to_numpy()),
-                             pos_label=fault, average="binary", zero_division=0)
-            trials.append({"C": c, "gamma": gamma, "tuning_f1": float(score), "model": svm})
+        for set_name, columns in feature_sets().items():
+            for c, gamma in itertools.product(SVM_GRID["C"], SVM_GRID["gamma"]):
+                svm = fit_svm(thinned, columns, C=c, gamma=gamma)
+                score = f1_score(tuning["label"], svm.predict(tuning[columns].to_numpy()),
+                                 pos_label=fault, average="binary", zero_division=0)
+                trials.append({"features": set_name, "C": c, "gamma": gamma,
+                               "tuning_f1": float(score), "model": svm, "columns": columns})
         best = max(trials, key=lambda t: t["tuning_f1"])
-        search[fault] = [{k: v for k, v in t.items() if k != "model"} for t in trials]
-        svm_selected[fault] = {"C": best["C"], "gamma": best["gamma"]}
-        svms[fault] = best["model"]
+        search[fault] = [{k: v for k, v in t.items() if k not in ("model", "columns")}
+                         for t in trials]
+        svm_selected[fault] = {"features": best["features"], "C": best["C"],
+                               "gamma": best["gamma"]}
+        svms[fault], inputs[fault] = best["model"], best["columns"]
 
         # 2. Sigmoid calibration of the frozen SVM on calibration engines.
         detectors[fault] = CalibratedClassifierCV(FrozenEstimator(best["model"]),
                                                   method="sigmoid").fit(
-            calibration[names].to_numpy(), calibration["label"].to_numpy())
+            calibration[best["columns"]].to_numpy(), calibration["label"].to_numpy())
 
     # 3. Normal baseline per operating bin from training windows with no fault.
     baseline_names = [n for n in names if not n.startswith("ctx_")]
@@ -201,6 +225,7 @@ def fit_multifault_model(table: pd.DataFrame, truths: dict[str, dict], config: d
     bins, global_stats = _baseline(normal, baseline_names)
     model = MultiFaultModel(
         feature_names=names, fault_classes=list(FAULTS), detectors=detectors, svms=svms,
+        detector_features=inputs,
         baseline_names=baseline_names, bin_stats=bins, global_stats=global_stats,
         normal_scores=np.empty(0), clear_updates=config["runtime"]["clear_fault_updates"],
         trained_on=sorted(table.loc[(table["split"] == "train"), "run_id"].unique()),

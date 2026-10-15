@@ -27,6 +27,7 @@ class StubModel:
 
     model_version = "stub"
     feature_version = "test"
+    feature_names = feature_names()  # replay passes each model only its own columns
 
     def predict(self, x):
         loud = np.atleast_2d(x)[0, feature_names().index("vibration_log_rms")] > 0

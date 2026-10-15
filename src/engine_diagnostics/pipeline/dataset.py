@@ -13,7 +13,7 @@ from typing import Any
 import pandas as pd
 
 from engine_diagnostics.data.run_io import find_runs, load_run, validate_run
-from engine_diagnostics.pipeline.features import FEATURE_VERSION, extract_run
+from engine_diagnostics.pipeline.features import SYNC_FEATURE_VERSION, extract_run
 from engine_diagnostics.pipeline.labels import (
     FAULT_COLUMNS,
     FAULTS,
@@ -66,5 +66,5 @@ def build_feature_table(raw_dir: Path, truth_dir: Path, batch_config_path: Path,
     if not frames:
         raise ValueError(f"no runs found in {raw_dir}")
     table = pd.concat(frames, ignore_index=True)
-    table.attrs["feature_version"] = FEATURE_VERSION
+    table.attrs["feature_version"] = SYNC_FEATURE_VERSION  # all_feature_names()
     return table

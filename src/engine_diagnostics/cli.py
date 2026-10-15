@@ -96,7 +96,7 @@ def _validate_runs(raw_dir: Path, config: dict) -> int:
 def _build_features(args, config: dict) -> int:
     try:
         from engine_diagnostics.pipeline.dataset import build_feature_table
-        from engine_diagnostics.pipeline.features import FEATURE_VERSION
+        from engine_diagnostics.pipeline.features import FEATURE_VERSION, SYNC_FEATURE_VERSION
     except ImportError as error:
         print(f"build-features needs the analysis extra ({error.name} missing)", file=sys.stderr)
         return 1
@@ -108,7 +108,8 @@ def _build_features(args, config: dict) -> int:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     table.to_parquet(args.output, index=False)
     counts = table.groupby(["split", "label"]).size()
-    print(f"{len(table)} windows, feature version {FEATURE_VERSION} -> {args.output}")
+    print(f"{len(table)} windows, features {SYNC_FEATURE_VERSION} (base {FEATURE_VERSION} "
+          f"+ stroke-sync) -> {args.output}")
     print(counts.to_string())
     return 0
 

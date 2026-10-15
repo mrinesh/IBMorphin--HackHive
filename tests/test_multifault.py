@@ -12,7 +12,7 @@ pytest.importorskip("sklearn")
 
 from engine_diagnostics.config import load_config  # noqa: E402
 from engine_diagnostics.models import multifault as M  # noqa: E402
-from engine_diagnostics.pipeline.features import feature_names  # noqa: E402
+from engine_diagnostics.pipeline.features import all_feature_names  # noqa: E402
 from engine_diagnostics.pipeline.labels import (  # noqa: E402
     FAULTS,
     fault_window_labels,
@@ -73,7 +73,7 @@ ONSET = 8.0
 def synthetic(seed=0):
     """Each fault shifts its own block of six features while active (fixture only)."""
     rng = np.random.default_rng(seed)
-    names = feature_names()
+    names = all_feature_names()
     rows, truths, engine = [], {}, 0
     t_end = np.arange(2.0, 30.01, 0.5)
     for split, n_engines in SPLITS.items():
