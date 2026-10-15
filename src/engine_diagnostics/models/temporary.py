@@ -10,7 +10,13 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import balanced_accuracy_score, confusion_matrix, f1_score, recall_score
+from sklearn.metrics import (
+    balanced_accuracy_score,
+    confusion_matrix,
+    f1_score,
+    precision_score,
+    recall_score,
+)
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
@@ -78,9 +84,9 @@ def trainable(table: pd.DataFrame, split: str) -> pd.DataFrame:
     return rows.reset_index(drop=True)
 
 
-def fit_svm(train: pd.DataFrame, names: list[str]):
+def fit_svm(train: pd.DataFrame, names: list[str], C: float = 10.0, gamma="scale"):
     model = make_pipeline(StandardScaler(),
-                          SVC(kernel="rbf", C=10.0, gamma="scale", class_weight="balanced",
+                          SVC(kernel="rbf", C=C, gamma=gamma, class_weight="balanced",
                               decision_function_shape="ovr"))
     return model.fit(train[names].to_numpy(), train["label"].to_numpy())
 
@@ -114,8 +120,11 @@ def classification_metrics(truth: np.ndarray, predicted: np.ndarray,
         "windows": int(len(truth)),
         "macro_f1": float(f1_score(truth, predicted, labels=classes, average="macro",
                                    zero_division=0)),
-        "balanced_accuracy": float(balanced_accuracy_score(truth, predicted)),
+        "balanced_accuracy": (float(balanced_accuracy_score(truth, predicted))
+                              if len(truth) else None),
         "recall": dict(zip(classes, map(float, recall_score(
+            truth, predicted, labels=classes, average=None, zero_division=0)), strict=True)),
+        "precision": dict(zip(classes, map(float, precision_score(
             truth, predicted, labels=classes, average=None, zero_division=0)), strict=True)),
         "support": {c: int(np.sum(truth == c)) for c in classes},
         "confusion_labels": classes,

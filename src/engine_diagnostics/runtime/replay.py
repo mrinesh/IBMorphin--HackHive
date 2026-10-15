@@ -58,8 +58,10 @@ class ReplayEngine:
         self.rates = {m: metadata["streams"][m]["fs_hz"] for m in MODALITIES}
         self.scales = {m: metadata["streams"][m]["full_scale"] for m in MODALITIES}
         self.decision_times = window_ends(metadata["duration_s"], config)
-        self.alerts = AlertState(confirm=config["runtime"]["confirm_fault_updates"],
-                                 clear=config["runtime"]["clear_fault_updates"])
+        # A model may carry alert persistence tuned on its tuning partition.
+        self.alerts = AlertState(
+            confirm=getattr(model, "confirm_updates", config["runtime"]["confirm_fault_updates"]),
+            clear=getattr(model, "clear_updates", config["runtime"]["clear_fault_updates"]))
         self.reset()
 
     def reset(self) -> None:

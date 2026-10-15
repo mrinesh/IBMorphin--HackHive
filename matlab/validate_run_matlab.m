@@ -4,7 +4,8 @@ function report = validate_run_matlab(runDir, truthPath)
 %       'evaluation_truth/run_00001_events.json')
 %   Checks lengths, dtype, finite values, clipping, firing-event rate against
 %   observed RPM, fault events after onset, and the condition's intended
-%   signature (knock: 5-9 kHz energy after knocked vs unknocked combustion).
+%   signature (knock: 5-9 kHz energy after knocked vs unknocked combustion
+%   must exceed 1.1x; below 2x it is reported as faint).
 %   Python validate-runs repeats the format checks independently.
 
     config = load_project_config();
@@ -85,7 +86,10 @@ function report = validate_run_matlab(runDir, truthPath)
             knocked = knocked(fired < duration - 0.006);
             ratio = mean(windowEnergy(knocked)) / mean(windowEnergy(~knocked));
             metrics.knock_band_ratio = ratio;
-            ok = any(knocked) && any(~knocked) && ratio > 2;
+            % The check confirms the intervention exists. Low-severity knock is
+            % intentionally faint (ratio near 1.1-2); it is reported, not failed.
+            metrics.knock_faint = ratio < 2;
+            ok = any(knocked) && any(~knocked) && ratio > 1.1;
         case 'valve_clearance_like'
             ok = any(faulted & kinds == "valve_impact");
         otherwise

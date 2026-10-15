@@ -199,6 +199,91 @@ def _replay(args, config: dict) -> int:
     return 0
 
 
+def _load_truths(table, truth_dir: Path) -> dict:
+    from engine_diagnostics.pipeline.labels import load_truth
+
+    return {run_id: load_truth(truth_dir, run_id) for run_id in table["run_id"].unique()}
+
+
+def _train(args, config: dict) -> int:
+    try:
+        import joblib
+        import pandas as pd
+
+        from engine_diagnostics.models.diagnostic import fit_diagnostic_model
+    except ImportError as error:
+        print(f"train needs the analysis extra ({error.name} missing)", file=sys.stderr)
+        return 1
+    if not args.features.is_file():
+        print(f"{args.features} not found; run build-features first", file=sys.stderr)
+        return 1
+    table = pd.read_parquet(args.features)
+    model = fit_diagnostic_model(table, _load_truths(table, args.truth_dir), config)
+    args.model.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(model, args.model)
+    notes = model.notes
+    selected = notes["decision_selected"]
+    summary = {k: v for k, v in notes.items() if k != "decision_trials"}
+    args.report.parent.mkdir(parents=True, exist_ok=True)
+    args.report.write_text(json.dumps({"model_version": model.model_version, **summary,
+                                       "decision_trials": notes["decision_trials"]},
+                                      indent=2, default=str) + "\n", encoding="utf-8")
+    print(f"{model.model_version}: train {notes['train_windows_used']} of "
+          f"{notes['train_windows']} windows; SVM {notes['svm_selected']}")
+    for trial in notes["svm_search"]:
+        print(f"  tuning macro-F1 {trial['tuning_macro_f1']:.3f}  C={trial['C']} "
+              f"gamma={trial['gamma']}")
+    print(f"selected on tuning runs: p_min {selected['probability_min']}, anomaly quantile "
+          f"{selected['anomaly_quantile']}, gate {selected['gate_fault_with_anomaly']}, "
+          f"confirm {selected['confirm_updates']}")
+    fa = selected["false_alerts_per_normal_minute"]
+    print(f"  tuning: false alerts/normal min {fa:.3f}, sustained recall "
+          f"{selected['sustained_recall']:.3f}, latency p50 {selected['latency_p50_s']} s, "
+          f"wrong-class episodes {selected['wrong_class_episodes']}")
+    if not notes["false_alert_limit_met_on_tuning"]:
+        print("  WARNING: no setting met the false-alert limit on tuning runs")
+    print(f"model -> {args.model}\nreport -> {args.report}")
+    return 0
+
+
+def _evaluate(args, config: dict) -> int:
+    try:
+        import joblib
+        import pandas as pd
+
+        from engine_diagnostics.final_evaluation import evaluate_final
+    except ImportError as error:
+        print(f"evaluate needs the analysis extra ({error.name} missing)", file=sys.stderr)
+        return 1
+    if args.report.is_file() and not args.force:
+        print(f"{args.report} exists: the test set has already been scored. Use --force "
+              "only to reproduce the same frozen model's result.", file=sys.stderr)
+        return 1
+    table = pd.read_parquet(args.features)
+    model = joblib.load(args.model)
+    report = evaluate_final(model, table, _load_truths(table, args.truth_dir), args.raw_dir,
+                            config, args.model)
+    args.report.parent.mkdir(parents=True, exist_ok=True)
+    args.report.write_text(json.dumps(report, indent=2, default=str) + "\n", encoding="utf-8")
+    print(report["status"])
+    for subset in ("core", "challenge"):
+        if subset not in report:
+            continue
+        part = report[subset]
+        top, acc, rep = part["windows"]["top_class"], part["windows"]["accepted"], part["replay"]
+        print(f"[{subset}] {part['runs']} runs | window macro-F1 {top['macro_f1']:.3f} "
+              f"(accepted {acc['macro_f1']:.3f} at coverage {acc['coverage']:.3f})")
+        print(f"  recall {json.dumps({k: round(v, 2) for k, v in top['recall'].items()})}")
+        print(f"  replay: false alerts/normal min {rep['false_alerts_per_normal_minute']:.3f}, "
+              f"sustained recall {rep['sustained_recall']}, latency p50/p95 "
+              f"{rep['latency_p50_s']}/{rep['latency_p95_s']} s, brief recall "
+              f"{rep['brief_recall']}, processing p95 {rep['processing_ms_p95']:.1f} ms")
+    for name, part in report["ablations"].items():
+        print(f"ablation {name:24s} macro-F1 {part['macro_f1']:.3f}")
+    print(f"report -> {args.report}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Engine diagnostics project initialization tools")
     parser.add_argument("--version", action="version", version=__version__)
@@ -239,6 +324,25 @@ def main(argv: list[str] | None = None) -> int:
                         help="after replay, compare alerts with evaluation truth")
     replay.add_argument("--config", type=Path, default=Path("configs/mvp.json"))
     replay.add_argument("--schema", type=Path, default=Path("schemas/project-config.schema.json"))
+    fit = commands.add_parser("train", help="Fit the v1 model using train/tuning/calibration")
+    fit.add_argument("--features", type=Path,
+                     default=Path("data/processed/core_v1_features.parquet"))
+    fit.add_argument("--truth-dir", type=Path, default=Path("evaluation_truth/core_v1"))
+    fit.add_argument("--model", type=Path, default=Path("artifacts/models/diagnostic_v1.joblib"))
+    fit.add_argument("--report", type=Path, default=Path("reports/generated/training_v1.json"))
+    final = commands.add_parser("evaluate", help="Score the frozen model once on test engines")
+    final.add_argument("--features", type=Path,
+                       default=Path("data/processed/core_v1_features.parquet"))
+    final.add_argument("--truth-dir", type=Path, default=Path("evaluation_truth/core_v1"))
+    final.add_argument("--raw-dir", type=Path, default=Path("data/raw/core_v1"))
+    final.add_argument("--model", type=Path, default=Path("artifacts/models/diagnostic_v1.joblib"))
+    final.add_argument("--report", type=Path,
+                       default=Path("reports/generated/final_evaluation_v1.json"))
+    final.add_argument("--force", action="store_true")
+    for sub in (fit, final):
+        sub.add_argument("--config", type=Path, default=Path("configs/mvp.json"))
+        sub.add_argument("--schema", type=Path,
+                         default=Path("schemas/project-config.schema.json"))
     args = parser.parse_args(argv)
     if args.command == "doctor":
         return _doctor(args.root.resolve())
@@ -255,6 +359,10 @@ def main(argv: list[str] | None = None) -> int:
         return _build_features(args, config)
     if args.command == "replay":
         return _replay(args, config)
+    if args.command == "train":
+        return _train(args, config)
+    if args.command == "evaluate":
+        return _evaluate(args, config)
     print(json.dumps({
         "status": "valid",
         "schema_version": config["schema_version"],

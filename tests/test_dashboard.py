@@ -18,13 +18,18 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def widget(widgets, label):
+    return next(w for w in widgets if w.label == label)
+
+
 def test_dashboard_renders_banner_and_seeks_with_live_predictions():
     app = AppTest.from_file(str(APP), default_timeout=60).run()
     assert not app.exception
     assert any("SYNTHETIC DATA" in m.value for m in app.markdown)
-    app.sidebar.selectbox[0].set_value("run_00012").run()
-    app.sidebar.slider[0].set_value(12.0).run()
-    app.sidebar.button[2].click().run()  # Seek
+    widget(app.sidebar.selectbox, "Dataset").set_value("integration_v1").run()
+    widget(app.sidebar.selectbox, "Run").set_value("run_00012").run()
+    widget(app.sidebar.slider, "Seek (s)").set_value(12.0).run()
+    widget(app.sidebar.button, "Seek").click().run()
     assert not app.exception
     state = app.session_state
     assert state["stream_t"] == pytest.approx(12.0)
@@ -37,7 +42,8 @@ def test_play_advances_stream_time_in_real_time():
     import time
 
     app = AppTest.from_file(str(APP), default_timeout=60).run()
-    app.sidebar.button[0].click().run()  # Play
+    widget(app.sidebar.selectbox, "Dataset").set_value("integration_v1").run()
+    widget(app.sidebar.button, "Play").click().run()
     assert app.session_state["playing"]
     time.sleep(1.5)
     app.run()
