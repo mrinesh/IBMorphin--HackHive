@@ -18,6 +18,14 @@ A leave-one-engine-out check on the 16-run integration batch shows poor transfer
 between synthetic engines (mean macro-F1 0.389); the dashboard can replay a run
 with its engine held out to show this live.
 
+**Simultaneous faults.** The `core_v2` MATLAB dataset puts 0-3 faults in the same
+run with independent onsets. The v2 model has one calibrated detector and one
+alert per fault plus crank-synchronous vibration features. On four new held-out
+engines it scores window macro-F1 0.884 (v1: 0.621 on the same windows) and
+alerts every sustained fault in 10 of 12 two-fault and 4 of 4 three-fault runs;
+valve recall (0.62) and knock false alerts (0.30 per fault-free minute) remain
+weak. See PROJECT_REPORT §11.7.
+
 ## Quick start
 
 Results and design: [PROJECT_REPORT.md](PROJECT_REPORT.md). Demo walkthrough:

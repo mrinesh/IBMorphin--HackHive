@@ -10,6 +10,9 @@ function report = validate_generator(options)
 %     4. noise-free energy above 0.9 x Nyquist (aliasing control)
 %     5. bit-identical regeneration
 %     6. reference feature values on exported core_v1 runs (if present)
+%     7. fault combinations: in every pair and the triple, each fault keeps at
+%        least half of its single-fault signature effect (vs normal) when the
+%        same run is compared with and without that fault (not masked)
 
     arguments
         options.Config (1,1) string = ""
@@ -132,8 +135,38 @@ function report = validate_generator(options)
         end
     end
     report.reference_feature_count = numel(reference);
+
+    % 7. Combinations: each fault adds its own signature on top of the others.
+    % Same operating profile and streams; faults on cylinders 1-3 from 10 s.
+    names = ["misfire", "knock_like", "valve_clearance_like"];
+    sets = {names([1 2]), names([1 3]), names([2 3]), names};
+    normalRun = generate_run(project, batch, multi_scenario(2000, 0.5, strings(1, 0), 10, 0.6));
+    single = struct();
+    for f = names
+        single.(f) = signature(generate_run(project, batch, multi_scenario(2000, 0.5, f, 10, 0.6)), ...
+            f, 10, fsA, fsV, project) / signature(normalRun, f, 10, fsA, fsV, project);
+    end
+    combos = struct('faults', {}, 'fault', {}, 'with', {}, 'without', {}, 'ratio', {}, ...
+        'single_ratio', {}, 'retained', {});
+    for k = 1:numel(sets)
+        members = sets{k};
+        withRun = generate_run(project, batch, multi_scenario(2000, 0.5, members, 10, 0.6));
+        for f = members
+            withoutRun = generate_run(project, batch, ...
+                multi_scenario(2000, 0.5, members(members ~= f), 10, 0.6));
+            with = signature(withRun, f, 10, fsA, fsV, project);
+            without = signature(withoutRun, f, 10, fsA, fsV, project);
+            retained = (with / without - 1) / (single.(f) - 1);
+            combos(end + 1) = struct('faults', char(join(members, "+")), 'fault', char(f), ...
+                'with', with, 'without', without, 'ratio', with / without, ...
+                'single_ratio', single.(f), 'retained', retained); %#ok<AGROW>
+        end
+    end
+    report.combinations = combos;
+    report.combinations_passed = all([combos.ratio] > 1) && all([combos.retained] >= 0.5);
     report.passed = report.firing_frequency_passed && report.severity_sweep_passed ...
-        && report.cross_modal_lag_passed && report.aliasing_passed && report.reproducible;
+        && report.cross_modal_lag_passed && report.aliasing_passed && report.reproducible ...
+        && report.combinations_passed;
 
     write_json(report, fullfile(outDir, "validation.json"));
     write_json(reference, fullfile(outDir, "matlab_features.json"));
@@ -145,6 +178,10 @@ function report = validate_generator(options)
     fprintf('cross-modal lag %.5f s (expected %.5f s)\n', report.cross_modal_lag.measured_s, expectedLag);
     fprintf('aliasing: audio %.1f dB, vibration %.1f dB above 0.9 x Nyquist\n', ...
         alias.audio_db, alias.vibration_db);
+    for c = combos
+        fprintf('%-45s %-21s with/without %.3f (alone %.3f, retained %.0f%%)\n', ...
+            c.faults, c.fault, c.ratio, c.single_ratio, 100 * c.retained);
+    end
     fprintf('reproducible %d; reference features %d; PASSED %d\n', report.reproducible, ...
         numel(reference), report.passed);
 end
@@ -152,6 +189,19 @@ end
 function s = scenario(rpm, load, condition, onset, severity)
     s = struct('run_id', 'run_09001', 'engine_id', 'engine_001', 'condition', condition, ...
         'onset_s', onset, 'affected_cylinder', 2, 'severity', severity, ...
+        'rpm', [rpm, rpm], 'load', [load, load], 'ramp_s', [1, 29], 'profile_kind', 'steady');
+end
+
+function s = multi_scenario(rpm, load, conditions, onset, severity)
+    % One fault per listed condition, on cylinders 1, 2, 3 in the order given
+    % by misfire, knock_like, valve_clearance_like; an empty list is normal.
+    cylinder = struct('misfire', 1, 'knock_like', 2, 'valve_clearance_like', 3);
+    faults = struct('condition', {}, 'onset_s', {}, 'affected_cylinder', {}, 'severity', {});
+    for c = conditions
+        faults(end + 1) = struct('condition', char(c), 'onset_s', onset, ...
+            'affected_cylinder', cylinder.(c), 'severity', severity); %#ok<AGROW>
+    end
+    s = struct('run_id', 'run_09002', 'engine_id', 'engine_001', 'faults', faults, ...
         'rpm', [rpm, rpm], 'load', [load, load], 'ramp_s', [1, 29], 'profile_kind', 'steady');
 end
 

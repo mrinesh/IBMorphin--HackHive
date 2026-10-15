@@ -10,7 +10,7 @@ function run = generate_run(projectConfig, batchConfig, scenario)
     scenario = normalize_scenario(scenario, durationS);
     runNumber = sscanf(scenario.run_id, 'run_%d');
     engineNumber = sscanf(scenario.engine_id, 'engine_%d');
-    masterSeed = projectConfig.dataset.master_seed;
+    masterSeed = dataset_seed(projectConfig, batchConfig);
     [streams, streamIndices] = make_streams(masterSeed, runNumber, engineNumber);
 
     engineParams = draw_engine_params(params.engine_variation, streams.engine);
@@ -85,6 +85,7 @@ function events = add_unrelated_impacts(events, profile, scenario, params, durat
     extra.kind = repmat("unrelated_impact", n, 1);
     extra.intensity = amplitude(1) + diff(amplitude) * rand(stream, n, 1);
     extra.faulted = false(n, 1);
+    extra.fault = strings(n, 1);
     extra.freq_scale = ones(n, 1);
     extra.tau_scale = ones(n, 1);
     extra.mode_freq_hz = src.freq_range_hz(1) + diff(src.freq_range_hz) * rand(stream, n, 1);
@@ -169,7 +170,8 @@ function truth = build_truth(batchConfig, scenario, events, durationS, masterSee
         'cylinder', num2cell(events.cylinder(inRun)), ...
         'kind', cellstr(events.kind(inRun)), ...
         'intensity', num2cell(events.intensity(inRun)), ...
-        'faulted', num2cell(events.faulted(inRun)));
+        'faulted', num2cell(events.faulted(inRun)), ...
+        'fault', cellstr(events.fault(inRun)));
 
     % NaN fields are written as null by jsonencode ([] would be written as []).
     condition = scenario.condition;
@@ -188,15 +190,18 @@ function truth = build_truth(batchConfig, scenario, events, durationS, masterSee
     truth.degradation = scenario.degradation;
     truth.recovery_s = scenario.recovery_s;
     truth.profile_kind = scenario.profile_kind;
-    if strcmp(condition, 'normal')
-        intervals = zeros(0, 2);
-    elseif ~isnan(scenario.recovery_s(1))
-        intervals = [scenario.onset_s, scenario.recovery_s(1); scenario.recovery_s(2), durationS];
-    else
-        intervals = [scenario.onset_s, durationS];
+    % Per-fault lifecycle and activity; written as a JSON list even for one fault.
+    faults = scenario.faults;
+    entries = cell(1, numel(faults));
+    for k = 1:numel(faults)
+        entry = faults(k);
+        entry.active_intervals = num2cell(fault_intervals(entry, durationS), 2);
+        entries{k} = entry;
     end
-    truth.active_intervals = num2cell(intervals, 2);
-    truth.label_timeline = label_timeline(condition, intervals, durationS);
+    truth.conditions = cellstr(string({faults.condition}));
+    truth.faults = entries;
+    truth.active_intervals = num2cell(union_intervals(faults, durationS), 2);
+    truth.label_timeline = label_timeline(faults, durationS);
     truth.disturbances = struct('impact_rate_hz', scenario.impact_rate_hz, ...
         'clip_gain', scenario.clip_gain, 'noise_scale', scenario.noise_scale, ...
         'resonance_shift', scenario.resonance_shift, ...
@@ -206,22 +211,72 @@ function truth = build_truth(batchConfig, scenario, events, durationS, masterSee
     truth.seed = struct('master_seed', masterSeed, 'substreams', streamIndices);
 end
 
-function timeline = label_timeline(condition, intervals, durationS)
-    % Alternate normal and fault segments with a 1 s transition around each change.
-    changes = intervals';
-    changes = changes(changes > 0 & changes < durationS)';
-    edges = [0, reshape([changes - 0.5; changes + 0.5], 1, []), durationS];
-    labels = {};
-    state = 'normal';
-    for k = 1:numel(changes)
-        labels(end + 1:end + 2) = {state, 'transition'};
-        if strcmp(state, 'normal')
-            state = condition;
+function intervals = fault_intervals(fault, durationS)
+    if ~isnan(fault.recovery_s(1))
+        intervals = [fault.onset_s, fault.recovery_s(1); fault.recovery_s(2), durationS];
+    else
+        intervals = [fault.onset_s, durationS];
+    end
+end
+
+function merged = union_intervals(faults, durationS)
+    % Times when at least one fault is active (equals the fault's own intervals
+    % for a single fault).
+    pieces = zeros(0, 2);
+    for k = 1:numel(faults)
+        pieces = [pieces; fault_intervals(faults(k), durationS)]; %#ok<AGROW>
+    end
+    pieces = sortrows(pieces);
+    merged = zeros(0, 2);
+    for k = 1:size(pieces, 1)
+        if ~isempty(merged) && pieces(k, 1) <= merged(end, 2)
+            merged(end, 2) = max(merged(end, 2), pieces(k, 2));
         else
-            state = 'normal';
+            merged(end + 1, :) = pieces(k, :); %#ok<AGROW>
         end
     end
-    labels{end + 1} = state;
+end
+
+function timeline = label_timeline(faults, durationS)
+    % Stable segments labeled with the active fault set ('normal' if none,
+    % otherwise sorted names joined with '+'), separated by a 1 s transition
+    % around each activity change. Changes closer than 1 s share one transition.
+    changes = [];
+    for k = 1:numel(faults)
+        changes = [changes; reshape(fault_intervals(faults(k), durationS), [], 1)]; %#ok<AGROW>
+    end
+    changes = unique(changes(changes > 0 & changes < durationS))';
+    spans = zeros(0, 2);
+    for c = changes
+        if ~isempty(spans) && c - 0.5 <= spans(end, 2)
+            spans(end, 2) = c + 0.5;
+        else
+            spans(end + 1, :) = [c - 0.5, c + 0.5]; %#ok<AGROW>
+        end
+    end
+    edges = [0, reshape(spans', 1, []), durationS];
+    labels = cell(1, numel(edges) - 1);
+    for k = 1:numel(labels)
+        if mod(k, 2) == 0
+            labels{k} = 'transition';
+        else
+            labels{k} = active_label(faults, (edges(k) + edges(k + 1)) / 2, durationS);
+        end
+    end
     timeline = struct('start_s', num2cell(edges(1:end - 1)), 'end_s', num2cell(edges(2:end)), ...
         'label', labels);
+end
+
+function label = active_label(faults, t, durationS)
+    active = strings(0, 1);
+    for k = 1:numel(faults)
+        intervals = fault_intervals(faults(k), durationS);
+        if any(intervals(:, 1) <= t & t < intervals(:, 2))
+            active(end + 1) = string(faults(k).condition); %#ok<AGROW>
+        end
+    end
+    label = 'normal';
+    if ~isempty(active)
+        label = char(join(sort(active), "+"));
+    end
 end

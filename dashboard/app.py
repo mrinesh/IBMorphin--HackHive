@@ -35,6 +35,9 @@ DATASETS = {
     "core_v1": {"raw": ROOT / "data/raw/core_v1", "truth": ROOT / "evaluation_truth/core_v1",
                 "model": ROOT / "artifacts/models/diagnostic_v1.joblib",
                 "splits": ROOT / "configs/core_v1.json"},
+    "core_v2": {"raw": ROOT / "data/raw/core_v2", "truth": ROOT / "evaluation_truth/core_v2",
+                "model": ROOT / "artifacts/models/multifault_v2.joblib",
+                "splits": ROOT / "configs/core_v2.json"},
     "integration_v1": {"raw": ROOT / "data/raw", "truth": ROOT / "evaluation_truth",
                        "model": ROOT / "artifacts/models/temporary.joblib",
                        "splits": ROOT / "configs/integration_batch.json"},
@@ -49,6 +52,7 @@ TICK_S = 0.5
 CONTEXT_SIGNALS = ("rpm", "load", "throttle")
 SLOW_SIGNALS = ("coolant_temp", "short_term_fuel_trim", "long_term_fuel_trim")
 CLASS_ORDER = ["normal", "misfire", "knock_like", "valve_clearance_like", "uncertain"]
+FAULT_COLORS = {"misfire": "#d62728", "knock_like": "#ff7f0e", "valve_clearance_like": "#9467bd"}
 VALVE = "valve_clearance_like"
 DEGRADATION_WINDOW = 10
 
@@ -225,6 +229,47 @@ def evidence_table(record) -> tuple[pd.DataFrame, bool]:
     return table, matched
 
 
+def single_timeline(records) -> go.Figure:
+    timeline = go.Figure()
+    if records:
+        log = pd.DataFrame([{k: r[k] for k in ("t_end_s", "accepted", "alert")}
+                            for r in records])
+        timeline.add_trace(go.Scatter(x=log["t_end_s"], y=log["accepted"], mode="markers",
+                                      name="accepted decision"))
+        alerted = log[log["alert"].notna()]
+        timeline.add_trace(go.Scatter(x=alerted["t_end_s"], y=alerted["alert"], mode="markers",
+                                      marker={"symbol": "square", "size": 12, "opacity": 0.4},
+                                      name="active alert"))
+    timeline.update_layout(height=260, title="Decision timeline",
+                           yaxis={"categoryorder": "array", "categoryarray": CLASS_ORDER},
+                           margin={"t": 40, "b": 20})
+    return timeline
+
+
+def multi_timeline(records) -> go.Figure:
+    """One row per fault: detections, borderline (uncertain) windows, and alerts."""
+    timeline = go.Figure()
+    faults = model.fault_classes
+    for fault in faults:
+        rows = [r for r in records if "fault_decisions" in r]
+        for kind, marker, name in (("fault", {"size": 8}, "detected"),
+                                   ("uncertain", {"symbol": "x", "size": 7}, "uncertain")):
+            hits = [r["t_end_s"] for r in rows if r["fault_decisions"][fault] == kind]
+            timeline.add_trace(go.Scatter(
+                x=hits, y=[fault] * len(hits), mode="markers", name=f"{fault} {name}",
+                marker={**marker, "color": FAULT_COLORS[fault]}, showlegend=False))
+        alerted = [r["t_end_s"] for r in records if fault in r.get("alerts", [])]
+        timeline.add_trace(go.Scatter(
+            x=alerted, y=[fault] * len(alerted), mode="markers", showlegend=False,
+            marker={"symbol": "square", "size": 14, "opacity": 0.3,
+                    "color": FAULT_COLORS[fault]}, name=f"{fault} alert"))
+    timeline.update_layout(height=260, margin={"t": 40, "b": 20},
+                           title="Per-fault timeline (dot detected, x uncertain, "
+                                 "square active alert)",
+                           yaxis={"categoryorder": "array", "categoryarray": list(faults)})
+    return timeline
+
+
 def freshness(signal: str, t_now: float) -> str:
     rows = bundle.telemetry[(bundle.telemetry["signal"] == signal)
                             & (bundle.telemetry["valid"] == 1) & (bundle.telemetry["t_s"] < t_now)]
@@ -249,13 +294,18 @@ def live_view():
     t_now = state.stream_t
     records = state.records
     latest = records[-1] if records else None
+    multi = hasattr(model, "fault_classes")  # v2: one detector and alert per fault
     has_probability = bool(latest and "probability" in latest)
 
     cols = st.columns(7)
     cols[0].metric("Stream time", f"{t_now:.2f} s")
     cols[1].metric("Accepted", latest["accepted"] if latest else "warming up")
     cols[2].metric("Classifier", (latest["predicted"] or "-") if latest else "-")
-    if has_probability:
+    if multi:
+        cols[3].metric("Faults detected", len(latest["detected"]) if latest else "-",
+                       help="Each fault has its own calibrated detector and threshold, so "
+                            "several can be reported in the same window.")
+    elif has_probability:
         cols[3].metric("Calibrated confidence", f"{latest['probability']:.2f}",
                        help=f"Accepted only if ≥ {model.probability_min:.2f}; calibrated on "
                             "separate calibration engines (synthetic).")
@@ -267,11 +317,25 @@ def live_view():
     cols[6].metric("Processing / display",
                    f"{latest['processing_ms']:.0f} / {state.get('render_ms', 0):.0f} ms"
                    if latest else "-")
-    confirm = getattr(model, "confirm_updates", config["runtime"]["confirm_fault_updates"])
-    if latest and latest["alert"]:
-        st.error(f"ALERT: {latest['alert']} (confirmed by {confirm} consistent updates)")
+    if multi:
+        fault_cols = st.columns(len(model.fault_classes))
+        for col, fault in zip(fault_cols, model.fault_classes, strict=True):
+            col.metric(f"P({fault})",
+                       f"{latest['probabilities'][fault]:.2f}" if has_probability else "-",
+                       help=f"Detected at ≥ {model.thresholds[fault]:.2f}; calibrated on "
+                            "separate calibration engines (synthetic).")
+        active = latest.get("alerts", []) if latest else []
+        for fault in active:
+            st.error(f"ALERT: {fault} (confirmed by {model.confirm_updates[fault]} consistent "
+                     "updates of this fault)")
+        if not active:
+            st.success("No active alert")
     else:
-        st.success("No active alert")
+        confirm = getattr(model, "confirm_updates", config["runtime"]["confirm_fault_updates"])
+        if latest and latest["alert"]:
+            st.error(f"ALERT: {latest['alert']} (confirmed by {confirm} consistent updates)")
+        else:
+            st.success("No active alert")
 
     engine = state.engine
     window_s = config["analysis"]["window_s"]
@@ -332,31 +396,19 @@ def live_view():
     tele.update_layout(height=380, showlegend=False, margin={"t": 50, "b": 20})
     st.plotly_chart(tele, width="stretch")
 
-    timeline = go.Figure()
-    if records:
-        log = pd.DataFrame([{k: r[k] for k in ("t_end_s", "accepted", "alert")}
-                            for r in records])
-        timeline.add_trace(go.Scatter(x=log["t_end_s"], y=log["accepted"], mode="markers",
-                                      name="accepted decision"))
-        alerted = log[log["alert"].notna()]
-        timeline.add_trace(go.Scatter(x=alerted["t_end_s"], y=alerted["alert"], mode="markers",
-                                      marker={"symbol": "square", "size": 12, "opacity": 0.4},
-                                      name="active alert"))
+    timeline = multi_timeline(records) if multi else single_timeline(records)
     if show_truth:
-        from engine_diagnostics.pipeline.labels import load_truth  # evaluation only
+        from engine_diagnostics.pipeline.labels import fault_intervals, load_truth  # evaluation
 
         truth = load_truth(DATASETS[dataset]["truth"], run_id)
-        intervals = truth.get("active_intervals") or []
-        if intervals and not isinstance(intervals[0], list):
-            intervals = [intervals]
-        for a, b in intervals:
-            timeline.add_vrect(x0=a, x1=b, fillcolor="orange", opacity=0.15, line_width=0)
-        note = (f"truth: {truth['condition']}" if intervals else "truth: normal run")
+        intervals = fault_intervals(truth)
+        for fault, spans in intervals.items():
+            for a, b in spans:
+                timeline.add_vrect(x0=a, x1=b, fillcolor=FAULT_COLORS.get(fault, "orange"),
+                                   opacity=0.12, line_width=0)
+        note = (f"truth: {' + '.join(sorted(intervals))}" if intervals else "truth: normal run")
         timeline.add_annotation(x=duration / 2, y=1.08, yref="paper", text=note, showarrow=False)
-    timeline.update_layout(height=260, title="Decision timeline",
-                           xaxis={"range": [0, duration], "title": "s"},
-                           yaxis={"categoryorder": "array", "categoryarray": CLASS_ORDER},
-                           margin={"t": 40, "b": 20})
+    timeline.update_xaxes(range=[0, duration], title="s")
     st.plotly_chart(timeline, width="stretch")
 
     lower_left, lower_right = st.columns(2)

@@ -10,6 +10,7 @@ statistics. The app lists every dataset whose runs and model exist:
 | Dataset | Runs | Model |
 |---|---|---|
 | `core_v1` (final) | `data/raw/core_v1` | `artifacts/models/diagnostic_v1.joblib` (`engine-diagnostics train`) |
+| `core_v2` (multi-fault) | `data/raw/core_v2` | `artifacts/models/multifault_v2.joblib` (`engine-diagnostics train-multi`) |
 | `integration_v1` | `data/raw` | `artifacts/models/temporary.joblib` (`engine-diagnostics train-temporary`) |
 
 ## Demo presets
@@ -21,6 +22,13 @@ misfire; misfire with recovery; accelerated valve degradation; a waveform gap;
 and a missed mild-knock challenge run (a stated limitation).
 
 ## Panels
+
+For `core_v2` the v2 model reports each fault separately: one calibrated
+probability per fault, a "Faults detected" count, one alert banner per active
+fault (each confirmed and cleared on its own), and a per-fault decision
+timeline (dot detected, x uncertain, square active alert). The truth overlay
+shades each fault's own active intervals.
+
 
 - Permanent "SYNTHETIC DATA — RECORDED REPLAY" banner; model/feature versions
 - Accepted decision, classifier class, calibrated confidence (v1) or decision
