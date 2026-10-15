@@ -80,58 +80,6 @@ def seek(target_s: float) -> None:
 config, model = load_project()
 run_ids = [p.name for p in find_runs(RAW_DIR)] if RAW_DIR.is_dir() else []
 
-section = st.sidebar.radio("Section", ["Recorded replay", "External dataset check"])
-if section == "External dataset check":
-    st.title("External engine health dataset")
-    st.markdown(
-        "Review the [GitHub notebook](https://github.com/cozzolinoac11/"
-        "automotive-vehicles-engine-health/blob/main/automotive_vehicles_engine_health.ipynb) "
-        "dataset separately from the recorded waveform replay. Its notebook output reports "
-        "19,535 rows with engine RPM, oil/fuel/coolant pressure, oil/coolant temperature, "
-        "and an `Engine Condition` label. The CSV itself is not stored in that repository; "
-        "the notebook loads it from Google Drive."
-    )
-    st.warning(
-        "The current temporary model cannot run on these columns. It requires 33 features "
-        "computed from synchronized audio and vibration windows plus RPM, load, and throttle. "
-        "This table has no audio or vibration waveforms, and its binary health label does "
-        "not map to the model's normal/misfire/knock/valve classes. No predictions are made here."
-    )
-    st.subheader("Inspect a CSV copy")
-    uploaded = st.file_uploader("Upload the dataset CSV", type=["csv"], key="external_engine_csv")
-    if uploaded is not None:
-        try:
-            external = pd.read_csv(uploaded)
-        except (UnicodeDecodeError, pd.errors.ParserError) as error:
-            st.error(f"Could not read this CSV: {error}")
-        else:
-            st.write(f"{len(external):,} rows · {len(external.columns)} columns")
-            st.dataframe(external.head(20), hide_index=True, width="stretch")
-            st.subheader("Dataset checks")
-            checks = pd.DataFrame({
-                "column": external.columns,
-                "dtype": [str(dtype) for dtype in external.dtypes],
-                "missing": [int(value) for value in external.isna().sum()],
-            })
-            st.dataframe(checks, hide_index=True, width="stretch")
-            label = "Engine Condition"
-            if label in external:
-                st.caption("Label counts")
-                st.dataframe(external[label].value_counts(dropna=False).rename("rows"),
-                             width="stretch")
-            expected = {
-                "Engine rpm", "Lub oil pressure", "Fuel pressure", "Coolant pressure",
-                "lub oil temp", "Coolant temp", label,
-            }
-            missing = sorted(expected - set(external.columns))
-            if missing:
-                st.info("This CSV does not match the notebook's reported columns. Missing: "
-                        + ", ".join(missing))
-            else:
-                st.success("The CSV matches the notebook's reported seven-column schema. "
-                           "That confirms dataset identity, not compatibility with this model.")
-    st.stop()
-
 st.markdown(
     "<div style='padding:0.6rem 1rem;border-radius:0.4rem;background:#8a1c1c;color:white;"
     "font-weight:700;letter-spacing:0.05em'>SYNTHETIC DATA — RECORDED REPLAY</div>",
