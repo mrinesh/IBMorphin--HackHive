@@ -109,11 +109,11 @@ Execution tracker. Checked items have been completed; unchecked items remain fut
 - [ ] Inspect parameter sweeps: severity, RPM, load, gain, noise, and resonance changes.
 - [x] Match gain and operating distributions across classes; include healthy high-load and faulty low-load runs.
 - [ ] Ensure normal signals contain structural energy in fault-analysis bands; avoid unique fault frequencies.
-- [ ] Freeze engine-level splits before creating overlapping windows: 36 training, 8 tuning, 8 calibration, and 8 final-test engines.
-- [ ] Generate the core target of 60 engines × 8 runs × 45 seconds; use two runs per class per engine.
+- [x] Freeze engine-level splits before creating overlapping windows: 36 training, 8 tuning, 8 calibration, and 8 final-test engines. Scaled to 18/4/4/4.
+- [x] Generate the core target of 60 engines × 8 runs × 45 seconds; use two runs per class per engine. Scaled by decision to 30 engines × 8 runs × 30 s.
 - [ ] Reserve operating/noise/generation settings for 32 additional challenge runs on final-test engines.
 - [ ] Reserve approximately 8–10 GB working storage; core float32 waveform payload is approximately 4.29 GB before MAT compression and metadata.
-- [ ] Validate every run; quarantine failures with reasons rather than silently skipping them.
+- [x] Validate every run; quarantine failures with reasons rather than silently skipping them.
 - [ ] Record labels for normal, observable fault, transition/ambiguous windows, and event intervals.
 - [ ] Lock dataset checksums and final-test manifests before model tuning.
 
@@ -150,21 +150,21 @@ Execution tracker. Checked items have been completed; unchecked items remain fut
 
 **Owner:** ML/evaluation lead. **Dependency:** frozen features and development partitions. **Timing:** approximately 15% of effort.
 
-- [ ] Fit robust normal reference statistics conditioned on RPM/load; tune its anomaly threshold on tuning runs.
-- [ ] Train one RBF SVM for the four classes with training-only preprocessing.
-- [ ] Thin training windows and cap the initial training set at approximately 6,000–8,000 representative samples.
-- [ ] Use a small documented hyperparameter search; keep final-test data untouched.
-- [ ] Compare telemetry-only, audio-plus-context, vibration-plus-context, and fused models using identical partitions.
-- [ ] Audit suspiciously strong telemetry-only or amplitude-only results for generator shortcuts.
-- [ ] Calibrate probabilities on independent calibration engines if supported; otherwise display labeled decision scores.
-- [ ] Implement data-quality, unsupported-operation, and uncertain-prediction states.
-- [ ] Start alert persistence at two consistent accepted fault updates; clear after three accepted normal updates; tune on development runs.
-- [ ] Freeze model, preprocessing, calibration, thresholds, and persistence before final evaluation.
-- [ ] Report macro-F1, balanced accuracy, per-class precision/recall, support, and confusion matrices.
-- [ ] Report rejected-data coverage and unresolved predictions alongside accepted-only results.
-- [ ] Measure false alert episodes per normal minute and event recall, misses, and detection latency during actual replay.
+- [x] Fit robust normal reference statistics conditioned on RPM/load; tune its anomaly threshold on tuning runs.
+- [x] Train one RBF SVM for the four classes with training-only preprocessing.
+- [x] Thin training windows and cap the initial training set at approximately 6,000–8,000 representative samples.
+- [x] Use a small documented hyperparameter search; keep final-test data untouched.
+- [x] Compare telemetry-only, audio-plus-context, vibration-plus-context, and fused models using identical partitions.
+- [x] Audit suspiciously strong telemetry-only or amplitude-only results for generator shortcuts.
+- [x] Calibrate probabilities on independent calibration engines if supported; otherwise display labeled decision scores.
+- [x] Implement data-quality, unsupported-operation, and uncertain-prediction states. Unsupported operation is not separate from quality/uncertain.
+- [x] Start alert persistence at two consistent accepted fault updates; clear after three accepted normal updates; tune on development runs.
+- [x] Freeze model, preprocessing, calibration, thresholds, and persistence before final evaluation.
+- [x] Report macro-F1, balanced accuracy, per-class precision/recall, support, and confusion matrices.
+- [x] Report rejected-data coverage and unresolved predictions alongside accepted-only results.
+- [x] Measure false alert episodes per normal minute and event recall, misses, and detection latency during actual replay.
 - [ ] Evaluate unseen engines/seeds, reserved RPM ranges, noise, sensor responses, timing failures, and mild/intermittent faults.
-- [ ] Evaluate the degradation indicator on held-out trajectories without using severity truth as an input.
+- [x] Evaluate the degradation indicator on held-out trajectories without using severity truth as an input.
 - [ ] Save failure examples and document that synthetic tests do not establish real-engine accuracy.
 
 **Proposed goals, not promised results:** core macro-F1 ≥0.80; each fault recall ≥0.75; challenge macro-F1 ≥0.65; ≤0.2 false alerts per normal minute; p95 processing below 250 ms; p95 alert latency ≤4 seconds for predefined sustained moderate/severe cases. Report intermittent cases separately.

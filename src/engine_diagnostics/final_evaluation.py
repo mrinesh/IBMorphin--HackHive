@@ -77,15 +77,22 @@ def replay_metrics(model, run_ids: list[str], raw_dir: Path, truths: dict[str, d
         latencies += [r["processing_ms"] for r in records]
         if truth.get("degradation"):
             indicator = degradation_indicator(records)
+            if np.all(np.isnan(indicator)):
+                degradation.append({"run_id": run_id, "spearman": None,
+                                    "note": "no ok-quality windows (data-quality state only)"})
+                continue
             severity = [severity_at(truth, t) for t in times]
-            rho = spearmanr(indicator, severity).statistic
+            valid = ~np.isnan(indicator)
+            rho = spearmanr(indicator[valid], np.array(severity)[valid]).statistic
             degradation.append({"run_id": run_id, "spearman": float(rho),
                                 "indicator_first_5s": float(np.nanmean(indicator[:10])),
                                 "indicator_last_5s": float(np.nanmean(indicator[-10:]))})
+    rhos = [d["spearman"] for d in degradation if d["spearman"] is not None]
     return {**summarize(scores),
             "processing_ms_p50": float(np.percentile(latencies, 50)),
             "processing_ms_p95": float(np.percentile(latencies, 95)),
-            "degradation_runs": degradation}
+            "degradation_runs": degradation,
+            "degradation_spearman_median": float(np.median(rhos)) if rhos else None}
 
 
 def evaluate_final(model, table: pd.DataFrame, truths: dict[str, dict], raw_dir: Path,

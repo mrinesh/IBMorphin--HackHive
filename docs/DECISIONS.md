@@ -68,6 +68,19 @@
   waveform gaps, and telemetry dropouts. Clock offsets/drift remain deferred.
 - Clipping and declared gaps are data-quality warnings, not contract violations.
 
+## 2026-10-15: v1 model frozen and scored
+
+- v1 model trained only on train engines, tuned on tuning engines, calibrated
+  on calibration engines; test engines scored once (see TESTING.md).
+- Feature version stays 0.1.0: two valve-oriented features were tried and
+  rejected because they lowered tuning results.
+- Checklist §7 goals: met core macro-F1 (0.835), core false alerts (0 per
+  normal minute, small denominator), processing p95 (13 ms). Missed: knock
+  (0.74) and valve (0.71) recall, challenge macro-F1 (0.384), and p95 alert
+  latency (14.8 s overall; slow-onset degradation runs dominate).
+- No further changes are made against test results; any redesign would need
+  fresh test data.
+
 ## Open decisions
 
 - Assign team owners and record the actual hackathon deadline.
