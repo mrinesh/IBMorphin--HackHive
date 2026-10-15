@@ -45,6 +45,12 @@ batch, not a working engine-diagnostics pipeline.
 | Review figures (2026-10-15) | Inspected | `plot_run_overview` spectrograms/zooms show the intended knock band, weak misfire strokes, and shifted valve impacts |
 | MATLAB/Python handoff (2026-10-15) | Passed | `validate-runs`: all 3 runs valid in Python (column orientation, float32 class, sample counts/rates, t0, summary sums/first/last vs MATLAB, telemetry units/rates/order); manifest written |
 | Run I/O tests (2026-10-15) | Passed | 31 tests with extras (17 contract-violation/loader tests, 5 on real exported runs); 9 passed, 2 skipped in a base-only isolated env; Ruff clean |
+| Windows full Python stack (2026-10-16) | Passed | `uv sync --locked --all-extras --group quality` on Windows 11, Python 3.13.7 / uv 0.9.4; `doctor` reports all optional packages; Ruff clean |
+| Windows integration batch (2026-10-16) | Passed | 13 runs generated in R2026b; `validate-runs` 13/13; 481 feature windows; `train-temporary` metrics identical to macOS (SVM macro-F1 0.984, accepted 0.986 at 0.857 coverage, same ablations) |
+| Windows generator validation (2026-10-16) | Passed | `validate_generator()` values identical to macOS (firing error 0.50/0.25/0.17%, lag 1.75 ms, aliasing -53.1/-44.3 dB, severity sweeps); 18 reference features written |
+| Windows core_v1 and v1 training (2026-10-16) | Passed; not bit-identical to macOS | 256 runs in 359 s (single MATLAB process), 0 quarantined; `validate-runs` 256/256; 14,592 windows. `train` matches macOS hyperparameters (C=30, gamma=0.03), thresholds, and tuning replay (0.128 false alerts/normal min, sustained recall 0.769, latency p50 1.77 s); tuning macro-F1 0.829-0.832 vs 0.829-0.833. SHA-256 differs: manifest 02def0fa980e… vs 16a90def96a5…, features b5e812d81172… vs b638614240a2…, model 4df5b78c46f8… vs 805e7559bc6a… |
+| Windows pytest (2026-10-16) | Passed | 68 passed, 0 skipped with integration, core_v1, v1 model, and MATLAB reference data present |
+| Windows dashboard (2026-10-16) | Started | Streamlit server healthy on localhost:8501 and opened in a browser; presets not yet reviewed by a person |
 
 The first pytest attempt failed because the agent's Windows sandbox denied access
 to pytest temporary/cache directories. All nine tests passed when run with normal
@@ -61,7 +67,7 @@ filesystem access. This was an environment restriction, not a passing sandbox ru
 | Dashboard visual review | Open in a browser and rehearse normal -> fault -> alert -> evidence | Only automated AppTest and health checks have run |
 | Robustness settings | Generate and validate clock offsets/drift, missing telemetry, and clipping end to end | The format supports them; the generator does not produce them yet |
 | MATLAB discovery in `doctor` | Add `/Applications/MATLAB_*.app/bin` to PATH or teach `doctor` to search it | `matlab` is not on PATH on macOS, so `doctor` reports it missing (fixed on Windows via user PATH) |
-| Full Python stack on Windows | Repeat the extras install, imports, pytest, and Ruff on the original Windows machine | Verified on macOS only |
+| Cross-platform reproducibility | Diff core_v1 manifests, then feature tables, between Windows and macOS to locate the first difference | Windows outputs are close but not bit-identical to macOS; source (MATLAB numerics, file metadata, or Python) unknown. Demo uses whichever machine's frozen model is presented |
 | Other Python versions | Exercise initialization on each version claimed as supported | Only Python 3.13.7 has been tested; package declares 3.11-3.13 |
 
 ## Required checks at later milestones
