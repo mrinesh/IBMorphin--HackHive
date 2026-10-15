@@ -11,6 +11,7 @@ change demo inputs or outputs.
 | Goal | Rehearsed, reproducible synthetic demo and submission package | Honest evaluation of the pipeline on a real public dataset |
 
 Fill in names and the deadline: Track A = ______, Track B = ______, deadline ______.
+Step-by-step tasks with completion criteria: [TRACK_CHECKLIST.md](TRACK_CHECKLIST.md).
 
 ## Track A: demo and submission
 
