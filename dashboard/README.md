@@ -50,6 +50,20 @@ shades each fault's own active intervals.
   and, in the same colors, on the waveform and RPM charts. RPM is "not expected" for
   knock and valve faults. Valve-clearance evidence is usually weak, matching the model
 
+## Health timeline (deterioration demonstration)
+
+Below the decision timeline, a live chart tracks, relative to the healthy baseline of
+the same RPM/load range (`runtime/health.py`): firing-rhythm irregularity (sound),
+high-frequency impulsiveness (vibration), and the model's overall anomaly score. Each
+line is smoothed over the last 2 s of good windows (causal) and divided by its
+developing threshold, so 1.0 is the boundary. A stage ribbon shows healthy →
+developing anomaly (a line stays at or above 1 without a confirmed alert) →
+persistent fault (the model's confirmed alert), plus no data for failed-quality
+windows, and a text summary lists the transitions. Thresholds (z = 4 for both
+features; the model's own anomaly threshold) were set on core_v1 tuning engines.
+All progression is simulated, so the chart is labeled a deterioration
+demonstration and makes no forecast or remaining-useful-life claim.
+
 ## Fault-injection lab
 
 Sidebar **Mode → Fault-injection lab** (needs core_v1 runs, their evaluation truth,

@@ -36,6 +36,7 @@ from engine_diagnostics.pipeline.features import (
     window_slice,
 )
 from engine_diagnostics.runtime.evidence import EvidencePanel, build_evidence
+from engine_diagnostics.runtime.health import STAGES, HealthTimeline, health_timeline
 from engine_diagnostics.runtime.replay import ReplayEngine, packets, replay_run
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -75,6 +76,7 @@ LAB_FAULT_NAMES = {"none": "No fault", "misfire": "Misfire", "knock_like": "Knoc
 LAB_NOISE = [1.0, 1.5, 2.0, 3.0, 5.0]  # x recorded noise; 2x is the challenge-run level
 LAB_SENSORS = {"audio": "Microphone (audio)", "vibration": "Accelerometer (vibration)",
                "rpm": "RPM telemetry"}
+STAGE_COLORS = dict(zip(STAGES, ("#2ca02c", "#ff9f1c", "#d62728", "#bbbbbb"), strict=True))
 
 st.set_page_config(page_title="Engine replay", layout="wide")
 
@@ -479,6 +481,43 @@ def lab_response(records, t_now: float) -> None:
             st.caption("Compare to see which changes the injected signals caused.")
 
 
+def run_health(records) -> HealthTimeline:
+    return health_timeline(
+        [r["t_end_s"] for r in records],
+        pd.DataFrame([feature_z(r) if r["quality"] == "ok" else {} for r in records]),
+        [r["anomaly_score"] for r in records], model.anomaly_threshold,
+        [bool(active_alerts(r)) for r in records], [r["quality"] == "ok" for r in records])
+
+
+def health_figure(health: HealthTimeline) -> go.Figure:
+    step = config["analysis"]["step_s"]
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.78, 0.22],
+                        vertical_spacing=0.06)
+    top = max(2.0, float(np.nanmax(health.level.to_numpy(), initial=0)) * 1.1)
+    fig.add_hrect(y0=0, y1=1, fillcolor=STAGE_COLORS["healthy"], opacity=0.08, line_width=0,
+                  row=1, col=1)
+    fig.add_hline(y=1, line={"color": STAGE_COLORS["developing anomaly"], "dash": "dash"},
+                  annotation_text="developing threshold", annotation_position="top left",
+                  row=1, col=1)
+    for label in health.level.columns:
+        fig.add_trace(go.Scatter(x=health.t, y=health.level[label], name=label, mode="lines"),
+                      row=1, col=1)
+    for stage in STAGES:
+        hit = [s == stage for s in health.stage]
+        if any(hit):
+            fig.add_trace(go.Bar(x=health.t[hit], y=[1] * sum(hit), width=step, name=stage,
+                                 marker_color=STAGE_COLORS[stage], showlegend=True,
+                                 legendgroup="stage"), row=2, col=1)
+    fig.update_yaxes(title="x threshold", range=[0, top], row=1, col=1)
+    fig.update_yaxes(visible=False, row=2, col=1)
+    fig.update_xaxes(range=[0, duration], title="s", row=2, col=1)
+    fig.update_layout(height=380, bargap=0, margin={"t": 40, "b": 20},
+                      title="Health timeline vs healthy baseline: deterioration demonstration "
+                            "(simulated data)",
+                      legend={"orientation": "h", "y": -0.25})
+    return fig
+
+
 def single_timeline(records) -> go.Figure:
     timeline = go.Figure()
     if records:
@@ -693,6 +732,21 @@ def live_view():
                                     text=f"sensor failure: {', '.join(state.lab.failed)}")
     timeline.update_xaxes(range=[0, duration], title="s")
     st.plotly_chart(timeline, width="stretch")
+
+    if records:
+        health = run_health(records)
+        st.plotly_chart(health_figure(health), width="stretch")
+        st.markdown(f"**Health stages so far:** {health.summary()}")
+        st.caption(
+            "Each line is a smoothed (2 s, causal) deviation from the healthy baseline for the "
+            "same operating range, divided by its developing threshold: firing-rhythm "
+            "irregularity and high-frequency impulsiveness as robust z (threshold 4), and the "
+            "model's anomaly score (its own threshold). Developing anomaly = a line stays at or "
+            "above 1 without a confirmed alert; persistent fault = the model's confirmed alert. "
+            "Thresholds were set on tuning engines; on held-out test engines about 9% of healthy "
+            "windows still show as developing. All progression shown is simulated, so this is a "
+            "deterioration demonstration: it describes the current state and makes no forecast "
+            "or remaining-useful-life claim, which would need real run-to-failure data.")
 
     lower_left, lower_right = st.columns(2)
     if latest and latest["quality"] == "ok":

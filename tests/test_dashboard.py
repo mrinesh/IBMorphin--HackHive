@@ -123,6 +123,23 @@ def test_fault_injection_lab_labels_injected_signals_and_shows_response():
     assert "FAULT-INJECTION LAB" not in " ".join(m.value for m in app.markdown)
 
 
+@pytest.mark.skipif(not V1_MODEL.is_file() or not (ROOT / "data/raw/core_v1/run_00216").is_dir(),
+                    reason="needs core_v1 runs and the v1 model")
+def test_health_timeline_tracks_stages_and_states_no_rul_claim():
+    app = AppTest.from_file(str(APP), default_timeout=120).run()
+    widget(app.sidebar.selectbox, "Dataset").set_value("core_v1").run()
+    widget(app.sidebar.selectbox, "Run").set_value("run_00216").run()  # valve degradation
+    widget(app.sidebar.slider, "Seek (s)").set_value(24.0).run()
+    widget(app.sidebar.button, "Seek").click().run()
+    assert not app.exception
+    summary = next(m.value for m in app.markdown if m.value.startswith("**Health stages so far:**"))
+    assert summary.split("**")[2].strip().startswith("healthy")
+    assert "persistent fault at" in summary
+    caption = " ".join(c.value for c in app.caption)
+    assert "deterioration demonstration" in caption
+    assert "no forecast or remaining-useful-life claim" in caption
+
+
 needs_holdout = pytest.mark.skipif(
     not (ROOT / "data/processed/integration_v1_features.parquet").is_file()
     or not (ROOT / "data/raw/run_00014").is_dir(),
