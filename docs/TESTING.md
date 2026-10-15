@@ -49,6 +49,7 @@ filesystem access. This was an environment restriction, not a passing sandbox ru
 | Anomaly threshold and margin | Tune on a separate tuning partition | Threshold is the 99th percentile of training normal scores; margin 0.3 is untuned |
 | Replay with nonzero stream offsets | Support `t0_s != 0` and clock drift in replay | Replay rejects nonzero `t0_s`; all current runs use 0 |
 | Dashboard visual review | Open in a browser and rehearse normal -> fault -> alert -> evidence | Only automated AppTest and health checks have run |
+| External dataset check | Upload the source CSV in the dashboard and review schema/missing-value/label summaries | UI section implemented; CSV is not present in the linked Git repository, and the current waveform model is incompatible with the tabular schema |
 | Robustness settings | Generate and validate clock offsets/drift, missing telemetry, and clipping end to end | The format supports them; the generator does not produce them yet |
 | MATLAB discovery in `doctor` | Add `/Applications/MATLAB_*.app/bin` to PATH or teach `doctor` to search it | `matlab` is not on PATH on macOS, so `doctor` reports it missing |
 | Full Python stack on Windows | Repeat the extras install and imports on the original Windows machine | Verified on macOS only |

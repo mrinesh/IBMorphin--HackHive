@@ -10,6 +10,14 @@ uv run --all-extras streamlit run dashboard/app.py
 statistics. The app needs exported runs in `data/raw` and the temporary model in
 `artifacts/models/temporary.joblib`.
 
+## External dataset check
+
+The sidebar's **External dataset check** section accepts a CSV and displays its
+columns, missing values, and `Engine Condition` counts. It compares the upload
+with the linked notebook's reported schema. It does not run the waveform model
+on tabular data: the notebook dataset has no audio/vibration signals and uses a
+different label set.
+
 ## What it shows
 
 - Permanent "SYNTHETIC DATA — RECORDED REPLAY" banner, model and feature versions
