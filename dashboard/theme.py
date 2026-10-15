@@ -26,7 +26,7 @@ TOKENS = {
     "amber": "#FBBF24",
     "rose": "#FB7185",
     "green": "#4ADE80",
-    "slate": "#64748B",
+    "slate": "#8B9BB4",
 }
 
 # Lucide icon paths (24x24, 2px stroke), inlined so the dashboard works offline.
@@ -90,11 +90,17 @@ def class_meta(accepted: str | None, quality: str | None = None) -> dict:
 
 
 def register_plotly_template() -> None:
-    """Transparent dark template with subtle grids and monospace numbers."""
+    """Transparent dark template with subtle grids and monospace numbers.
+
+    plotly_dark and the HUD overrides are merged once and registered as one template:
+    a "plotly_dark+engine_hud" default would be re-merged for every figure (~25 ms each).
+    """
+    if pio.templates.default == "engine_hud":
+        return
     axis = {"gridcolor": TOKENS["grid"], "zerolinecolor": TOKENS["grid"],
             "linecolor": "rgba(148, 163, 184, 0.25)", "tickfont": {"color": TOKENS["muted"]},
             "title": {"font": {"color": TOKENS["muted"]}}}
-    pio.templates["engine_hud"] = go.layout.Template(layout={
+    overrides = go.layout.Template(layout={
         "paper_bgcolor": "rgba(0,0,0,0)",
         "plot_bgcolor": "rgba(7, 11, 20, 0.55)",
         "font": {"family": "Fira Code, ui-monospace, monospace", "color": TOKENS["text"],
@@ -109,7 +115,9 @@ def register_plotly_template() -> None:
                        "font": {"family": "Fira Code, monospace", "color": TOKENS["text"]}},
         "annotationdefaults": {"font": {"color": TOKENS["muted"]}},
     })
-    pio.templates.default = "plotly_dark+engine_hud"
+    pio.templates["engine_hud"] = pio.templates.merge_templates(pio.templates["plotly_dark"],
+                                                                overrides)
+    pio.templates.default = "engine_hud"
 
 
 # Four L-shaped corner brackets drawn with gradients (no extra DOM nodes).
@@ -137,7 +145,7 @@ def banner_html() -> str:
 
 
 def brand_html() -> str:
-    return ('<div class="hud-brand"><div class="name">ENGINE<span>//</span>SENSE</div>'
+    return ('<div class="hud-brand"><h1 class="name">ENGINE<span>//</span>SENSE</h1>'
             '<div class="tag">Multisensor fault diagnostics · sound · vibration · ECU '
             'telemetry</div></div>')
 

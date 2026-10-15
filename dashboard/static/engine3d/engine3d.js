@@ -40,7 +40,7 @@ const COLORS = {
   amber: 0xfbbf24,
   rose: 0xfb7185,
   green: 0x4ade80,
-  slate: 0x64748b,
+  slate: 0x8b9bb4,
   steel: 0x1b2a3f,
   steelLight: 0x3a5272,
   piston: 0x9fb3c8,
@@ -59,6 +59,13 @@ const DECK_Y = 2.5;
 const BAY = { scale: 0.24, y: 0.62 + 0.83 * 0.24 + 0.02, z: 2.75 };
 const DETAIL_Y = 1.6;
 const TRANSITION_S = 1.3;
+// Reduced-motion stand-ins for the animated effects (steady glow per model state).
+const STEADY = {
+  normal: { flash: 0.35, color: 0x7dd3fc },
+  misfire: { flash: 0.3, color: 0xfbbf24 },
+  knock_like: { flash: 0.6, color: 0xf472b6 },
+  valve_clearance_like: { flash: 0.35, color: 0x7dd3fc },
+};
 const CAMERA = {
   car: { radius: 17, target: new THREE.Vector3(0, 1.0, 0.3) },
   engine: { radius: 11.5, target: new THREE.Vector3(0, DETAIL_Y + 0.95, 0) },
@@ -221,15 +228,25 @@ function createView(root) {
       cyl.exhaust.position.y = cyl.valveY - 0.13 * exhaust;
       cyl.intake.position.y = cyl.valveY - 0.13 * intake;
 
-      // Effects decay.
-      sim.flash[k] = Math.max(0, sim.flash[k] - dt * (still ? 0 : 3.2));
-      sim.sparks[k] = Math.max(0, sim.sparks[k] - dt * 5);
-      sim.ticks[k] = Math.max(0, sim.ticks[k] - dt * 6);
+      if (still) {
+        // Reduced motion: no firing animation, so show the model state as a steady glow
+        // (same colors as the animated effects) instead of hiding it.
+        const steady = STEADY[effect] || STEADY.normal;
+        sim.flash[k] = t.playing || effect ? steady.flash * (effect ? 0.5 + 0.5 * intensity : 1) : 0;
+        cyl.flameColor.set(steady.color);
+        sim.sparks[k] = effect === 'knock_like' ? 0.7 : 0;
+        sim.ticks[k] = effect === 'valve_clearance_like' ? 0.7 : 0;
+      } else {
+        // Effects decay.
+        sim.flash[k] = Math.max(0, sim.flash[k] - dt * 3.2);
+        sim.sparks[k] = Math.max(0, sim.sparks[k] - dt * 5);
+        sim.ticks[k] = Math.max(0, sim.ticks[k] - dt * 6);
+      }
       cyl.flame.material.opacity = sim.flash[k];
       cyl.flame.material.color.copy(cyl.flameColor);
       cyl.flame.scale.setScalar(0.55 + 0.45 * sim.flash[k]);
       cyl.sparks.material.opacity = sim.sparks[k];
-      cyl.sparks.rotation.y += dt * 6;
+      if (!still) cyl.sparks.rotation.y += dt * 6;
       cyl.tick.material.opacity = sim.ticks[k];
     });
 
@@ -321,9 +338,9 @@ function createView(root) {
         setMode('engine');
       }
       sim.target = data;
-      if (data.height) root.style.setProperty('--engine3d-height', `${data.height}px`);
       if (firstOrder && Array.isArray(data.firing_order)) engine.setFiringOrder(data.firing_order);
       renderHud(hud, data);
+      describe(root, data);
     },
   };
 }
@@ -343,6 +360,12 @@ function renderHud(hud, data) {
   }
 }
 
+// Accessible name of the view tracks the model state shown in it.
+function describe(root, data) {
+  root.setAttribute('aria-label', `Engine view. ${data.status_text || ''}. Drag or use arrow ` +
+                    'keys to orbit, plus and minus to zoom.');
+}
+
 function line(text, color) {
   const element = document.createElement('div');
   element.textContent = text;
@@ -350,12 +373,76 @@ function line(text, color) {
   return element;
 }
 
+// Without WebGL: a 2D inline-4 schematic (SVG) driven by the same state, with the same
+// slider-crank motion and state colors, so the view still shows what the model says.
 function fallbackView(root) {
   const fallback = root.querySelector('.engine3d-fallback');
+  root.querySelector('.engine3d-controls')?.setAttribute('hidden', '');
   fallback.hidden = false;
-  fallback.textContent = 'WebGL is not available in this browser, so the 3D engine view is ' +
-    'off. The diagnosis panel and charts show the same model output.';
-  return { update() {} };
+  const NS = 'http://www.w3.org/2000/svg';
+  const el = (name, attrs, parent) => {
+    const node = document.createElementNS(NS, name);
+    Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, value));
+    parent?.appendChild(node);
+    return node;
+  };
+  const svg = el('svg', { viewBox: '0 0 400 230', width: '100%', height: '78%',
+                          'aria-hidden': 'true' });
+  const block = el('rect', { x: 40, y: 30, width: 320, height: 150, rx: 8, fill: 'none',
+                             'stroke-width': 2 }, svg);
+  const pistons = [0, 1, 2, 3].map((k) => {
+    const x = 70 + k * 75;
+    el('rect', { x, y: 40, width: 50, height: 120, fill: 'rgba(148,163,184,0.06)',
+                 stroke: 'rgba(148,163,184,0.35)' }, svg);
+    el('text', { x: x + 25, y: 205, 'text-anchor': 'middle', fill: '#94a3b8',
+                 'font-size': 12, 'font-family': 'Fira Code, monospace' }, svg)
+      .textContent = `CYL ${k + 1}`;
+    return { glow: el('rect', { x, y: 40, width: 50, height: 16, opacity: 0 }, svg),
+             piston: el('rect', { x: x + 3, y: 80, width: 44, height: 26, rx: 3,
+                                  fill: '#9fb3c8' }, svg) };
+  });
+  const status = document.createElement('div');
+  status.className = 'engine3d-fallback-status';
+  fallback.replaceChildren(svg, status);
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  let target = {};
+  let crank = 0;
+  let last = performance.now();
+  const tdc = [0, 3 * Math.PI, Math.PI, 2 * Math.PI];
+  function frame(now) {
+    if (!root.isConnected) return;
+    const dt = Math.min((now - last) / 1000, 0.1);
+    last = now;
+    if (target.playing && !reduceMotion.matches) {
+      crank += ((Number(target.rpm) || 0) / 60) * 2 * Math.PI * VISUAL_SPEED * dt;
+    }
+    pistons.forEach(({ piston, glow }, k) => {
+      const psi = crank - tdc[k];
+      const height = CRANK_R * Math.cos(psi) + Math.sqrt(ROD_L ** 2 - (CRANK_R * Math.sin(psi)) ** 2);
+      piston.setAttribute('y', String(56 + (CRANK_R + ROD_L - height) * 90));
+      glow.setAttribute('opacity', String(Math.max(0, Math.cos(mod(crank - tdc[k], 4 * Math.PI)))
+                                          * (target.playing ? 0.6 : 0)));
+    });
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+  return {
+    update(data) {
+      target = data;
+      root.setAttribute('aria-label', `Engine schematic (2D). ${data.status_text || ''}.`);
+      const color = data.edge_color || '#22d3ee';
+      block.setAttribute('stroke', color);
+      pistons.forEach(({ glow }) => glow.setAttribute('fill', color));
+      status.replaceChildren(
+        line('WebGL is unavailable, so a 2D schematic replaces the 3D view.'),
+        line(data.status_text || '', color),
+      );
+      if (Number.isInteger(data.truth_cylinder)) {
+        status.append(line(`Evaluation truth overlay: fault in cylinder ${data.truth_cylinder} ` +
+                           '(not used by the model)', '#fbbf24'));
+      }
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------

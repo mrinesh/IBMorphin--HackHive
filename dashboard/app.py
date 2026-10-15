@@ -77,7 +77,7 @@ TELEMETRY_CARDS = [  # signal, label, value format, unit
 ]
 
 st.set_page_config(page_title="ENGINE//SENSE · replay", layout="wide",
-                   initial_sidebar_state="expanded")
+                   initial_sidebar_state="auto")
 theme.register_plotly_template()
 
 
@@ -194,7 +194,7 @@ def on_preset_change() -> None:
 
 
 with st.sidebar:
-    st.subheader("Scenario")
+    st.header("Scenario")
     if scenario_options:
         st.segmented_control("Scenario", scenario_options, format_func=SCENARIOS.get,
                              key="scenario", on_change=on_scenario_change,
@@ -240,7 +240,7 @@ with st.sidebar:
     bundle, issues, run_packets = load_bundle(str(paths["raw"]), run_id)
     duration = bundle.metadata["duration_s"]
 
-    st.subheader("Playback")
+    st.header("Playback")
     speed = st.select_slider("Speed", options=[0.5, 1.0, 2.0, 4.0], value=1.0, key="speed")
 
     def toggle_play() -> None:
@@ -334,7 +334,7 @@ def live_view():
     else:
         st.success("No active alert", icon=":material/check_circle:")
 
-    cols = st.columns(7)
+    cols = st.container(key="readout").columns(7)
     cols[0].metric("Stream time", f"{t_now:.2f} s")
     cols[1].metric("Accepted", latest["accepted"] if latest else "warming up")
     cols[2].metric("Classifier", (latest["predicted"] or "-") if latest else "-")

@@ -100,7 +100,7 @@ _HTML = """
 
 _CSS = """
 .engine3d-root {
-  position: relative; width: 100%; height: var(--engine3d-height, 440px);
+  position: relative; width: 100%; height: clamp(300px, 52vw, 460px);
   border-radius: 6px; overflow: hidden; outline: none;
   background: radial-gradient(120% 90% at 50% 20%, #0d1b2e 0%, #070b14 70%);
 }
@@ -130,8 +130,14 @@ _CSS = """
 @media (prefers-reduced-motion: reduce) {
   .engine3d-controls button { transition: none; }
 }
+.engine3d-fallback[hidden], .engine3d-controls[hidden] { display: none; }
+.engine3d-fallback-status {
+  font: 600 12px/1.5 "Fira Code", ui-monospace, monospace; letter-spacing: 0.04em;
+  color: #94a3b8;
+}
 .engine3d-fallback {
-  position: absolute; inset: 0; display: grid; place-items: center; padding: 16px;
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 8px; padding: 16px; background: #070b14;
   color: #e6edf7; font: 14px/1.5 "Fira Sans", sans-serif; text-align: center;
 }
 """
@@ -155,6 +161,9 @@ export default function (component) {
 _component = st.components.v2.component("engine3d", html=_HTML, css=_CSS, js=_JS)
 
 
-def render(state: dict, *, key: str = "engine3d", height: int = 440) -> None:
-    """Mount (first call) or update (later calls) the 3D view with a small state dict."""
-    _component(key=key, data=state | {"height": height}, height=height)
+def render(state: dict, *, key: str = "engine3d") -> None:
+    """Mount (first call) or update (later calls) the 3D view with a small state dict.
+
+    The height is responsive CSS (shorter on phones), so the wrapper sizes to content.
+    """
+    _component(key=key, data=state)
