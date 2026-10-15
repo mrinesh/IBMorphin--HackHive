@@ -26,6 +26,7 @@ from scipy.signal import spectrogram, welch
 
 from engine_diagnostics.config import load_config
 from engine_diagnostics.data.run_io import find_runs, load_run, validate_run
+from engine_diagnostics.lab import LAB_FAULTS, LabSettings, base_runs, build_lab_bundle
 from engine_diagnostics.models.temporary import fit_holdout_model
 from engine_diagnostics.pipeline.features import (
     HIGH_ENVELOPE_HZ,
@@ -35,7 +36,7 @@ from engine_diagnostics.pipeline.features import (
     window_slice,
 )
 from engine_diagnostics.runtime.evidence import EvidencePanel, build_evidence
-from engine_diagnostics.runtime.replay import ReplayEngine, packets
+from engine_diagnostics.runtime.replay import ReplayEngine, packets, replay_run
 
 ROOT = Path(__file__).resolve().parents[1]
 DATASETS = {
@@ -67,6 +68,13 @@ SIGNAL_COLORS = {"sound": "#1f77b4", "vibration": "#2ca02c", "rpm": "#d62728"}
 SIGNAL_TAGS = {"sound": "blue", "vibration": "green", "rpm": "red"}
 SIGNAL_NAMES = {"sound": "Sound", "vibration": "Vibration", "rpm": "RPM"}
 WAVE_ROWS = {"sound": [1], "vibration": [2, 3]}  # rows of the waveform figure
+# Fault-injection lab: healthy core_v1 recordings modified on request, replayed unchanged.
+LAB_DATASET = "core_v1"
+LAB_COLOR = "#b35900"
+LAB_FAULT_NAMES = {"none": "No fault", "misfire": "Misfire", "knock_like": "Knock-like bursts"}
+LAB_NOISE = [1.0, 1.5, 2.0, 3.0, 5.0]  # x recorded noise; 2x is the challenge-run level
+LAB_SENSORS = {"audio": "Microphone (audio)", "vibration": "Accelerometer (vibration)",
+               "rpm": "RPM telemetry"}
 
 st.set_page_config(page_title="Engine replay", layout="wide")
 
@@ -112,12 +120,65 @@ def available_datasets() -> list[str]:
             if d["raw"].is_dir() and find_runs(d["raw"]) and d["model"].is_file()]
 
 
-def start_run(dataset: str, run_id: str, held_out: str | None = None) -> None:
+@st.cache_resource
+def lab_bases() -> pd.DataFrame:
+    d = DATASETS[LAB_DATASET]
+    return base_runs(d["raw"], d["truth"], d["splits"])
+
+
+@st.cache_resource
+def lab_truth(run_id: str) -> dict:
+    path = DATASETS[LAB_DATASET]["truth"] / f"{run_id}_events.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+@st.cache_resource
+def lab_generator() -> dict:
+    batch = json.loads(DATASETS[LAB_DATASET]["splits"].read_text(encoding="utf-8"))
+    return batch["generator_params"]
+
+
+@st.cache_resource
+def lab_bundle(settings: LabSettings):
+    base, _, _ = load_bundle(str(DATASETS[LAB_DATASET]["raw"]), settings.base_run)
+    bundle, log = build_lab_bundle(base, lab_truth(settings.base_run), settings, lab_generator())
+    return bundle, log, list(packets(bundle, load_config_cached()["runtime"]["packet_s"]))
+
+
+@st.cache_resource
+def unmodified_alerts(run_id: str) -> list[tuple[float, str]]:
+    """Alert onsets when the unmodified base recording is replayed (for comparison)."""
+    bundle, _, _ = load_bundle(str(DATASETS[LAB_DATASET]["raw"]), run_id)
+    records = replay_run(bundle, load_model(str(DATASETS[LAB_DATASET]["model"])),
+                         load_config_cached())
+    return alert_onsets(records)
+
+
+def alert_onsets(records) -> list[tuple[float, str]]:
+    onsets, previous = [], None
+    for r in records:
+        if r["alert"] and r["alert"] != previous:
+            onsets.append((r["t_end_s"], r["alert"]))
+        previous = r["alert"]
+    return onsets
+
+
+def lab_available() -> bool:
+    d = DATASETS[LAB_DATASET]
+    return LAB_DATASET in available_datasets() and d["truth"].is_dir()
+
+
+def start_run(dataset: str, run_id: str, held_out: str | None = None,
+              lab: LabSettings | None = None) -> None:
     config = load_config_cached()
     model = (load_holdout_model(held_out) if held_out
              else load_model(str(DATASETS[dataset]["model"])))
-    bundle, _, _ = load_bundle(str(DATASETS[dataset]["raw"]), run_id)
+    if lab:
+        bundle, lab_log, run_packets = lab_bundle(lab)
+    else:
+        (bundle, _, run_packets), lab_log = load_bundle(str(DATASETS[dataset]["raw"]), run_id), None
     st.session_state.update(dataset=dataset, run_id=run_id, held_out=held_out, model=model,
+                            lab=lab, lab_log=lab_log, bundle=bundle, packets=run_packets,
                             engine=ReplayEngine(model, config, bundle.metadata),
                             next_packet=0, records=[], stream_t=0.0, playing=False)
 
@@ -125,7 +186,7 @@ def start_run(dataset: str, run_id: str, held_out: str | None = None) -> None:
 def advance_to(target_s: float) -> None:
     """Push every packet that has fully arrived by stream time target_s."""
     state = st.session_state
-    _, _, run_packets = load_bundle(str(DATASETS[state.dataset]["raw"]), state.run_id)
+    run_packets = state.packets
     while (state.next_packet < len(run_packets)
            and run_packets[state.next_packet].t_end_s <= target_s + 1e-9):
         packet = run_packets[state.next_packet]
@@ -137,7 +198,7 @@ def advance_to(target_s: float) -> None:
 def seek(target_s: float) -> None:
     """Reset buffers and alerts, then re-process from the start (warm-up included)."""
     state = st.session_state
-    start_run(state.dataset, state.run_id, state.held_out)
+    start_run(state.dataset, state.run_id, state.held_out, state.get("lab"))
     advance_to(target_s)
 
 
@@ -159,42 +220,91 @@ if PRESETS_PATH.is_file():
     presets = [p for p in json.loads(PRESETS_PATH.read_text(encoding="utf-8"))
                if p["dataset"] in datasets]
 
-with st.sidebar:
-    st.header("Replay")
-    preset_names = ["(none)"] + [p["name"] for p in presets]
-    preset_name = st.selectbox("Demo preset", preset_names)
-    preset = next((p for p in presets if p["name"] == preset_name), None)
-    if preset and st.session_state.get("applied_preset") != preset_name:
-        start_run(preset["dataset"], preset["run_id"])
-        if preset.get("start_s"):
-            advance_to(preset["start_s"])
-        st.session_state.applied_preset = preset_name
-    if preset:
-        st.info(preset.get("note", ""))
+def lab_controls() -> None:
+    """Sidebar form for the fault-injection lab; applies settings on submit only."""
+    bases = lab_bases()
+    current: LabSettings | None = st.session_state.get("lab")
+    labels = {r.run_id: f"~{r.rpm:,.0f} rpm · {r.profile} · {r.run_id} ({r.split})"
+              for r in bases.itertuples()}
+    default = current.base_run if current else bases.run_id.iloc[len(bases) // 2]
+    with st.form("lab_form"):
+        st.caption("Healthy recordings from engines the classifier was not trained on.")
+        base = st.select_slider("Engine RPM (base recording)", options=list(bases.run_id),
+                                value=default, format_func=lambda r: labels[r])
+        fault = st.selectbox("Injected fault", LAB_FAULTS, format_func=LAB_FAULT_NAMES.get,
+                             index=LAB_FAULTS.index(current.fault) if current else 1)
+        severity = st.slider("Fault severity", 0.1, 1.0, current.severity if current else 0.5, 0.05)
+        onset = st.slider("Fault onset (s)", 3.0, 25.0, current.onset_s if current else 8.0, 0.5)
+        cylinder = st.selectbox("Affected cylinder", [1, 2, 3, 4],
+                                index=(current.cylinder - 1) if current else 1)
+        noise = st.select_slider("Background noise", options=LAB_NOISE,
+                                 value=current.noise_scale if current else 1.0,
+                                 format_func=lambda k: "recorded" if k == 1 else f"{k:g}x",
+                                 help="Total sensor noise relative to the recording. 2x is the "
+                                      "level of the reserved challenge runs.")
+        st.markdown("**Sensor availability**")
+        available = {s: st.checkbox(label, value=s not in (current.failed if current else ()),
+                                    key=f"lab_sensor_{s}") for s, label in LAB_SENSORS.items()}
+        fail_s = st.slider("Unavailable sensors fail at (s)", 3.0, 28.0,
+                           current.fail_s if current else 14.0, 0.5)
+        seed = st.number_input("Random seed", 1, 9999, current.seed if current else 1)
+        submitted = st.form_submit_button("Apply and replay", width="stretch", type="primary")
+    settings = LabSettings(base_run=base, fault=fault, severity=float(severity),
+                           onset_s=float(onset), cylinder=int(cylinder), noise_scale=float(noise),
+                           failed=tuple(s for s, ok in available.items() if not ok),
+                           fail_s=float(fail_s), seed=int(seed))
+    if submitted or current is None:
+        start_run(LAB_DATASET, base, lab=settings)
+        if submitted:
+            st.session_state.playing = True
+            st.session_state.anchor = time.monotonic()
 
-    dataset = st.selectbox("Dataset", datasets,
-                           index=datasets.index(st.session_state.get("dataset", datasets[0]))
-                           if st.session_state.get("dataset") in datasets else 0)
-    paths = DATASETS[dataset]
-    split_of = engine_split_map(str(paths["splits"]))
-    engines = run_engines(str(paths["raw"]))
-    run_ids = sorted(engines)
-    current = st.session_state.get("run_id") if st.session_state.get("dataset") == dataset else None
-    run_id = st.selectbox(
-        "Run", run_ids, index=run_ids.index(current) if current in run_ids else 0,
-        format_func=lambda r: f"{r} · {engines[r]} · {split_of.get(engines[r], '?')}")
-    holdable = (dataset == HOLDOUT_DATASET and FEATURES_PATH.is_file()
-                and split_of.get(engines[run_id]) == "train")
-    hold_out = st.checkbox(
-        "Hold out this run's engine", disabled=not holdable,
-        help="Integration dataset only: replay with a temporary model refitted without this "
-             "engine, so the engine is unseen. Test engines are already unseen.")
-    held_out = engines[run_id] if hold_out and holdable else None
-    state_key = tuple(st.session_state.get(k) for k in ("dataset", "run_id", "held_out"))
-    if state_key != (dataset, run_id, held_out):
-        start_run(dataset, run_id, held_out)
-    model = st.session_state.model
-    bundle, issues, run_packets = load_bundle(str(paths["raw"]), run_id)
+
+with st.sidebar:
+    modes = ["Recorded replay"] + (["Fault-injection lab"] if lab_available() else [])
+    mode = st.radio("Mode", modes, horizontal=True)
+    lab_mode = mode == "Fault-injection lab"
+    st.header("Fault-injection lab" if lab_mode else "Replay")
+    if lab_mode:
+        lab_controls()
+    else:
+        preset_names = ["(none)"] + [p["name"] for p in presets]
+        preset_name = st.selectbox("Demo preset", preset_names)
+        preset = next((p for p in presets if p["name"] == preset_name), None)
+        if preset and st.session_state.get("applied_preset") != preset_name:
+            start_run(preset["dataset"], preset["run_id"])
+            if preset.get("start_s"):
+                advance_to(preset["start_s"])
+            st.session_state.applied_preset = preset_name
+        if preset:
+            st.info(preset.get("note", ""))
+
+        dataset = st.selectbox("Dataset", datasets,
+                               index=datasets.index(st.session_state.get("dataset", datasets[0]))
+                               if st.session_state.get("dataset") in datasets else 0)
+        paths = DATASETS[dataset]
+        split_of = engine_split_map(str(paths["splits"]))
+        engines = run_engines(str(paths["raw"]))
+        run_ids = sorted(engines)
+        current = (st.session_state.get("run_id")
+                   if st.session_state.get("dataset") == dataset else None)
+        run_id = st.selectbox(
+            "Run", run_ids, index=run_ids.index(current) if current in run_ids else 0,
+            format_func=lambda r: f"{r} · {engines[r]} · {split_of.get(engines[r], '?')}")
+        holdable = (dataset == HOLDOUT_DATASET and FEATURES_PATH.is_file()
+                    and split_of.get(engines[run_id]) == "train")
+        hold_out = st.checkbox(
+            "Hold out this run's engine", disabled=not holdable,
+            help="Integration dataset only: replay with a temporary model refitted without this "
+                 "engine, so the engine is unseen. Test engines are already unseen.")
+        held_out = engines[run_id] if hold_out and holdable else None
+        state_key = tuple(st.session_state.get(k) for k in ("dataset", "run_id", "held_out", "lab"))
+        if state_key != (dataset, run_id, held_out, None):
+            start_run(dataset, run_id, held_out)
+    state = st.session_state
+    dataset, run_id, held_out = state.dataset, state.run_id, state.held_out
+    model, bundle, run_packets = state.model, state.bundle, state.packets
+    issues = [] if lab_mode else load_bundle(str(DATASETS[dataset]["raw"]), run_id)[1]
     duration = bundle.metadata["duration_s"]
     speed = st.select_slider("Speed", options=[0.5, 1.0, 2.0, 4.0], value=1.0)
     play_col, restart_col = st.columns(2)
@@ -202,13 +312,14 @@ with st.sidebar:
         st.session_state.playing = not st.session_state.playing
         st.session_state.anchor = time.monotonic() - st.session_state.stream_t / speed
     if restart_col.button("Restart", width="stretch"):
-        start_run(dataset, run_id, held_out)
+        start_run(dataset, run_id, held_out, state.get("lab"))
     target = st.slider("Seek (s)", 0.0, float(duration), 0.0, step=0.5)
     if st.button("Seek", width="stretch"):
         seek(target)
         st.session_state.anchor = time.monotonic() - st.session_state.stream_t / speed
-    show_truth = st.checkbox("Show evaluation truth overlay", value=False,
-                             help="Simulation truth for review only; never used by the model.")
+    show_truth = not lab_mode and st.checkbox(
+        "Show evaluation truth overlay", value=False,
+        help="Simulation truth for review only; never used by the model.")
     st.caption(f"Model {model.model_version} · features {model.feature_version} · "
                f"packets {config['runtime']['packet_s'] * 1000:.0f} ms · "
                f"window {config['analysis']['window_s']:g} s / "
@@ -219,6 +330,18 @@ with st.sidebar:
 if held_out:
     st.warning(f"Unseen-engine replay: the model was refitted without {held_out}, so "
                f"this run's engine is new to it. Synthetic check, not a real-world claim.")
+lab_log = state.get("lab_log") if lab_mode else None
+if lab_log:
+    items = "".join(f"<li>{line}</li>" for line in lab_log.lines)
+    st.markdown(
+        f"<div style='margin-top:0.4rem;padding:0.6rem 1rem;border-radius:0.4rem;"
+        f"border:3px dashed {LAB_COLOR};background:rgba(179,89,0,0.12)'>"
+        f"<b style='color:{LAB_COLOR};letter-spacing:0.05em'>FAULT-INJECTION LAB — "
+        "INJECTED / SIMULATED SIGNALS</b><ul style='margin:0.3rem 0 0.2rem 1rem'>"
+        f"{items}</ul><small>Injected with the MATLAB generator's source model in Python "
+        "(per-engine sensor variation not reproduced). The injection schedule is known to the "
+        "lab and shown on the timeline; the model only sees the modified signals.</small></div>",
+        unsafe_allow_html=True)
 
 
 def reference_stats(record):
@@ -308,6 +431,52 @@ def render_evidence(panel: EvidencePanel) -> None:
         st.plotly_chart(evidence_figure(panel), width="stretch", key=f"evidence_{panel.fault}")
         st.caption("Indicators compare this window with the model's normal reference for the same "
                    "operating range. They show what changed; they do not prove a cause.")
+
+
+def lab_response(records, t_now: float) -> None:
+    """How predictions responded to the lab changes, beside the unmodified recording."""
+    settings: LabSettings = st.session_state.lab
+    onset = settings.onset_s if settings.fault != "none" else None
+    lab_alerts = alert_onsets(records)
+    base_alerts = unmodified_alerts(settings.base_run)
+    with st.container(border=True):
+        st.markdown(f"<b style='color:{LAB_COLOR}'>Lab response</b> "
+                    f"<small>(this replay up to {t_now:.1f} s vs the unmodified recording)</small>",
+                    unsafe_allow_html=True)
+        left, right = st.columns(2)
+        with left:
+            st.markdown("**This lab replay**")
+            if onset is not None:
+                early = [a for a in lab_alerts if a[0] < onset]
+                hits = [a for a in lab_alerts if a[0] >= onset]
+                hit = next((a for a in hits if a[1] == settings.fault), None)
+                if hit:
+                    st.markdown(f"Injected {settings.fault} detected: alert at {hit[0]:.1f} s, "
+                                f"**{hit[0] - onset:.1f} s after onset**")
+                elif t_now < onset:
+                    st.markdown(f"Fault starts at {onset:g} s.")
+                else:
+                    st.markdown(f"Injected {settings.fault} **not detected** so far.")
+                other = [f"{c} at {t:.1f} s" for t, c in hits if c != settings.fault]
+                if other:
+                    st.markdown(f"Other alerts after onset: {', '.join(other)}")
+                if early:
+                    listed = ", ".join(f"{c} at {t:.1f} s" for t, c in early)
+                    st.markdown(f"Alerts before onset: {listed}")
+            else:
+                st.markdown("No fault injected. Alerts: " + (", ".join(
+                    f"{c} at {t:.1f} s" for t, c in lab_alerts) or "none so far"))
+            since = [r for r in records if onset is None or r["t_end_s"] >= onset]
+            counts = pd.Series([r["accepted"] if r["quality"] == "ok" else r["quality"]
+                                for r in since]).value_counts()
+            if not counts.empty:
+                st.caption("Decisions" + (" since onset: " if onset is not None else ": ")
+                           + ", ".join(f"{k} {v}" for k, v in counts.items()))
+        with right:
+            st.markdown("**Unmodified recording** (full replay, same model)")
+            st.markdown(", ".join(f"{c} alert at {t:.1f} s" for t, c in base_alerts)
+                        or "No alerts during the whole run.")
+            st.caption("Compare to see which changes the injected signals caused.")
 
 
 def single_timeline(records) -> go.Figure:
@@ -418,6 +587,9 @@ def live_view():
         else:
             st.success("No active alert")
 
+    if lab_log:
+        lab_response(records, t_now)
+
     panels = [p for p in (alert_evidence(records, f) for f in active_alerts(latest)) if p]
     if panels:
         st.subheader("Evidence for active alerts")
@@ -428,10 +600,11 @@ def live_view():
     engine = state.engine
     window_s = config["analysis"]["window_s"]
     left, right = st.columns(2)
+    tag = " · LAB: injected/modified" if lab_log else ""
     waves = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.06,
-                          subplot_titles=[f"{m} (last {window_s:g} s, display decimated "
+                          subplot_titles=[f"{m}{tag} (last {window_s:g} s, display decimated "
                                           f"{DISPLAY_DECIMATION}x)" for m in MODALITIES]
-                          + ["vibration high-band envelope (5-10 kHz)"])
+                          + [f"vibration high-band envelope (5-10 kHz){tag}"])
     psd = go.Figure()
     for row, m in enumerate(MODALITIES, start=1):
         fs = engine.rates[m]
@@ -506,6 +679,18 @@ def live_view():
                                    opacity=0.12, line_width=0)
         note = (f"truth: {' + '.join(sorted(intervals))}" if intervals else "truth: normal run")
         timeline.add_annotation(x=duration / 2, y=1.08, yref="paper", text=note, showarrow=False)
+    if lab_log:
+        if lab_log.fault_interval:
+            a, b = lab_log.fault_interval
+            timeline.add_vrect(x0=a, x1=b, fillcolor=LAB_COLOR, opacity=0.12,
+                               line={"color": LAB_COLOR, "dash": "dash", "width": 1})
+            timeline.add_annotation(x=a, y=1.1, yref="paper", xanchor="left", showarrow=False,
+                                    text=f"injected {state.lab.fault} from {a:g} s "
+                                         "(known to the lab, hidden from the model)")
+        if lab_log.fail_s is not None:
+            timeline.add_vline(x=lab_log.fail_s, line={"color": "black", "dash": "dot"})
+            timeline.add_annotation(x=lab_log.fail_s, y=-0.25, yref="paper", showarrow=False,
+                                    text=f"sensor failure: {', '.join(state.lab.failed)}")
     timeline.update_xaxes(range=[0, duration], title="s")
     st.plotly_chart(timeline, width="stretch")
 

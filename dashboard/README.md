@@ -49,6 +49,34 @@ shades each fault's own active intervals.
   The weak, missing, or burst firings and RPM dips are shaded in the panel's chart
   and, in the same colors, on the waveform and RPM charts. RPM is "not expected" for
   knock and valve faults. Valve-clearance evidence is usually weak, matching the model
+
+## Fault-injection lab
+
+Sidebar **Mode → Fault-injection lab** (needs core_v1 runs, their evaluation truth,
+and the v1 model). Judges set, then press **Apply and replay**:
+
+- Engine RPM: picks a clean healthy core_v1 recording (tuning, calibration, or test
+  engine; never a classifier training engine) nearest the chosen RPM
+- Injected fault: none, misfire, or knock-like bursts, with severity, onset, and
+  cylinder. Injection (`src/engine_diagnostics/lab.py`) reuses the generator's source
+  model and settings on the base run's own combustion schedule: misfire removes
+  85-97% of the rendered combustion transient on the chosen cylinder and adds the
+  RPM dip; knock adds damped 5.5-8.5 kHz bursts 10-20 degrees after combustion.
+  Stroke probability and burst strength follow the generator's severity mapping.
+  Valve-clearance injection is not offered (needs the full generator)
+- Background noise: total sensor noise 1-5x the recording's (2x = challenge runs)
+- Sensor availability: microphone, accelerometer, or RPM telemetry stop at a chosen
+  time, producing `missing_waveform` or `stale_telemetry` (no prediction, alert held)
+- Random seed for reproducible injections
+
+Everything modified is labeled: a dashed "FAULT-INJECTION LAB — INJECTED / SIMULATED
+SIGNALS" banner listing each change, "LAB: injected/modified" on waveform titles, and
+the injected interval and sensor-failure time on the timeline (known to the lab,
+hidden from the model). A **Lab response** box compares detection latency and
+decisions with a full replay of the unmodified recording. The modified run goes
+through the unchanged replay path (features, model, alerts, evidence panels).
+Approximation: per-engine sensor gain/resonance variation is not reproduced, and a
+misfire's RPM dip does not re-time later events.
 - Simulated valve-wear indicator: 5 s rolling mean of the calibrated
   valve-clearance probability (accelerated simulation, not remaining life)
 - "Hold out this run's engine" (integration dataset, training engines only): replays with a model

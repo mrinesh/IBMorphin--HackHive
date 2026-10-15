@@ -98,6 +98,31 @@ def test_active_alert_shows_linked_evidence_panel():
         assert claim in text
 
 
+@pytest.mark.skipif(not V1_MODEL.is_file() or not (ROOT / "data/raw/core_v1").is_dir()
+                    or not (ROOT / "evaluation_truth/core_v1").is_dir(),
+                    reason="needs core_v1 runs, truth, and the v1 model")
+def test_fault_injection_lab_labels_injected_signals_and_shows_response():
+    app = AppTest.from_file(str(APP), default_timeout=180).run()
+    widget(app.sidebar.radio, "Mode").set_value("Fault-injection lab").run()
+    assert not app.exception
+    widget(app.sidebar.button, "Apply and replay").click().run()  # default: misfire 0.5 at 8 s
+    widget(app.sidebar.slider, "Seek (s)").set_value(12.0).run()
+    widget(app.sidebar.button, "Seek").click().run()
+    assert not app.exception
+    state = app.session_state
+    assert state["lab"].fault == "misfire" and state["bundle"].run_id.startswith("lab:")
+    text = " ".join(m.value for m in app.markdown)
+    assert "FAULT-INJECTION LAB" in text and "INJECTED misfire" in text
+    assert "Lab response" in text and "Unmodified recording" in text
+    assert state["records"][-1]["alert"] == "misfire"
+    assert not any("evaluation truth" in c.label for c in app.sidebar.checkbox)
+
+    widget(app.sidebar.radio, "Mode").set_value("Recorded replay").run()
+    assert not app.exception
+    assert app.session_state["lab"] is None
+    assert "FAULT-INJECTION LAB" not in " ".join(m.value for m in app.markdown)
+
+
 needs_holdout = pytest.mark.skipif(
     not (ROOT / "data/processed/integration_v1_features.parquet").is_file()
     or not (ROOT / "data/raw/run_00014").is_dir(),
