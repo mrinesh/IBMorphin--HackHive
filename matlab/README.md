@@ -8,6 +8,9 @@ project = initialize_project();          % inspect settings and installed produc
 runs = generate_integration_batch();     % write data/raw and evaluation_truth
 report = validate_run_matlab('data/raw/run_00001', ...
     'evaluation_truth/run_00001_events.json');
+plot_run_overview('data/raw/run_00001', ...
+    'evaluation_truth/run_00001_events.json', ...
+    'reports/generated/integration_v1_run_00001.png');   % review figure
 ```
 
 `generate_integration_batch` reads `configs/mvp.json` (shared settings) and
@@ -24,6 +27,7 @@ Requires Signal Processing Toolbox (`butter`, `pwelch`, `hann`).
 | `generate_integration_batch.m` | Entry point: loop scenarios, generate, export |
 | `export_run.m` | Write `waveforms.mat` (`-v7`), `telemetry.csv`, `metadata.json`, private truth |
 | `validate_run_matlab.m` | Lengths, dtype, clipping, firing rate vs RPM, intended fault signature |
+| `plot_run_overview.m` | Review figure (spectrograms, zooms, RPM) using evaluation truth |
 | `sim/make_streams.m` | Independent `mrg32k3a` substreams per run and purpose |
 | `sim/operating_profile.m` | RPM, load, throttle at 1 kHz control rate |
 | `sim/integrate_crank.m`, `sim/crank_event_times.m` | Crank angle from RPM and its inverse |
