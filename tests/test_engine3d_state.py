@@ -57,3 +57,11 @@ def test_quality_failure_and_warm_up():
 
 def test_payload_stays_small():
     assert len(json.dumps(state(record(), truth=TRUTH))) < 600
+
+
+def test_view_controls_are_labelled_buttons():
+    html = engine3d._HTML
+    for label in ("Car", "Engine", "Reset view"):
+        assert f">{label}</button>" in html
+    assert html.count('type="button"') == 3 and 'aria-pressed="true"' in html
+    assert 'role="img"' in html and "arrow keys" in html  # keyboard alternative to dragging

@@ -89,6 +89,11 @@ _HTML = """
 <div class="engine3d-root" tabindex="0" role="img"
      aria-label="3D engine view. Drag or use arrow keys to orbit, plus and minus to zoom.">
   <div class="engine3d-hud" aria-hidden="true"></div>
+  <div class="engine3d-controls" role="group" aria-label="3D view">
+    <button type="button" data-view="car" aria-pressed="true">Car</button>
+    <button type="button" data-view="engine" aria-pressed="false">Engine</button>
+    <button type="button" data-action="reset">Reset view</button>
+  </div>
   <div class="engine3d-fallback" hidden></div>
 </div>
 """
@@ -105,6 +110,25 @@ _CSS = """
   position: absolute; left: 12px; top: 10px; right: 12px; pointer-events: none;
   font: 600 11px/1.4 "Fira Code", ui-monospace, monospace; letter-spacing: 0.06em;
   color: #94a3b8; text-transform: uppercase;
+}
+.engine3d-controls {
+  position: absolute; right: 10px; bottom: 10px; display: flex; gap: 6px; flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.engine3d-controls button {
+  min-height: 36px; min-width: 44px; padding: 0 12px; border-radius: 6px; cursor: pointer;
+  font: 600 12px/1 "Fira Sans", sans-serif; letter-spacing: 0.05em; text-transform: uppercase;
+  color: #e6edf7; background: rgba(7, 11, 20, 0.78); border: 1px solid rgba(34, 211, 238, 0.4);
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+  touch-action: manipulation;
+}
+.engine3d-controls button:hover { border-color: #22d3ee; color: #22d3ee; }
+.engine3d-controls button[aria-pressed="true"] {
+  background: rgba(34, 211, 238, 0.16); border-color: #22d3ee; color: #22d3ee;
+}
+.engine3d-controls button:focus-visible { outline: 2px solid #22d3ee; outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  .engine3d-controls button { transition: none; }
 }
 .engine3d-fallback {
   position: absolute; inset: 0; display: grid; place-items: center; padding: 16px;
