@@ -15,6 +15,11 @@ statistics. The app needs exported runs in `data/raw` and the temporary model in
 - Permanent "SYNTHETIC DATA — RECORDED REPLAY" banner, model and feature versions
 - Play/pause, restart, speed, and seek. Seek resets buffers and alert state and
   re-processes from the start, so the trailing window is warmed up honestly
+- Target-engine calibration from a separate known-healthy run from the same
+  engine. Select the calibration run before replay; at least eight valid windows
+  are required.
+- Decisions remain uncertain until calibration is supplied; use a run known to
+  represent healthy operation.
 - Current accepted decision, SVM class, anomaly score vs threshold, quality,
   processing time, and alert status
 - Last 2 s of audio and vibration (display decimated 8×; analysis is full rate)

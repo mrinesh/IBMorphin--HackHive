@@ -150,8 +150,13 @@ A window is labeled only when it lies inside one truth segment; otherwise it is
 ## Temporary model
 
 `engine-diagnostics train-temporary` writes `artifacts/models/temporary.joblib`
-(model version `temporary-0.2.0`, feature version, ordered feature names,
-training runs) and `reports/generated/temporary_model_report.json`. Each window
+(model version `temporary-0.3.0`, feature version, ordered feature names,
+training runs) and `reports/generated/temporary_model_report.json`. Training
+normalizes waveform features relative to each source engine's healthy reference.
+Replay requires a separate known-healthy calibration run from the same engine;
+at least eight quality-ok windows are needed. Calibration features are not
+passed to the fault classifier as labels. This is a transfer adaptation
+assumption, not an automatic way to identify a faulty engine at startup. Each window
 decision has `predicted` (SVM class), `margin`, `anomaly_score`, `anomalous`,
 and `accepted` (the class, or `uncertain` when the SVM and the normal baseline
 disagree or the margin is small).

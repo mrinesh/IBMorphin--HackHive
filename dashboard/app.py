@@ -22,7 +22,7 @@ from scipy.signal import welch
 
 from engine_diagnostics.config import load_config
 from engine_diagnostics.data.run_io import find_runs, load_run, validate_run
-from engine_diagnostics.pipeline.features import MODALITIES
+from engine_diagnostics.pipeline.features import MODALITIES, extract_run
 from engine_diagnostics.runtime.replay import ReplayEngine, packets
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -52,10 +52,30 @@ def load_bundle(run_id: str):
     return bundle, issues, list(packets(bundle, config["runtime"]["packet_s"]))
 
 
-def start_run(run_id: str) -> None:
+@st.cache_resource
+def load_calibration(run_id: str):
+    config, _ = load_project()
+    bundle = load_run(RAW_DIR / run_id)
+    issues = validate_run(bundle, config)
+    if issues:
+        return bundle, issues, np.empty((0, 0))
+    table = extract_run(bundle, config)
+    features = table.loc[table["quality"] == "ok", model.feature_names].to_numpy()
+    return bundle, [], features
+
+
+def start_run(run_id: str, calibration_run_id: str) -> None:
     config, model = load_project()
     bundle, _, _ = load_bundle(run_id)
-    st.session_state.update(run_id=run_id, engine=ReplayEngine(model, config, bundle.metadata),
+    calibration_bundle, issues, calibration_features = load_calibration(calibration_run_id)
+    if issues:
+        raise ValueError("invalid calibration run: " + "; ".join(issues))
+    if calibration_bundle.metadata["engine_id"] != bundle.metadata["engine_id"]:
+        st.error("Choose a healthy calibration run from the same engine as the replay run.")
+        st.stop()
+    engine = ReplayEngine(model, config, bundle.metadata, calibration_features)
+    st.session_state.update(run_id=run_id, calibration_run_id=calibration_run_id,
+                            calibration_window_count=len(calibration_features), engine=engine,
                             next_packet=0, records=[], stream_t=0.0, playing=False)
 
 
@@ -73,7 +93,7 @@ def advance_to(target_s: float) -> None:
 
 def seek(target_s: float) -> None:
     """Reset buffers and alerts, then re-process from the start (warm-up included)."""
-    start_run(st.session_state.run_id)
+    start_run(st.session_state.run_id, st.session_state.calibration_run_id)
     advance_to(target_s)
 
 
@@ -93,8 +113,17 @@ if model is None or not run_ids:
 with st.sidebar:
     st.header("Replay")
     run_id = st.selectbox("Run", run_ids)
-    if st.session_state.get("run_id") != run_id:
-        start_run(run_id)
+    calibration_options = ["Select a known-healthy calibration run", *run_ids]
+    calibration_run_id = st.selectbox("Known-healthy calibration run", calibration_options)
+    if calibration_run_id == calibration_options[0]:
+        st.info("Choose a separate recording that is known to be healthy.")
+        st.stop()
+    if calibration_run_id == run_id:
+        st.error("Choose a separate run for healthy calibration.")
+        st.stop()
+    if (st.session_state.get("run_id") != run_id
+            or st.session_state.get("calibration_run_id") != calibration_run_id):
+        start_run(run_id, calibration_run_id)
     bundle, issues, run_packets = load_bundle(run_id)
     duration = bundle.metadata["duration_s"]
     speed = st.select_slider("Speed", options=[0.5, 1.0, 2.0, 4.0], value=1.0)
@@ -103,7 +132,7 @@ with st.sidebar:
         st.session_state.playing = not st.session_state.playing
         st.session_state.anchor = time.monotonic() - st.session_state.stream_t / speed
     if restart_col.button("Restart", width="stretch"):
-        start_run(run_id)
+        start_run(run_id, calibration_run_id)
     target = st.slider("Seek (s)", 0.0, float(duration), 0.0, step=0.5)
     if st.button("Seek", width="stretch"):
         seek(target)
@@ -114,6 +143,8 @@ with st.sidebar:
                f"packets {config['runtime']['packet_s'] * 1000:.0f} ms · "
                f"window {config['analysis']['window_s']:g} s / "
                f"step {config['analysis']['step_s']:g} s")
+    st.caption(f"Calibrated from {st.session_state.calibration_window_count} quality-ok "
+               f"windows in {calibration_run_id}.")
     if issues:
         st.error("Run failed validation:\n" + "\n".join(issues))
 
@@ -121,7 +152,11 @@ with st.sidebar:
 def evidence_table(record) -> pd.DataFrame:
     """Largest deviations from the training normal reference for the latest window."""
     names = model.baseline_names
-    values = np.array([record["features"][model.feature_names.index(n)] for n in names])
+    feature_idx = [model.feature_names.index(n) for n in names]
+    classifier_idx = [model.classifier_names.index(n) for n in names]
+    raw_values = np.array([record["features"][idx] for idx in feature_idx])
+    values = ((raw_values - model.target_median[classifier_idx])
+              / model.target_scale[classifier_idx])
     z = (values - model.baseline_median) / model.baseline_scale
     top = np.argsort(-np.abs(z))[:3]
     return pd.DataFrame({"feature": [names[k] for k in top],

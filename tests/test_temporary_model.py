@@ -66,6 +66,8 @@ def test_accepted_decision_requires_agreement():
     table = synthetic_table()
     model = T.fit_temporary_model(table)
     test = T.trainable(table, "test")
+    calibration = test[test["label"] == "normal"].head(model.calibration_windows)
+    model.calibrate(calibration[model.feature_names].to_numpy())
     results = model.predict(test[model.feature_names].to_numpy())
     assert len(results) == len(test)
     for result in results:
@@ -76,4 +78,4 @@ def test_accepted_decision_requires_agreement():
     report = T.evaluate(model, table)
     assert report["svm"]["macro_f1"] > 0.9
     assert set(report["ablations"]) == set(T.ABLATIONS)
-    assert "not a performance claim" in report["status"]
+    assert "not a real-world performance claim" in report["status"]

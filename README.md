@@ -9,9 +9,10 @@ MATLAB generator produces synchronized audio, vibration, and telemetry runs
 knock-like, or valve-clearance-like). Python validates them against the data
 contract, extracts window features, trains a temporary baseline/SVM model on
 three engines, and replays runs in 40 ms packets with persistent alerts, in the
-terminal or a local Streamlit dashboard. A leave-one-engine-out check is
-included, but current synthetic cross-engine scores are poor; real cross-domain
-validity is unproven.
+terminal or a local Streamlit dashboard. Cross-engine replay uses a separate
+known-healthy calibration recording from the same engine. Synthetic leave-one-
+engine-out scores improve with calibration but still miss many knock events;
+real cross-domain validity is unproven.
 
 ## Quick start
 
@@ -65,7 +66,7 @@ runs = generate_integration_batch();   % data/raw and evaluation_truth
 uv run --all-extras engine-diagnostics validate-runs
 uv run --all-extras engine-diagnostics build-features
 uv run --all-extras engine-diagnostics train-temporary
-uv run --all-extras engine-diagnostics replay run_00012 --speed 1 --with-truth
+uv run --all-extras engine-diagnostics replay run_00012 --calibration-run run_00010 --speed 1 --with-truth
 uv run --all-extras streamlit run dashboard/app.py
 uv run --all-extras pytest
 ```

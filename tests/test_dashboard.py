@@ -23,13 +23,14 @@ def test_dashboard_renders_banner_and_seeks_with_live_predictions():
     assert not app.exception
     assert any("SYNTHETIC DATA" in m.value for m in app.markdown)
     app.sidebar.selectbox[0].set_value("run_00012").run()
+    app.sidebar.selectbox[1].set_value("run_00010").run()
     app.sidebar.slider[0].set_value(12.0).run()
     app.sidebar.button[2].click().run()  # Seek
     assert not app.exception
     state = app.session_state
     assert state["stream_t"] == pytest.approx(12.0)
     assert [r["t_end_s"] for r in state["records"]][-1] == 12.0
-    assert state["records"][-1]["model_version"] == "temporary-0.2.0"
+    assert state["records"][-1]["model_version"] == "temporary-0.3.0"
     assert any("ALERT" in e.value for e in app.error)
 
 
@@ -37,6 +38,8 @@ def test_play_advances_stream_time_in_real_time():
     import time
 
     app = AppTest.from_file(str(APP), default_timeout=60).run()
+    app.sidebar.selectbox[0].set_value("run_00012").run()
+    app.sidebar.selectbox[1].set_value("run_00010").run()
     app.sidebar.button[0].click().run()  # Play
     assert app.session_state["playing"]
     time.sleep(1.5)

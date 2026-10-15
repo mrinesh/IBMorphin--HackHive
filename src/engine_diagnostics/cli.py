@@ -136,9 +136,12 @@ def _train_temporary(args) -> int:
     cross_domain = report["cross_domain"]
     print(f"cross-domain check: {cross_domain['status']}")
     for name, part in cross_domain["results"].items():
-        print(f"leave-one-engine-out {name:14s} mean macro-F1 "
+        pooled = part["pooled"]
+        print(f"leave-one-engine-out {name:27s} mean macro-F1 "
               f"{part['macro_f1_mean_by_engine']:.3f} "
-              f"(std {part['macro_f1_std_by_engine']:.3f})")
+              f"(std {part['macro_f1_std_by_engine']:.3f}); "
+              f"pooled {pooled['macro_f1']:.3f}; recall "
+              f"{json.dumps({k: round(v, 2) for k, v in pooled['recall'].items()})}")
     print(f"model -> {args.model}\nreport -> {args.report}")
     return 0
 
@@ -149,6 +152,7 @@ def _replay(args, config: dict) -> int:
         import numpy as np
 
         from engine_diagnostics.data.run_io import load_run, validate_run
+        from engine_diagnostics.pipeline.features import extract_run
         from engine_diagnostics.runtime.replay import prediction_log, replay_run
     except ImportError as error:
         print(f"replay needs the analysis extra ({error.name} missing)", file=sys.stderr)
@@ -163,6 +167,29 @@ def _replay(args, config: dict) -> int:
         print("\n".join(issues), file=sys.stderr)
         return 1
     model = joblib.load(args.model)
+    calibration_bundle = None
+    if hasattr(model, "calibrate"):
+        if not args.calibration_run:
+            print("This model needs --calibration-run with a separate known-healthy run",
+                  file=sys.stderr)
+            return 1
+        if args.calibration_run == args.run_id:
+            print("--calibration-run must differ from the replay run", file=sys.stderr)
+            return 1
+        calibration_bundle = load_run(args.raw_dir / args.calibration_run)
+        if calibration_bundle.metadata.get("engine_id") != bundle.metadata.get("engine_id"):
+            print("Calibration and replay runs must come from the same engine", file=sys.stderr)
+            return 1
+        calibration_issues = validate_run(calibration_bundle, config)
+        if calibration_issues:
+            print("\n".join(calibration_issues), file=sys.stderr)
+            return 1
+        calibration = extract_run(calibration_bundle, config)
+        if (calibration["quality"] == "ok").sum() < 8:
+            print("Calibration run has fewer than 8 quality-ok windows", file=sys.stderr)
+            return 1
+    if calibration_bundle is not None:
+        print(f"Target calibrated from known-healthy run {calibration_bundle.run_id}")
     print(f"SYNTHETIC DATA - RECORDED REPLAY | {args.run_id} | {model.model_version} | "
           f"speed {'fast' if not args.speed else f'{args.speed:g}x'}")
 
@@ -172,7 +199,8 @@ def _replay(args, config: dict) -> int:
               f"accepted={d['accepted']:21s} anomaly={d['anomaly_score']:5.2f}  "
               f"ALERT={alert:21s} {d['processing_ms']:5.1f} ms")
 
-    records = replay_run(bundle, model, config, speed=args.speed, on_decision=show)
+    records = replay_run(bundle, model, config, speed=args.speed, on_decision=show,
+                         calibration_bundle=calibration_bundle)
     log = prediction_log(records)
     args.log_dir.mkdir(parents=True, exist_ok=True)
     log_path = args.log_dir / f"{args.run_id}_predictions.csv"
@@ -231,6 +259,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="real-time factor, e.g. 1 for 1x; default runs as fast as possible")
     replay.add_argument("--raw-dir", type=Path, default=Path("data/raw"))
     replay.add_argument("--model", type=Path, default=Path("artifacts/models/temporary.joblib"))
+    replay.add_argument("--calibration-run", default=None,
+                        help="separate known-healthy run used to calibrate this engine")
     replay.add_argument("--log-dir", type=Path, default=Path("artifacts/logs"))
     replay.add_argument("--truth-dir", type=Path, default=Path("evaluation_truth"))
     replay.add_argument("--with-truth", action="store_true",

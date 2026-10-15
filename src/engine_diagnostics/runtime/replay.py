@@ -17,6 +17,7 @@ import pandas as pd
 from engine_diagnostics.data.run_io import RunBundle
 from engine_diagnostics.pipeline.features import (
     MODALITIES,
+    extract_run,
     extract_window,
     telemetry_context,
     window_ends,
@@ -50,11 +51,15 @@ def packets(bundle: RunBundle, packet_s: float) -> Iterator[Packet]:
 
 
 class ReplayEngine:
-    def __init__(self, model, config: dict[str, Any], metadata: dict[str, Any]):
+    def __init__(self, model, config: dict[str, Any], metadata: dict[str, Any],
+                 calibration_features: np.ndarray | None = None):
         if any(metadata["streams"][m]["t0_s"] != 0 for m in MODALITIES):
             raise ValueError("replay currently requires t0_s = 0 for every stream")
         self.model = model
         self.config = config
+        self.calibration_features = calibration_features
+        if (hasattr(model, "calibrate") and calibration_features is None):
+            raise ValueError("this model requires a separate known-healthy calibration run")
         self.rates = {m: metadata["streams"][m]["fs_hz"] for m in MODALITIES}
         self.scales = {m: metadata["streams"][m]["full_scale"] for m in MODALITIES}
         self.decision_times = window_ends(metadata["duration_s"], config)
@@ -64,6 +69,10 @@ class ReplayEngine:
 
     def reset(self) -> None:
         """Clear buffers and alert state (used on restart or seek)."""
+        if hasattr(self.model, "reset_calibration"):
+            self.model.reset_calibration()
+        if self.calibration_features is not None:
+            self.model.calibrate(self.calibration_features)
         self.buffers = {m: np.zeros(0, dtype=np.float32) for m in MODALITIES}
         self.buffer_start = dict.fromkeys(MODALITIES, 0)  # absolute index of buffer[0]
         self.received = dict.fromkeys(MODALITIES, 0)  # samples received so far
@@ -124,9 +133,19 @@ class ReplayEngine:
 
 
 def replay_run(bundle: RunBundle, model, config: dict[str, Any], speed: float | None = None,
-               on_decision=None) -> list[dict[str, Any]]:
+               on_decision=None, calibration_bundle: RunBundle | None = None) -> list[dict[str, Any]]:
     """Replay a whole run; `speed` paces packets in real time (1.0 = 1x), None = fast."""
-    engine = ReplayEngine(model, config, bundle.metadata)
+    calibration_features = None
+    if calibration_bundle is not None:
+        if calibration_bundle.run_id == bundle.run_id:
+            raise ValueError("calibration must use a separate known-healthy run")
+        if calibration_bundle.metadata.get("engine_id") != bundle.metadata.get("engine_id"):
+            raise ValueError("calibration and replay runs must come from the same engine")
+        calibration_table = extract_run(calibration_bundle, config)
+        calibration_features = calibration_table.loc[
+            calibration_table["quality"] == "ok", model.feature_names
+        ].to_numpy()
+    engine = ReplayEngine(model, config, bundle.metadata, calibration_features)
     packet_s = config["runtime"]["packet_s"]
     records = []
     clock = time.perf_counter()
