@@ -73,7 +73,7 @@ Execution tracker. Checked items have been completed; unchecked items remain fut
 **Owner:** MATLAB/data-generation lead. **Dependency:** Phase 3 contracts proven. **Timing:** approximately 20% of effort.
 
 - [x] Build the generator as reusable MATLAB functions driven by configuration, not an undocumented interactive workspace.
-- [ ] Generate RPM/load trajectories for steady operation, idle-like operation, gradual ramps, and load transitions.
+- [x] Generate RPM/load trajectories for steady operation, idle-like operation, gradual ramps, and load transitions.
 - [x] Integrate RPM into crank angle and schedule combustion events across the 720-degree four-stroke cycle.
 - [ ] Include normal combustion variability, shaft-order components, ordinary valve impacts, structural ringing, and colored noise.
 - [ ] Render acoustic and vibration channels through different gains, delays, filters, and resonances; avoid scaled copies.
@@ -81,11 +81,11 @@ Execution tracker. Checked items have been completed; unchecked items remain fut
 - [ ] Model knock-like faults with short post-combustion damped bursts, initially within 5–9 kHz.
 - [ ] Model valve-clearance-like faults by changing recurring impact timing, shape, and variability; avoid assuming amplitude must always increase.
 - [ ] Generate slow coolant and fuel-trim behavior; do not assign a unique telemetry value to each fault class.
-- [ ] Add randomized fault onset, severity, intermittence, and selected recovery intervals.
-- [ ] Add one accelerated valve-like deterioration scenario; label its time scale as simulated, not service life.
+- [x] Add randomized fault onset, severity, intermittence, and selected recovery intervals.
+- [x] Add one accelerated valve-like deterioration scenario; label its time scale as simulated, not service life.
 - [ ] Add sensor gain/placement variation, resonance variation, background noise, unrelated impacts, drift, clipping, and missing-data cases.
 - [ ] Add timing jitter, small clock offsets, and drift as explicit robustness settings.
-- [ ] Band-limit rendered impulses before downsampling; verify aliasing is controlled.
+- [x] Band-limit rendered impulses before downsampling; verify aliasing is controlled.
 - [x] Use reproducible independent random streams for operating state, fault events, and each sensor's noise.
 - [ ] Save resolved configuration, generator version, engine/run identifiers, and seed references for every run.
 - [ ] Document which equations are physically motivated, which parameter mappings are heuristic, and which require measurements.
@@ -101,13 +101,13 @@ Execution tracker. Checked items have been completed; unchecked items remain fut
 **Owners:** signal-processing and data leads. **Dependency:** Phase 4. **Timing:** approximately 15% of effort, including generation.
 
 - [ ] Check array lengths, units, duration, timestamps, finite values, and expected sample rates.
-- [ ] Verify normal event/firing frequency at several fixed RPM values.
+- [x] Verify normal event/firing frequency at several fixed RPM values.
 - [ ] Verify consistent event timing across sensor streams and correct clock correction.
 - [ ] Verify intended fault interventions using private source-event truth.
 - [ ] Check bandwidth, clipping, filter transients, and discontinuities at onset/recovery.
-- [ ] Verify repeated seeds reproduce outputs within the pinned MATLAB environment.
+- [x] Verify repeated seeds reproduce outputs within the pinned MATLAB environment.
 - [ ] Inspect parameter sweeps: severity, RPM, load, gain, noise, and resonance changes.
-- [ ] Match gain and operating distributions across classes; include healthy high-load and faulty low-load runs.
+- [x] Match gain and operating distributions across classes; include healthy high-load and faulty low-load runs.
 - [ ] Ensure normal signals contain structural energy in fault-analysis bands; avoid unique fault frequencies.
 - [ ] Freeze engine-level splits before creating overlapping windows: 36 training, 8 tuning, 8 calibration, and 8 final-test engines.
 - [ ] Generate the core target of 60 engines × 8 runs × 45 seconds; use two runs per class per engine.
@@ -138,7 +138,7 @@ Execution tracker. Checked items have been completed; unchecked items remain fut
 - [ ] Add broad RPM-normalized order features using observed RPM; never use hidden crank-angle truth.
 - [ ] Combine per-modality features with observed RPM/load/throttle context; keep slow telemetry primarily for display initially.
 - [ ] Add quality rules for clipping, missing waveforms, stale telemetry, and unsupported transients.
-- [ ] Verify MATLAB/Python reference agreement with explicit numerical tolerances and matched settings.
+- [x] Verify MATLAB/Python reference agreement with explicit numerical tolerances and matched settings.
 - [ ] Verify offline and packet-replay features agree after identical causal processing.
 - [ ] Freeze feature definitions, order, units, and version.
 
