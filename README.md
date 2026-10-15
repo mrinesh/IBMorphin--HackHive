@@ -14,6 +14,17 @@ On four held-out virtual engines: macro-F1 0.835, no false alerts during normal
 replay, and 13 ms processing per decision; mild faults and the reserved
 challenge conditions are largely missed. **All data is synthetic**; these results
 do not establish real-engine accuracy, physical wear, or remaining useful life.
+A leave-one-engine-out check on the 16-run integration batch shows poor transfer
+between synthetic engines (mean macro-F1 0.389); the dashboard can replay a run
+with its engine held out to show this live.
+
+**Simultaneous faults.** The `core_v2` MATLAB dataset puts 0-3 faults in the same
+run with independent onsets. The v2 model has one calibrated detector and one
+alert per fault plus crank-synchronous vibration features. On four new held-out
+engines it scores window macro-F1 0.884 (v1: 0.621 on the same windows) and
+alerts every sustained fault in 10 of 12 two-fault and 4 of 4 three-fault runs;
+valve recall (0.62) and knock false alerts (0.30 per fault-free minute) remain
+weak. See PROJECT_REPORT §11.7.
 
 ## Quick start
 
@@ -63,7 +74,7 @@ addpath('matlab');
 project = initialize_project();          % settings and installed products
 summary = generate_dataset();            % core_v1: data/raw/core_v1, evaluation_truth/core_v1
 report = validate_generator();           % generator checks and MATLAB feature references
-runs = generate_integration_batch();     % optional 13-run integration batch
+runs = generate_integration_batch();     % optional 16-run integration batch
 ```
 
 On macOS MATLAB is at `/Applications/MATLAB_R2026b.app` and not on PATH. For

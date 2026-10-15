@@ -7,7 +7,9 @@ Predictions come from ReplayEngine (shared features, model, alerts) as packets
 are replayed; nothing is precomputed. Display traces are decimated; analysis
 uses full-rate samples. Display panels may show any data already received
 (up to the current stream time). The optional truth overlay is evaluation data
-and is never passed to the engine.
+and is never passed to the engine. For the integration dataset, "Hold out this
+run's engine" replays with a temporary model refitted without that engine, and
+the cross-engine panel shows the leave-one-engine-out report from train-temporary.
 """
 
 import json
@@ -24,6 +26,7 @@ from scipy.signal import spectrogram, welch
 
 from engine_diagnostics.config import load_config
 from engine_diagnostics.data.run_io import find_runs, load_run, validate_run
+from engine_diagnostics.models.temporary import fit_holdout_model
 from engine_diagnostics.pipeline.features import HIGH_ENVELOPE_HZ, MODALITIES, _band_envelope
 from engine_diagnostics.runtime.replay import ReplayEngine, packets
 
@@ -32,17 +35,24 @@ DATASETS = {
     "core_v1": {"raw": ROOT / "data/raw/core_v1", "truth": ROOT / "evaluation_truth/core_v1",
                 "model": ROOT / "artifacts/models/diagnostic_v1.joblib",
                 "splits": ROOT / "configs/core_v1.json"},
+    "core_v2": {"raw": ROOT / "data/raw/core_v2", "truth": ROOT / "evaluation_truth/core_v2",
+                "model": ROOT / "artifacts/models/multifault_v2.joblib",
+                "splits": ROOT / "configs/core_v2.json"},
     "integration_v1": {"raw": ROOT / "data/raw", "truth": ROOT / "evaluation_truth",
                        "model": ROOT / "artifacts/models/temporary.joblib",
                        "splits": ROOT / "configs/integration_batch.json"},
 }
 PRESETS_PATH = ROOT / "configs/demo_presets.json"
+HOLDOUT_DATASET = "integration_v1"
+FEATURES_PATH = ROOT / "data/processed/integration_v1_features.parquet"
+REPORT_PATH = ROOT / "reports/generated/temporary_model_report.json"
 DISPLAY_DECIMATION = 8
 SPECTROGRAM_S = 10.0
 TICK_S = 0.5
 CONTEXT_SIGNALS = ("rpm", "load", "throttle")
 SLOW_SIGNALS = ("coolant_temp", "short_term_fuel_trim", "long_term_fuel_trim")
 CLASS_ORDER = ["normal", "misfire", "knock_like", "valve_clearance_like", "uncertain"]
+FAULT_COLORS = {"misfire": "#d62728", "knock_like": "#ff7f0e", "valve_clearance_like": "#9467bd"}
 VALVE = "valve_clearance_like"
 DEGRADATION_WINDOW = 10
 
@@ -80,16 +90,22 @@ def run_engines(raw_dir: str) -> dict[str, str]:
             for d in find_runs(Path(raw_dir))}
 
 
+@st.cache_resource
+def load_holdout_model(engine_id: str):
+    return fit_holdout_model(pd.read_parquet(FEATURES_PATH), engine_id)
+
+
 def available_datasets() -> list[str]:
     return [name for name, d in DATASETS.items()
             if d["raw"].is_dir() and find_runs(d["raw"]) and d["model"].is_file()]
 
 
-def start_run(dataset: str, run_id: str) -> None:
+def start_run(dataset: str, run_id: str, held_out: str | None = None) -> None:
     config = load_config_cached()
-    model = load_model(str(DATASETS[dataset]["model"]))
+    model = (load_holdout_model(held_out) if held_out
+             else load_model(str(DATASETS[dataset]["model"])))
     bundle, _, _ = load_bundle(str(DATASETS[dataset]["raw"]), run_id)
-    st.session_state.update(dataset=dataset, run_id=run_id,
+    st.session_state.update(dataset=dataset, run_id=run_id, held_out=held_out, model=model,
                             engine=ReplayEngine(model, config, bundle.metadata),
                             next_packet=0, records=[], stream_t=0.0, playing=False)
 
@@ -108,7 +124,8 @@ def advance_to(target_s: float) -> None:
 
 def seek(target_s: float) -> None:
     """Reset buffers and alerts, then re-process from the start (warm-up included)."""
-    start_run(st.session_state.dataset, st.session_state.run_id)
+    state = st.session_state
+    start_run(state.dataset, state.run_id, state.held_out)
     advance_to(target_s)
 
 
@@ -154,9 +171,17 @@ with st.sidebar:
     run_id = st.selectbox(
         "Run", run_ids, index=run_ids.index(current) if current in run_ids else 0,
         format_func=lambda r: f"{r} · {engines[r]} · {split_of.get(engines[r], '?')}")
-    if st.session_state.get("run_id") != run_id or st.session_state.get("dataset") != dataset:
-        start_run(dataset, run_id)
-    model = load_model(str(paths["model"]))
+    holdable = (dataset == HOLDOUT_DATASET and FEATURES_PATH.is_file()
+                and split_of.get(engines[run_id]) == "train")
+    hold_out = st.checkbox(
+        "Hold out this run's engine", disabled=not holdable,
+        help="Integration dataset only: replay with a temporary model refitted without this "
+             "engine, so the engine is unseen. Test engines are already unseen.")
+    held_out = engines[run_id] if hold_out and holdable else None
+    state_key = tuple(st.session_state.get(k) for k in ("dataset", "run_id", "held_out"))
+    if state_key != (dataset, run_id, held_out):
+        start_run(dataset, run_id, held_out)
+    model = st.session_state.model
     bundle, issues, run_packets = load_bundle(str(paths["raw"]), run_id)
     duration = bundle.metadata["duration_s"]
     speed = st.select_slider("Speed", options=[0.5, 1.0, 2.0, 4.0], value=1.0)
@@ -165,7 +190,7 @@ with st.sidebar:
         st.session_state.playing = not st.session_state.playing
         st.session_state.anchor = time.monotonic() - st.session_state.stream_t / speed
     if restart_col.button("Restart", width="stretch"):
-        start_run(dataset, run_id)
+        start_run(dataset, run_id, held_out)
     target = st.slider("Seek (s)", 0.0, float(duration), 0.0, step=0.5)
     if st.button("Seek", width="stretch"):
         seek(target)
@@ -178,6 +203,10 @@ with st.sidebar:
                f"step {config['analysis']['step_s']:g} s")
     if issues:
         st.error("Run failed validation:\n" + "\n".join(issues))
+
+if held_out:
+    st.warning(f"Unseen-engine replay: the model was refitted without {held_out}, so "
+               f"this run's engine is new to it. Synthetic check, not a real-world claim.")
 
 
 def reference_stats(record):
@@ -198,6 +227,47 @@ def evidence_table(record) -> tuple[pd.DataFrame, bool]:
     table = pd.DataFrame({"feature": [names[k] for k in top], "value": values[top].round(4),
                           "normal median": median[top].round(4), "robust z": z[top].round(1)})
     return table, matched
+
+
+def single_timeline(records) -> go.Figure:
+    timeline = go.Figure()
+    if records:
+        log = pd.DataFrame([{k: r[k] for k in ("t_end_s", "accepted", "alert")}
+                            for r in records])
+        timeline.add_trace(go.Scatter(x=log["t_end_s"], y=log["accepted"], mode="markers",
+                                      name="accepted decision"))
+        alerted = log[log["alert"].notna()]
+        timeline.add_trace(go.Scatter(x=alerted["t_end_s"], y=alerted["alert"], mode="markers",
+                                      marker={"symbol": "square", "size": 12, "opacity": 0.4},
+                                      name="active alert"))
+    timeline.update_layout(height=260, title="Decision timeline",
+                           yaxis={"categoryorder": "array", "categoryarray": CLASS_ORDER},
+                           margin={"t": 40, "b": 20})
+    return timeline
+
+
+def multi_timeline(records) -> go.Figure:
+    """One row per fault: detections, borderline (uncertain) windows, and alerts."""
+    timeline = go.Figure()
+    faults = model.fault_classes
+    for fault in faults:
+        rows = [r for r in records if "fault_decisions" in r]
+        for kind, marker, name in (("fault", {"size": 8}, "detected"),
+                                   ("uncertain", {"symbol": "x", "size": 7}, "uncertain")):
+            hits = [r["t_end_s"] for r in rows if r["fault_decisions"][fault] == kind]
+            timeline.add_trace(go.Scatter(
+                x=hits, y=[fault] * len(hits), mode="markers", name=f"{fault} {name}",
+                marker={**marker, "color": FAULT_COLORS[fault]}, showlegend=False))
+        alerted = [r["t_end_s"] for r in records if fault in r.get("alerts", [])]
+        timeline.add_trace(go.Scatter(
+            x=alerted, y=[fault] * len(alerted), mode="markers", showlegend=False,
+            marker={"symbol": "square", "size": 14, "opacity": 0.3,
+                    "color": FAULT_COLORS[fault]}, name=f"{fault} alert"))
+    timeline.update_layout(height=260, margin={"t": 40, "b": 20},
+                           title="Per-fault timeline (dot detected, x uncertain, "
+                                 "square active alert)",
+                           yaxis={"categoryorder": "array", "categoryarray": list(faults)})
+    return timeline
 
 
 def freshness(signal: str, t_now: float) -> str:
@@ -224,13 +294,18 @@ def live_view():
     t_now = state.stream_t
     records = state.records
     latest = records[-1] if records else None
+    multi = hasattr(model, "fault_classes")  # v2: one detector and alert per fault
     has_probability = bool(latest and "probability" in latest)
 
     cols = st.columns(7)
     cols[0].metric("Stream time", f"{t_now:.2f} s")
     cols[1].metric("Accepted", latest["accepted"] if latest else "warming up")
     cols[2].metric("Classifier", (latest["predicted"] or "-") if latest else "-")
-    if has_probability:
+    if multi:
+        cols[3].metric("Faults detected", len(latest["detected"]) if latest else "-",
+                       help="Each fault has its own calibrated detector and threshold, so "
+                            "several can be reported in the same window.")
+    elif has_probability:
         cols[3].metric("Calibrated confidence", f"{latest['probability']:.2f}",
                        help=f"Accepted only if ≥ {model.probability_min:.2f}; calibrated on "
                             "separate calibration engines (synthetic).")
@@ -242,11 +317,25 @@ def live_view():
     cols[6].metric("Processing / display",
                    f"{latest['processing_ms']:.0f} / {state.get('render_ms', 0):.0f} ms"
                    if latest else "-")
-    confirm = getattr(model, "confirm_updates", config["runtime"]["confirm_fault_updates"])
-    if latest and latest["alert"]:
-        st.error(f"ALERT: {latest['alert']} (confirmed by {confirm} consistent updates)")
+    if multi:
+        fault_cols = st.columns(len(model.fault_classes))
+        for col, fault in zip(fault_cols, model.fault_classes, strict=True):
+            col.metric(f"P({fault})",
+                       f"{latest['probabilities'][fault]:.2f}" if has_probability else "-",
+                       help=f"Detected at ≥ {model.thresholds[fault]:.2f}; calibrated on "
+                            "separate calibration engines (synthetic).")
+        active = latest.get("alerts", []) if latest else []
+        for fault in active:
+            st.error(f"ALERT: {fault} (confirmed by {model.confirm_updates[fault]} consistent "
+                     "updates of this fault)")
+        if not active:
+            st.success("No active alert")
     else:
-        st.success("No active alert")
+        confirm = getattr(model, "confirm_updates", config["runtime"]["confirm_fault_updates"])
+        if latest and latest["alert"]:
+            st.error(f"ALERT: {latest['alert']} (confirmed by {confirm} consistent updates)")
+        else:
+            st.success("No active alert")
 
     engine = state.engine
     window_s = config["analysis"]["window_s"]
@@ -307,31 +396,19 @@ def live_view():
     tele.update_layout(height=380, showlegend=False, margin={"t": 50, "b": 20})
     st.plotly_chart(tele, width="stretch")
 
-    timeline = go.Figure()
-    if records:
-        log = pd.DataFrame([{k: r[k] for k in ("t_end_s", "accepted", "alert")}
-                            for r in records])
-        timeline.add_trace(go.Scatter(x=log["t_end_s"], y=log["accepted"], mode="markers",
-                                      name="accepted decision"))
-        alerted = log[log["alert"].notna()]
-        timeline.add_trace(go.Scatter(x=alerted["t_end_s"], y=alerted["alert"], mode="markers",
-                                      marker={"symbol": "square", "size": 12, "opacity": 0.4},
-                                      name="active alert"))
+    timeline = multi_timeline(records) if multi else single_timeline(records)
     if show_truth:
-        from engine_diagnostics.pipeline.labels import load_truth  # evaluation only
+        from engine_diagnostics.pipeline.labels import fault_intervals, load_truth  # evaluation
 
         truth = load_truth(DATASETS[dataset]["truth"], run_id)
-        intervals = truth.get("active_intervals") or []
-        if intervals and not isinstance(intervals[0], list):
-            intervals = [intervals]
-        for a, b in intervals:
-            timeline.add_vrect(x0=a, x1=b, fillcolor="orange", opacity=0.15, line_width=0)
-        note = (f"truth: {truth['condition']}" if intervals else "truth: normal run")
+        intervals = fault_intervals(truth)
+        for fault, spans in intervals.items():
+            for a, b in spans:
+                timeline.add_vrect(x0=a, x1=b, fillcolor=FAULT_COLORS.get(fault, "orange"),
+                                   opacity=0.12, line_width=0)
+        note = (f"truth: {' + '.join(sorted(intervals))}" if intervals else "truth: normal run")
         timeline.add_annotation(x=duration / 2, y=1.08, yref="paper", text=note, showarrow=False)
-    timeline.update_layout(height=260, title="Decision timeline",
-                           xaxis={"range": [0, duration], "title": "s"},
-                           yaxis={"categoryorder": "array", "categoryarray": CLASS_ORDER},
-                           margin={"t": 40, "b": 20})
+    timeline.update_xaxes(range=[0, duration], title="s")
     st.plotly_chart(timeline, width="stretch")
 
     lower_left, lower_right = st.columns(2)
@@ -358,3 +435,33 @@ def live_view():
 
 
 live_view()
+
+
+def cross_engine_panel():
+    st.subheader("Cross-engine check (leave-one-engine-out, temporary model)")
+    report = (json.loads(REPORT_PATH.read_text(encoding="utf-8"))
+              if REPORT_PATH.is_file() else {})
+    cross = report.get("cross_domain")
+    if cross is None:
+        st.info("No cross-engine results. Run `engine-diagnostics train-temporary`.")
+        return
+    st.caption(f"{cross['status']}. Protocol: {cross['protocol']}.")
+    rows = []
+    for protocol, part in cross["results"].items():
+        for engine_id, metrics in [*part["engines"].items(), ("pooled", part["pooled"])]:
+            rows.append({"features": protocol, "held-out engine": engine_id,
+                         "windows": metrics["windows"],
+                         "macro-F1": round(metrics["macro_f1"], 3),
+                         **{f"recall {c}": round(v, 2) for c, v in metrics["recall"].items()}})
+    st.dataframe(pd.DataFrame(rows), hide_index=True)
+    pooled = cross["results"]["fused"]["pooled"]
+    labels = pooled["confusion_labels"]
+    st.dataframe(pd.DataFrame(pooled["confusion"], index=[f"true {c}" for c in labels],
+                              columns=[f"predicted {c}" for c in labels]))
+    st.caption("Pooled confusion of the fused SVM over all held-out engines. Report from "
+               f"model {report['model_version']}; regenerate with train-temporary after "
+               "changing data.")
+
+
+if dataset == HOLDOUT_DATASET:
+    cross_engine_panel()

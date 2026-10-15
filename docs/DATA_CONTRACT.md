@@ -107,19 +107,44 @@ dataset is identified by its manifest.
 inference. It contains:
 
 - `schema_version`, `run_id`, `engine_id`, `generator_version`
-- `condition`: one canonical class; `normal` for runs without a fault
+- `condition`: `normal`, one canonical fault class, or, for a run with several
+  simultaneous faults, their sorted names joined with `+`
+  (e.g. `knock_like+misfire`)
+- `conditions`: the list of faults in the run (empty for normal)
+- `faults`: one entry per fault with its own `condition`, `onset_s`,
+  `affected_cylinder`, `severity`, `severity_end`, `degradation`, `recovery_s`,
+  and `active_intervals`. Always a JSON list. Each fault has an independent
+  lifecycle, so onsets are staggered and recoveries differ
 - `onset_s`, `affected_cylinder` (`null` for normal runs), `severity` (0-1,
-  generator-specific meaning; 0 for normal runs)
-- `active_intervals`: `[start_s, end_s]` pairs where the fault is applied
-- `label_timeline`: `start_s`, `end_s`, `label` segments (`normal`, a fault
-  class, or `transition` for the second around onset)
+  generator-specific meaning; 0 for normal runs). For multi-fault runs these
+  summarize the list: earliest onset, the cylinder if all faults share one
+  (else `null`), and the largest severity; per-fault values are in `faults`
+- `active_intervals`: `[start_s, end_s]` pairs where at least one fault is applied
+- `label_timeline`: `start_s`, `end_s`, `label` segments. A label is `normal`,
+  the active fault set (sorted names joined with `+`), or `transition` for the
+  second around each change in that set; changes closer than 1 s share one
+  transition
 - `events`: every source event with `time_s`, `cylinder`, `kind`
-  (`combustion`, `valve_impact`, `knock_burst`), `intensity`, and `faulted`
+  (`combustion`, `valve_impact`, `knock_burst`), `intensity`, `faulted`, and
+  `fault` (the condition that changed or added it, or `""`). Truth written
+  before multi-fault support has no `fault` field or `faults` list and is read
+  as a single fault
 - `seed`: `master_seed` and the random-stream indices used for the run
 - Sampled datasets also record `split`, `challenge`, `profile_kind`,
   `degradation`, `severity_end`, `recovery_s`, and `disturbances` (impact rate,
   clip gain, noise scale, resonance shift, waveform gap, telemetry dropout).
   Event kinds include `unrelated_impact`. `scenarios.json` lists every run.
+
+### Multi-fault generation
+
+MATLAB applies a run's faults in the fixed order misfire → knock-like →
+valve-clearance-like. Knock and valve events are timed after the misfire RPM
+dips, and a misfired (weakened) power stroke on the same cylinder cannot also
+knock. A batch configuration with `fault_sets` (core_v2) lists each set of
+faults (empty = normal) and `runs_per_engine`; `challenge.fault_sets` lists
+one run per set on each test engine. A batch may set its own `master_seed`.
+Single-fault scenarios draw exactly the same random numbers as before, so
+core_v1 and the integration batch regenerate bit-identically.
 
 ## Units and context
 
@@ -148,18 +173,35 @@ Ordered model input names are `engine_diagnostics.pipeline.features.feature_name
 samples in `[t-2, t)` and the latest valid telemetry strictly before `t`. A
 window's quality is `ok`, `clipped`, `missing_waveform`, or `stale_telemetry`.
 The labeled table (`build-features`) adds bookkeeping columns `run_id`,
-`engine_id`, `split`, `t_end_s`, `label`, `quality`; these are never model inputs.
-A window is labeled only when it lies inside one truth segment; otherwise it is
-`transition` and excluded from training.
+`engine_id`, `split`, `subset`, `t_end_s`, `label`, `quality`, and per-fault
+labels `y_misfire`, `y_knock_like`, `y_valve_clearance_like`; these are never
+model inputs. A window is labeled only when it lies inside one truth segment;
+otherwise it is `transition` and excluded from training. A per-fault label is
+1 when the window lies inside that fault's active interval (more than 0.5 s
+after a change), 0 when it is more than 0.5 s clear of every interval, and NaN
+otherwise; NaN windows are ignored for that fault only.
 
 ## Temporary model
 
 `engine-diagnostics train-temporary` writes `artifacts/models/temporary.joblib`
-(model version `temporary-0.1.0`, feature version, ordered feature names,
+(model version `temporary-0.2.0`, feature version, ordered feature names,
 training runs) and `reports/generated/temporary_model_report.json`. Each window
 decision has `predicted` (SVM class), `margin`, `anomaly_score`, `anomalous`,
 and `accepted` (the class, or `uncertain` when the SVM and the normal baseline
 disagree or the margin is small).
+
+## Multi-fault model (v2)
+
+`engine-diagnostics train-multi` writes `artifacts/models/multifault_v2.joblib`
+(model version `v2.0.0`) and `reports/generated/training_v2.json`. Each window
+decision has `probabilities` (calibrated P(present) per fault),
+`fault_decisions` (`fault`, `uncertain`, or `normal` per fault), `detected`,
+`uncertain_faults`, `anomaly_score`, `anomalous`, and `accepted` (the detected
+set joined with `+`, else `uncertain` if a fault is borderline or the window
+deviates from the normal baseline, else `normal`). Replay records add `alerts`,
+the list of active per-fault alerts, and `alert`, that list joined with `+`.
+`engine-diagnostics evaluate-multi` scores the frozen model once on the core_v2
+test engines and writes `reports/generated/final_evaluation_v2.json`.
 
 ## Prediction records
 

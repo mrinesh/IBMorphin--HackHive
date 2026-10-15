@@ -34,7 +34,7 @@ def episodes(times: list[float], alerts: list) -> list[tuple[float, float, str]]
 
 def _intervals(truth: dict[str, Any]) -> list[tuple[float, float]]:
     raw = truth.get("active_intervals") or []
-    if raw and not isinstance(raw[0], list):
+    if raw and not isinstance(raw[0], (list, tuple)):
         raw = [raw]
     return [(float(a), float(b)) for a, b in raw]
 

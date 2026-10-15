@@ -57,6 +57,8 @@ We built a complete, reproducible engine-condition workflow that combines an aco
 
 The system reliably separates healthy operation from strong faults and explains its alerts, but it misses mild faults and does not generalize to the reserved high-noise, extreme-RPM challenge conditions. Those failures are reported, not tuned away.
 
+**Simultaneous faults (v2, §11.7).** A second MATLAB dataset, `core_v2`, puts 0, 1, 2, or all 3 faults in the same run, each with its own onset, cylinder, and severity. A v2 model with one calibrated detector and one alert per fault, plus new crank-synchronous vibration features, scored on four new held-out engines: window macro-F1 0.884 (the single-label v1 model scores 0.621 on the same windows and can never name two faults), every sustained fault alerted in 10 of 12 two-fault runs and 4 of 4 three-fault runs, and misfire/knock/valve sustained recall 0.96/1.00/0.94. Knock false alerts (0.30 per fault-free minute) exceeded the 0.2 goal, valve window recall is 0.62, and the mild challenge combinations are largely missed.
+
 ## 2. Problem and objectives
 
 Engine signals change with speed, load, temperature, transmission path, and sensor placement, so a louder signal or a new spectral peak is not by itself a diagnosis. The problem statement asks for multiple sensor streams to be analyzed for recognizable signatures, normal baselines, fault recognition, and wear-related analysis, presented through a dashboard.
@@ -303,11 +305,47 @@ The most confident test errors are late windows of knock run `run_00222` (severi
 | Degradation indicator | Median Spearman ≥ 0.7 | 0.906 | Met |
 | Demo stability | Three offline rehearsals | See docs/TESTING.md | Pending at time of writing |
 
+### 11.7 Simultaneous faults: dataset `core_v2` and the v2 model
+
+**Data (MATLAB, generator 0.3.0).** 30 new engines (`engine_031`–`engine_060`, own master seed), split 18 train / 4 tuning / 4 calibration / 4 test. Each engine has 2 normal runs, one run per single fault, one per pair, and one with all three: 270 core runs of 30 s, plus 16 mild multi-fault challenge runs on the test engines. Faults are applied in physical order (misfire → knock → valve), each with an independent onset, cylinder, severity, recovery, and degradation; a misfired stroke cannot also knock. All 286 runs passed MATLAB and Python validation. In the generator check, every fault keeps at least half of its single-fault signature effect inside every pair and the triple (weakest: valve in the triple, 52%).
+
+**Model (v2.0.0).** One RBF SVM per fault (present vs absent), sigmoid-calibrated on the calibration engines, with its own threshold, uncertain band, and alert confirmation count chosen on tuning runs under the 0.2 false-alerts-per-minute goal. Each detector also chose its inputs on the tuning engines: misfire uses the base features plus new stroke-synchronous features, knock uses only the stroke-synchronous set, and valve uses vibration plus stroke-synchronous features. The new features (version 0.3.0) reference every 180° firing interval to the combustion onset and measure, per crank-angle sector and band, how much one of the four stroke groups (one cylinder) stands out. On the tuning engines they raised knock F1 from 0.57 to 0.97 and valve from 0.61 to 0.86. Test engines were scored once, after the model was frozen (model sha256 `ffbfa1be…`, manifest `825e2432…`).
+
+**Core test windows (1,652 windows with every fault label known; 36 runs on 4 engines).**
+
+| Fault | Precision | Recall | F1 | v1 recall (same windows) |
+|---|---|---|---|---|
+| Misfire | 1.00 | 1.00 | 1.00 | 0.89 |
+| Knock-like | 0.95 | 0.87 | 0.91 | 0.45 |
+| Valve-clearance-like | 0.94 | 0.62 | 0.75 | 0.18 |
+
+| Faults truly active | Windows | Exact set correct | Every true fault detected | No false fault |
+|---|---|---|---|---|
+| 0 | 971 | 0.99 | — | 0.99 |
+| 1 | 362 | 0.78 | 0.79 | 0.99 |
+| 2 | 263 | 0.66 | 0.71 | 0.95 |
+| 3 | 56 | 0.63 | 0.63 | 1.00 |
+
+The frozen single-label v1 model, scored on the same windows, reaches macro-F1 0.621 and detects every true fault in 0% of two- and three-fault windows, because it can name only one class.
+
+**Core replay (packet replay of all 36 test runs, one alert per fault).**
+
+| Fault | Sustained events | Detected | Latency p50 / p95 | False alert episodes / fault-free minutes |
+|---|---|---|---|---|
+| Misfire | 25 | 96% | 1.4 / 2.6 s | 0 / 12.4 (0.00 per min) |
+| Knock-like | 20 | 100% | 1.3 / 4.0 s | 4 / 13.2 (0.30 per min) |
+| Valve-clearance-like | 16 | 94% | 7.5 / 13.9 s | 2 / 11.6 (0.17 per min) |
+
+Every sustained fault was alerted in 12 of 12 one-fault runs, 10 of 12 two-fault runs, and 4 of 4 three-fault runs. The two incomplete two-fault runs: in `run_00258` the misfire alert did not start within its interval; in `run_00251` the valve alert fired 0.1 s before the valve fault began (triggered by knock on the same cylinder), so it counts as a false alert and the real valve fault as undetected. Two of eight normal runs raised a false knock alert. Processing is 23 ms p50 / 27 ms p95 per decision (the stroke-synchronous features add about 12 ms).
+
+**Challenge (16 mild multi-fault runs: severity 0.15–0.3, reserved RPM bands, 2× noise).** Window macro-F1 0.444; misfire window recall 0.96 but knock 0.03 and valve 0.64 with many false positives; every sustained fault alerted in 1 of 12 two-fault runs and 0 of 4 three-fault runs. As with v1, mild faults under unseen conditions are not handled.
+
 ## 12. Limitations and risks
 
 - **Synthetic only.** The generator is not a validated digital twin; audio and vibration units are nominal. High scores here do not transfer to a real engine without real measurements.
 - **Heuristic fault physics.** Fault mappings are designed to be plausible, not measured. The valve-clearance signature in particular is subtle, and the model detects it least well.
 - **Mild faults and new conditions.** Low-severity knock (as low as 1.14× event-locked energy) and the challenge conditions are largely missed.
+- **Simultaneous faults (v2).** Valve detection is the weak link (window recall 0.62), knock false alerts exceed the goal on the test engines (0.30 per fault-free minute, 4 episodes), and a fault on the same cylinder as another can trigger the wrong detector. Only one fault interaction (misfire suppresses knock) is modeled.
 - **Small test set.** Four test engines and 7.8 normal minutes; the zero-false-alert result has a small denominator. Windows are correlated and are not independent trials.
 - **Low-rate RPM.** 50 Hz RPM supports context and firing-period estimates, not crankshaft-acceleration misfire diagnosis or cylinder identification.
 - **Not implemented:** clock offset/drift handling in replay, a separate unsupported-operation state, engine-resampled confidence intervals.
@@ -318,7 +356,7 @@ The most confident test errors are late windows of knock run `run_00222` (severi
 | Item | Benefit | Prerequisite |
 |---|---|---|
 | Real recordings | Measure the synthetic-to-real gap | Licensed data with operating and fault labels |
-| Stronger valve and mild-fault signatures | Better recall on subtle faults | Cycle-synchronous averaging with a high-rate speed signal |
+| Stronger valve and mild-fault signatures | Better recall on subtle faults | Stroke-synchronous features now exist (v2); a high-rate speed signal would give exact crank angle |
 | Robustness training | Challenge-condition generalization | Wider training distributions for noise and RPM |
 | Clock drift and three-axis vibration | Realistic acquisition | Replay support for offsets; new rendering |
 | CNN comparison | Learned representations | Frozen SVM baseline (available) |
@@ -343,6 +381,11 @@ uv run --all-extras engine-diagnostics train
 uv run --all-extras engine-diagnostics evaluate      # scores the test engines once
 uv run --all-extras streamlit run dashboard/app.py
 uv run --all-extras --group quality pytest
+
+# Multi-fault dataset and v2 model
+#   MATLAB: addpath('matlab'); generate_dataset(Config="configs/core_v2.json");   % ~38 min
+scripts/run_pipeline_v2.sh            # validate, build features, train-multi
+uv run --all-extras engine-diagnostics evaluate-multi   # scores the test engines once
 ```
 
 Generated data, models, and reports are excluded from Git and are reproduced by these commands; the manifest and model hashes above identify the exact versions reported.

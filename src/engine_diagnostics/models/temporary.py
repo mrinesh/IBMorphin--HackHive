@@ -23,7 +23,7 @@ from sklearn.svm import SVC
 
 from engine_diagnostics.pipeline.features import FEATURE_VERSION, feature_names
 
-MODEL_VERSION = "temporary-0.1.0"
+MODEL_VERSION = "temporary-0.2.0"
 NORMAL = "normal"
 UNCERTAIN = "uncertain"
 
@@ -84,18 +84,28 @@ def trainable(table: pd.DataFrame, split: str) -> pd.DataFrame:
     return rows.reset_index(drop=True)
 
 
-def fit_svm(train: pd.DataFrame, names: list[str], C: float = 10.0, gamma="scale"):
+def engine_balanced_weights(train: pd.DataFrame) -> np.ndarray:
+    """Per-window weights giving each engine equal total weight (mean weight 1)."""
+    domain_sizes = train.groupby("engine_id")["engine_id"].transform("size").to_numpy()
+    return len(train) / (train["engine_id"].nunique() * domain_sizes)
+
+
+def fit_svm(train: pd.DataFrame, names: list[str], C: float = 10.0, gamma="scale",
+            sample_weight: np.ndarray | None = None):
+    # Unweighted by default so the frozen v1 model (models/diagnostic.py) is unchanged.
     model = make_pipeline(StandardScaler(),
                           SVC(kernel="rbf", C=C, gamma=gamma, class_weight="balanced",
                               decision_function_shape="ovr"))
-    return model.fit(train[names].to_numpy(), train["label"].to_numpy())
+    return model.fit(train[names].to_numpy(), train["label"].to_numpy(),
+                     standardscaler__sample_weight=sample_weight,
+                     svc__sample_weight=sample_weight)
 
 
 def fit_temporary_model(table: pd.DataFrame, anomaly_quantile: float = 0.99,
                         margin_threshold: float = 0.3) -> TemporaryModel:
     train = trainable(table, "train")
     names = feature_names()
-    classifier = fit_svm(train, names)
+    classifier = fit_svm(train, names, sample_weight=engine_balanced_weights(train))
     baseline_names = [n for n in names if not n.startswith("ctx_")]
     normal = train.loc[train["label"] == NORMAL, baseline_names].to_numpy()
     median = np.median(normal, axis=0)
@@ -110,7 +120,18 @@ def fit_temporary_model(table: pd.DataFrame, anomaly_quantile: float = 0.99,
     normal_scores = model.anomaly_score(train.loc[train["label"] == NORMAL, names].to_numpy())
     model.anomaly_threshold = float(np.quantile(normal_scores, anomaly_quantile))
     model.notes = {"anomaly_quantile": anomaly_quantile, "train_windows": len(train),
-                   "threshold_source": "training normal windows (no tuning partition yet)"}
+                   "threshold_source": "training normal windows (no tuning partition yet)",
+                   "domain_strategy": "equal total SVM sample weight per training engine",
+                   "domain_limit": "anomaly baseline uses pooled source-engine data; "
+                                   "no target-domain adaptation"}
+    return model
+
+
+def fit_holdout_model(table: pd.DataFrame, engine_id: str) -> TemporaryModel:
+    """Temporary model refitted without one engine, so replay sees that engine unseen."""
+    model = fit_temporary_model(table[table["engine_id"] != engine_id])
+    model.model_version = f"{MODEL_VERSION}-without-{engine_id}"
+    model.notes["held_out_engine"] = engine_id
     return model
 
 
@@ -142,7 +163,7 @@ ABLATIONS = {
 
 
 def evaluate(model: TemporaryModel, table: pd.DataFrame) -> dict[str, Any]:
-    """Held-out-engine check: SVM classes, accepted decisions, and modality ablations."""
+    """Held-out-engine check plus leave-one-engine-out source-domain evaluation."""
     train, test = trainable(table, "train"), trainable(table, "test")
     truth = test["label"].to_numpy()
     results = model.predict(test[model.feature_names].to_numpy())
@@ -164,10 +185,53 @@ def evaluate(model: TemporaryModel, table: pd.DataFrame) -> dict[str, Any]:
         "normal_windows_flagged_anomalous": float(np.mean(
             [r["anomalous"] for r, t in zip(results, truth, strict=True) if t == NORMAL])),
         "ablations": {},
+        "cross_domain": evaluate_leave_one_engine_out(table, model.classes),
     }
     for name, keep in ABLATIONS.items():
         names = [n for n in model.feature_names if keep(n)]
-        svm = fit_svm(train, names)
+        svm = fit_svm(train, names, sample_weight=engine_balanced_weights(train))
         report["ablations"][name] = classification_metrics(
             truth, svm.predict(test[names].to_numpy()), model.classes)
     return report
+
+
+def evaluate_leave_one_engine_out(table: pd.DataFrame, classes: list[str]) -> dict[str, Any]:
+    """Evaluate unseen synthetic engines by holding each training engine out.
+
+    Reports both the deployed fused feature set and a waveform-only variant to
+    expose reliance on engine-specific telemetry context.
+    """
+    source = trainable(table, "train")
+    feature_sets = {
+        "fused": feature_names(),
+        "waveform_only": [n for n in feature_names() if not n.startswith("ctx_")],
+    }
+    results = {}
+    for protocol, names in feature_sets.items():
+        predictions, truths, per_engine = [], [], {}
+        for engine_id in sorted(source["engine_id"].unique()):
+            fit = source[source["engine_id"] != engine_id]
+            holdout = source[source["engine_id"] == engine_id]
+            if fit.empty or holdout.empty:
+                continue
+            classifier = fit_svm(fit, names, sample_weight=engine_balanced_weights(fit))
+            truth = holdout["label"].to_numpy()
+            predicted = classifier.predict(holdout[names].to_numpy())
+            predictions.extend(predicted)
+            truths.extend(truth)
+            per_engine[engine_id] = classification_metrics(truth, predicted, classes)
+        pooled = classification_metrics(np.asarray(truths), np.asarray(predictions), classes)
+        per_engine_f1 = [part["macro_f1"] for part in per_engine.values()]
+        results[protocol] = {
+            "macro_f1_mean_by_engine": float(np.mean(per_engine_f1)) if per_engine_f1 else 0.0,
+            "macro_f1_std_by_engine": float(np.std(per_engine_f1)) if per_engine_f1 else 0.0,
+            "pooled": pooled,
+            "engines": per_engine,
+        }
+    return {
+        "status": ("synthetic leave-one-engine-out domain generalization check; "
+                   "not a real-world claim"),
+        "source_engines": sorted(source["engine_id"].unique()),
+        "protocol": "train on all but one training engine, evaluate on the unseen engine",
+        "results": results,
+    }

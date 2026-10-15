@@ -3,9 +3,12 @@ function report = validate_run_matlab(runDir, truthPath)
 %   report = validate_run_matlab('data/raw/run_00001', ...
 %       'evaluation_truth/run_00001_events.json')
 %   Checks lengths, dtype, finite values, clipping, firing-event rate against
-%   observed RPM, fault events after onset, and the condition's intended
-%   signature (knock: 5-9 kHz energy after knocked vs unknocked combustion
-%   must exceed 1.1x; below 2x it is reported as faint).
+%   observed RPM, and, for each fault in the run, that its events start only
+%   after its own onset and that its intended signature is present (knock:
+%   5-9 kHz energy after knocked vs unknocked combustion must exceed 1.1x;
+%   below 2x it is reported as faint). Multi-fault runs also check that no
+%   knock burst follows a misfired stroke on the same cylinder. Truth written
+%   before per-fault fields existed is read as one fault.
 %   Python validate-runs repeats the format checks independently.
 
     config = load_project_config();
@@ -59,45 +62,69 @@ function report = validate_run_matlab(runDir, truthPath)
         issues(end + 1) = sprintf("combustion events %d vs expected %.1f from RPM", observed, expected);
     end
 
-    onset = truth.onset_s;
-    if isempty(onset)
-        onset = Inf;  % normal run: no fault onset
-    end
-    if any(faulted & times < onset)
-        issues(end + 1) = "faulted events occur before onset";
+    cylinders = [truth.events.cylinder]';
+    faults = truth_faults(truth);
+    if isfield(truth.events, 'fault')
+        eventFault = string({truth.events.fault})';
+    else  % older truth: every faulted event belongs to the run's one condition
+        eventFault = repmat("", numel(kinds), 1);
+        eventFault(faulted) = string(truth.condition);
     end
     metrics.faulted_events = nnz(faulted);
-    switch truth.condition
-        case 'misfire'
-            ok = any(faulted & kinds == "combustion");
-        case 'knock_like'
-            % Compare 5-9 kHz energy just after knocked vs unknocked combustion
-            % on the affected cylinder; robust to RPM/load drift over the run.
-            cylinders = [truth.events.cylinder]';
-            bursts = times(kinds == "knock_burst");
-            fired = times(kinds == "combustion" & cylinders == truth.affected_cylinder ...
-                & times >= onset);
-            knocked = arrayfun(@(t) any(bursts > t & bursts <= t + 0.005), fired);
-            fs = w.vibration_fs_hz;
-            [b, a] = butter(4, [5000 9000] / (fs / 2), 'bandpass');
-            energy = filtfilt(b, a, fillmissing(double(w.vibration), "constant", 0)) .^ 2;
-            windowEnergy = arrayfun(@(t) sum(energy(max(1, round(t * fs)) ...
-                + (0:round(0.005 * fs)))), fired(fired < duration - 0.006));
-            knocked = knocked(fired < duration - 0.006);
-            ratio = mean(windowEnergy(knocked)) / mean(windowEnergy(~knocked));
-            metrics.knock_band_ratio = ratio;
-            % The check confirms the intervention exists. Low-severity knock is
-            % intentionally faint (ratio near 1.1-2); it is reported, not failed.
-            metrics.knock_faint = ratio < 2;
-            ok = any(knocked) && any(~knocked) && ratio > 1.1;
-        case 'valve_clearance_like'
-            ok = any(faulted & kinds == "valve_impact");
-        otherwise
-            ok = ~any(faulted);
+    if isempty(faults) && any(faulted)
+        issues(end + 1) = "normal run has faulted events";
     end
-    if ~ok
-        issues(end + 1) = "intended " + truth.condition + " signature not found";
+    unexpected = setdiff(unique(eventFault(eventFault ~= "")), string({faults.condition}));
+    if ~isempty(unexpected)
+        issues(end + 1) = "events tagged with unlisted fault " + unexpected(1);
     end
+    for k = 1:numel(faults)
+        f = faults(k);
+        condition = string(f.condition);
+        mine = eventFault == condition;
+        if any(mine & times < f.onset_s)
+            issues(end + 1) = condition + ": faulted events occur before onset"; %#ok<AGROW>
+        end
+        switch condition
+            case "misfire"
+                ok = any(mine & kinds == "combustion");
+            case "knock_like"
+                % Compare 5-9 kHz energy just after knocked vs unknocked combustion
+                % on the affected cylinder; robust to RPM/load drift over the run.
+                bursts = times(kinds == "knock_burst" & mine);
+                fired = times(kinds == "combustion" & cylinders == f.affected_cylinder ...
+                    & times >= f.onset_s & eventFault ~= "misfire");
+                knocked = arrayfun(@(t) any(bursts > t & bursts <= t + 0.005), fired);
+                fs = w.vibration_fs_hz;
+                [b, a] = butter(4, [5000 9000] / (fs / 2), 'bandpass');
+                energy = filtfilt(b, a, fillmissing(double(w.vibration), "constant", 0)) .^ 2;
+                windowEnergy = arrayfun(@(t) sum(energy(max(1, round(t * fs)) ...
+                    + (0:round(0.005 * fs)))), fired(fired < duration - 0.006));
+                knocked = knocked(fired < duration - 0.006);
+                ratio = mean(windowEnergy(knocked)) / mean(windowEnergy(~knocked));
+                metrics.knock_band_ratio = ratio;
+                % The check confirms the intervention exists. Low-severity knock is
+                % intentionally faint (ratio near 1.1-2); it is reported, not failed.
+                metrics.knock_faint = ratio < 2;
+                ok = any(knocked) && any(~knocked) && ratio > 1.1;
+            case "valve_clearance_like"
+                ok = any(mine & kinds == "valve_impact");
+        end
+        if ~ok
+            issues(end + 1) = "intended " + condition + " signature not found"; %#ok<AGROW>
+        end
+    end
+    % A misfired (weakened) stroke cannot also knock.
+    misfired = find(eventFault == "misfire" & kinds == "combustion");
+    burstIdx = find(kinds == "knock_burst");
+    for m = misfired'
+        if any(cylinders(burstIdx) == cylinders(m) & times(burstIdx) > times(m) ...
+                & times(burstIdx) <= times(m) + 0.005)
+            issues(end + 1) = "knock burst follows a misfired stroke"; %#ok<AGROW>
+            break
+        end
+    end
+    metrics.faults = strjoin(string({faults.condition}), "+");
 
     report = struct('run_id', metadata.run_id, 'passed', isempty(issues), ...
         'issues', issues, 'metrics', metrics);
@@ -106,5 +133,23 @@ function report = validate_run_matlab(runDir, truthPath)
     else
         fprintf('%s: FAILED\n', metadata.run_id);
         fprintf('  %s\n', issues);
+    end
+end
+
+function faults = truth_faults(truth)
+    % Per-fault lifecycle list; older truth describes its one fault in flat fields.
+    faults = struct('condition', {}, 'onset_s', {}, 'affected_cylinder', {});
+    if isfield(truth, 'faults')
+        raw = truth.faults;
+        if iscell(raw)
+            raw = [raw{:}];
+        end
+        for k = 1:numel(raw)
+            faults(end + 1) = struct('condition', raw(k).condition, ...
+                'onset_s', raw(k).onset_s, 'affected_cylinder', raw(k).affected_cylinder); %#ok<AGROW>
+        end
+    elseif ~strcmp(truth.condition, 'normal')
+        faults = struct('condition', truth.condition, 'onset_s', truth.onset_s, ...
+            'affected_cylinder', truth.affected_cylinder);
     end
 end
