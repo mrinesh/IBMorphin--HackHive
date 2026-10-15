@@ -80,6 +80,24 @@ def test_every_demo_preset_renders_with_its_model_panels():
         assert any(m.label == expected for m in app.metric), preset["name"]
 
 
+@pytest.mark.skipif(not V1_MODEL.is_file() or not (ROOT / "data/raw/core_v1/run_00228").is_dir(),
+                    reason="needs core_v1 runs and the v1 model")
+def test_active_alert_shows_linked_evidence_panel():
+    app = AppTest.from_file(str(APP), default_timeout=120).run()
+    widget(app.sidebar.selectbox, "Dataset").set_value("core_v1").run()
+    widget(app.sidebar.selectbox, "Run").set_value("run_00228").run()  # misfire preset
+    widget(app.sidebar.slider, "Seek (s)").set_value(19.0).run()
+    widget(app.sidebar.button, "Seek").click().run()
+    assert not app.exception
+    assert app.session_state["records"][-1]["alert"] == "misfire"
+    assert any(s.value == "Evidence for active alerts" for s in app.subheader)
+    text = " ".join(m.value for m in app.markdown)
+    assert "Possible misfire" in text
+    for claim in ("irregular firing rhythm", "repeated abnormal pulses",
+                  "accompanying fluctuation", "Assessment:"):
+        assert claim in text
+
+
 needs_holdout = pytest.mark.skipif(
     not (ROOT / "data/processed/integration_v1_features.parquet").is_file()
     or not (ROOT / "data/raw/run_00014").is_dir(),

@@ -27,7 +27,14 @@ from scipy.signal import spectrogram, welch
 from engine_diagnostics.config import load_config
 from engine_diagnostics.data.run_io import find_runs, load_run, validate_run
 from engine_diagnostics.models.temporary import fit_holdout_model
-from engine_diagnostics.pipeline.features import HIGH_ENVELOPE_HZ, MODALITIES, _band_envelope
+from engine_diagnostics.pipeline.features import (
+    HIGH_ENVELOPE_HZ,
+    MODALITIES,
+    _band_envelope,
+    _firing_rate_hz,
+    window_slice,
+)
+from engine_diagnostics.runtime.evidence import EvidencePanel, build_evidence
 from engine_diagnostics.runtime.replay import ReplayEngine, packets
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -55,6 +62,11 @@ CLASS_ORDER = ["normal", "misfire", "knock_like", "valve_clearance_like", "uncer
 FAULT_COLORS = {"misfire": "#d62728", "knock_like": "#ff7f0e", "valve_clearance_like": "#9467bd"}
 VALVE = "valve_clearance_like"
 DEGRADATION_WINDOW = 10
+# Evidence panels: each signal's statement and its highlighted segments share a color.
+SIGNAL_COLORS = {"sound": "#1f77b4", "vibration": "#2ca02c", "rpm": "#d62728"}
+SIGNAL_TAGS = {"sound": "blue", "vibration": "green", "rpm": "red"}
+SIGNAL_NAMES = {"sound": "Sound", "vibration": "Vibration", "rpm": "RPM"}
+WAVE_ROWS = {"sound": [1], "vibration": [2, 3]}  # rows of the waveform figure
 
 st.set_page_config(page_title="Engine replay", layout="wide")
 
@@ -229,6 +241,75 @@ def evidence_table(record) -> tuple[pd.DataFrame, bool]:
     return table, matched
 
 
+def feature_z(record) -> dict[str, float]:
+    """Robust z of every baseline feature against the model's normal reference."""
+    names = model.baseline_names
+    values = np.array([record["features"][model.feature_names.index(n)] for n in names])
+    (median, scale), _ = reference_stats(record)
+    return dict(zip(names, (values - median) / scale, strict=True))
+
+
+def active_alerts(record) -> list[str]:
+    if record is None:
+        return []
+    if hasattr(model, "fault_classes"):
+        return list(record.get("alerts", []))
+    return [record["alert"]] if record["alert"] else []
+
+
+def alert_evidence(records, fault: str) -> EvidencePanel | None:
+    """Evidence from the latest decision window with good quality."""
+    record = next((r for r in reversed(records) if r["quality"] == "ok"), None)
+    if record is None:
+        return None
+    t_end, window_s = record["t_end_s"], config["analysis"]["window_s"]
+    rates = {m: getattr(bundle, f"{m}_fs_hz") for m in MODALITIES}
+    waves = {m: getattr(bundle, m)[window_slice(t_end, rates[m], getattr(bundle, f"{m}_t0_s"),
+                                                config)] for m in MODALITIES}
+    tel = bundle.telemetry
+    rpm = tel[(tel["signal"] == "rpm") & (tel["valid"] == 1)
+              & (tel["t_s"] >= t_end - window_s) & (tel["t_s"] < t_end)]
+    firing_hz = _firing_rate_hz(record["context"]["rpm"], config["engine"])
+    return build_evidence(fault, waves, rates, t_end, window_s, rpm["t_s"].to_numpy(),
+                          rpm["value"].to_numpy(), firing_hz, feature_z(record))
+
+
+def evidence_figure(panel: EvidencePanel) -> go.Figure:
+    window_s = config["analysis"]["window_s"]
+    fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.08,
+                        subplot_titles=[f"{SIGNAL_NAMES[i.signal]}: {i.trace_label}"
+                                        for i in panel.indicators])
+    for row, ind in enumerate(panel.indicators, start=1):
+        fig.add_trace(go.Scattergl(x=ind.trace_t, y=ind.trace_y, name=ind.trace_label,
+                                   line={"width": 1, "color": "#555"}), row=row, col=1)
+        for a, b in ind.segments:
+            fig.add_vrect(x0=a, x1=b, fillcolor=SIGNAL_COLORS[ind.signal], opacity=0.3,
+                          line_width=0, row=row, col=1)
+    fig.update_xaxes(range=[panel.t_end_s - window_s, panel.t_end_s])
+    fig.update_xaxes(title="s", row=3, col=1)
+    fig.update_layout(height=420, showlegend=False, margin={"t": 40, "b": 20})
+    return fig
+
+
+def render_evidence(panel: EvidencePanel) -> None:
+    color = FAULT_COLORS.get(panel.fault, "#888")
+    with st.container(border=True):
+        st.markdown(f"<h4 style='margin:0;color:{color}'>{panel.headline}</h4>",
+                    unsafe_allow_html=True)
+        st.caption(f"Window {panel.t_end_s - config['analysis']['window_s']:.1f}-"
+                   f"{panel.t_end_s:.1f} s. Shaded segments below and on the waveform and RPM "
+                   "charts match each signal's color.")
+        for ind in panel.indicators:
+            count = f" · {len(ind.segments)} highlighted" if ind.segments else ""
+            st.markdown(f":{SIGNAL_TAGS[ind.signal]}[■ **{SIGNAL_NAMES[ind.signal]}:**] "
+                        f"{ind.claim} — **{ind.status}**{count}  \n"
+                        f"<small>{ind.detail}</small>", unsafe_allow_html=True)
+        st.markdown(f"**Assessment:** {panel.assessment}")
+        st.plotly_chart(evidence_figure(panel), width="stretch", key=f"evidence_{panel.fault}")
+        st.caption("Indicators compare this window with the model's normal reference for the same "
+                   "operating range. They show what changed; they do not prove a cause.")
+
+
 def single_timeline(records) -> go.Figure:
     timeline = go.Figure()
     if records:
@@ -337,6 +418,13 @@ def live_view():
         else:
             st.success("No active alert")
 
+    panels = [p for p in (alert_evidence(records, f) for f in active_alerts(latest)) if p]
+    if panels:
+        st.subheader("Evidence for active alerts")
+        for col, panel in zip(st.columns(len(panels)), panels, strict=True):
+            with col:
+                render_evidence(panel)
+
     engine = state.engine
     window_s = config["analysis"]["window_s"]
     left, right = st.columns(2)
@@ -361,6 +449,12 @@ def live_view():
                 waves.add_trace(go.Scattergl(x=t[::DISPLAY_DECIMATION],
                                              y=env[::DISPLAY_DECIMATION], name="envelope",
                                              line={"width": 1}), row=3, col=1)
+    for panel in panels:  # link: same segments and colors as the evidence panels
+        for ind in panel.indicators:
+            for row in WAVE_ROWS.get(ind.signal, []):
+                for a, b in ind.segments:
+                    waves.add_vrect(x0=a, x1=b, fillcolor=SIGNAL_COLORS[ind.signal],
+                                    opacity=0.2, line_width=0, row=row, col=1)
     waves.update_layout(height=460, showlegend=False, margin={"t": 40, "b": 20})
     psd.update_layout(height=460, title="PSD of current window (dB)", xaxis_title="kHz",
                       margin={"t": 40, "b": 20})
@@ -392,6 +486,10 @@ def live_view():
         rows = received_tele[received_tele["signal"] == signal]
         tele.add_trace(go.Scatter(x=rows["t_s"], y=rows["value"], name=signal),
                        row=k // 3 + 1, col=k % 3 + 1)
+    for panel in panels:
+        for a, b in next(i for i in panel.indicators if i.signal == "rpm").segments:
+            tele.add_vrect(x0=a, x1=b, fillcolor=SIGNAL_COLORS["rpm"], opacity=0.3,
+                           line_width=0, row=1, col=1)
     tele.update_xaxes(range=[0, duration])
     tele.update_layout(height=380, showlegend=False, margin={"t": 50, "b": 20})
     st.plotly_chart(tele, width="stretch")

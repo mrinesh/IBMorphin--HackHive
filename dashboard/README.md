@@ -42,6 +42,13 @@ shades each fault's own active intervals.
   default, loaded separately, never passed to the engine)
 - Three largest robust deviations from the normal reference of the same RPM/load
   bin (v1)
+- Evidence panel per active alert (`runtime/evidence.py`): a fault-specific claim
+  for sound, vibration, and RPM (e.g. misfire: irregular firing rhythm, repeated
+  abnormal pulses, accompanying RPM fluctuation), each rated supports / weak / not
+  seen from robust z-scores of the model's own features, plus an overall assessment.
+  The weak, missing, or burst firings and RPM dips are shaded in the panel's chart
+  and, in the same colors, on the waveform and RPM charts. RPM is "not expected" for
+  knock and valve faults. Valve-clearance evidence is usually weak, matching the model
 - Simulated valve-wear indicator: 5 s rolling mean of the calibrated
   valve-clearance probability (accelerated simulation, not remaining life)
 - "Hold out this run's engine" (integration dataset, training engines only): replays with a model
