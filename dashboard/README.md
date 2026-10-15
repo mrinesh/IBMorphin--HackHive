@@ -1,8 +1,47 @@
-# Dashboard workstream
+# Replay dashboard
 
-The Streamlit implementation begins after a small MATLAB export loads correctly
-through the common Python feature pipeline. No dashboard application exists yet.
+```powershell
+uv run --all-extras streamlit run dashboard/app.py
+```
 
-Planned panels: synthetic/replay status, telemetry, audio/vibration traces, PSD,
-spectrogram, envelope, prediction/evidence, quality state, fault timeline, and a
-simulated degradation indicator. Inference must drive predictions during replay.
+`.streamlit/config.toml` keeps the server on `localhost` and disables usage
+statistics. The app lists every dataset whose runs and model exist:
+
+| Dataset | Runs | Model |
+|---|---|---|
+| `core_v1` (final) | `data/raw/core_v1` | `artifacts/models/diagnostic_v1.joblib` (`engine-diagnostics train`) |
+| `integration_v1` | `data/raw` | `artifacts/models/temporary.joblib` (`engine-diagnostics train-temporary`) |
+
+## Demo presets
+
+`configs/demo_presets.json` holds seven presets on held-out test engines. Each
+selects a run, replays it to its start time, and shows a presenter note taken
+from evaluation truth: normal with a load step; knock then a load change;
+misfire; misfire with recovery; accelerated valve degradation; a waveform gap;
+and a missed mild-knock challenge run (a stated limitation).
+
+## Panels
+
+- Permanent "SYNTHETIC DATA — RECORDED REPLAY" banner; model/feature versions
+- Accepted decision, classifier class, calibrated confidence (v1) or decision
+  margin (temporary), anomaly score vs threshold, quality, processing and
+  server-side render time, alert status
+- Last 2 s of audio and vibration (display decimated 8×) and the 5-10 kHz
+  vibration impulse envelope; Welch PSD of the current window
+- Vibration spectrogram of the last 10 s received (STFT 2,048/512 from config)
+- RPM, load, throttle, coolant, and fuel trims with freshness status
+- Decision timeline with active alerts; optional evaluation-truth overlay (off by
+  default, loaded separately, never passed to the engine)
+- Three largest robust deviations from the normal reference of the same RPM/load
+  bin (v1)
+- Simulated valve-wear indicator: 5 s rolling mean of the calibrated
+  valve-clearance probability (accelerated simulation, not remaining life)
+
+Play, pause, restart, speed, and seek are in the sidebar. Seek resets buffers and
+alert state and re-processes from the start. Predictions are computed live by
+`ReplayEngine` from 40 ms packets; display panels show only data already
+received.
+
+Measured on the macOS development machine: processing p95 13 ms per decision;
+server-side render 112 ms median / 177 ms max per 0.5 s tick (AppTest; browser
+drawing not included).

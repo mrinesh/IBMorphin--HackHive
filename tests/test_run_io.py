@@ -1,0 +1,173 @@
+"""Run-bundle loading and validation against the data contract, using synthetic files."""
+
+import json
+from pathlib import Path
+
+import pytest
+
+np = pytest.importorskip("numpy")
+pytest.importorskip("pandas")
+scipy_io = pytest.importorskip("scipy.io")
+
+from engine_diagnostics.config import load_config  # noqa: E402
+from engine_diagnostics.data import run_io  # noqa: E402
+
+ROOT = Path(__file__).resolve().parents[1]
+DURATION_S = 2
+
+
+@pytest.fixture(scope="module")
+def config():
+    return load_config(ROOT / "configs/mvp.json", ROOT / "schemas/project-config.schema.json")
+
+
+def _summary(x):
+    x64 = x.astype(np.float64).ravel()
+    return {"n_samples": x.size, "sum": float(x64.sum()), "sum_sq": float(np.square(x64).sum()),
+            "first": float(x64[0]), "last": float(x64[-1])}
+
+
+def write_bundle(directory: Path, config: dict, *, mutate=None, run_id="run_00001") -> Path:
+    """Write a contract-conforming bundle; `mutate(parts)` may alter it before saving."""
+    rng = np.random.default_rng(0)
+    streams = config["streams"]
+    rates = streams["telemetry_rates_hz"]
+    waves = {
+        name: (0.01 * rng.standard_normal((DURATION_S * streams[name]["sample_rate_hz"], 1)))
+        .astype(np.float32)
+        for name in run_io.WAVEFORM_STREAMS
+    }
+    rows = [
+        (k / rates[signal], signal, 1.0 + k, unit, 1)
+        for signal, unit in run_io.TELEMETRY_UNITS.items()
+        for k in range(DURATION_S * rates[signal])
+    ]
+    rows.sort(key=lambda row: (row[0], row[1]))
+    metadata = {
+        "schema_version": "1.0", "run_id": run_id, "engine_id": "engine_001",
+        "batch_id": "test_v1", "generator_version": "0.1.0", "config_schema_version": "1.0",
+        "created_utc": "2026-10-15T00:00:00Z", "synthetic": True, "duration_s": DURATION_S,
+        "streams": {
+            name: {"fs_hz": streams[name]["sample_rate_hz"], "t0_s": 0,
+                   "unit": streams[name]["unit"], "n_samples": waves[name].size,
+                   "full_scale": 1.0}
+            for name in run_io.WAVEFORM_STREAMS
+        },
+        "telemetry_signals": {
+            signal: {"rate_hz": rates[signal], "unit": unit}
+            for signal, unit in run_io.TELEMETRY_UNITS.items()
+        },
+        "clock": {name: {"offset_s": 0, "drift_ppm": 0}
+                  for name in ("audio", "vibration", "telemetry")},
+        "waveform_summary": {name: _summary(waves[name]) for name in run_io.WAVEFORM_STREAMS},
+    }
+    mat = {**waves, "audio_fs_hz": float(streams["audio"]["sample_rate_hz"]),
+           "vibration_fs_hz": float(streams["vibration"]["sample_rate_hz"]),
+           "audio_t0_s": 0.0, "vibration_t0_s": 0.0}
+    parts = {"mat": mat, "rows": rows, "metadata": metadata}
+    if mutate:
+        mutate(parts)
+
+    run_dir = directory / run_id
+    run_dir.mkdir(parents=True)
+    scipy_io.savemat(run_dir / "waveforms.mat", parts["mat"], format="5")
+    lines = ["t_s,signal,value,unit,valid"] + [
+        f"{t:.6f},{signal},{'' if value is None else value},{unit},{valid}"
+        for t, signal, value, unit, valid in parts["rows"]
+    ]
+    (run_dir / "telemetry.csv").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (run_dir / "metadata.json").write_text(json.dumps(parts["metadata"]), encoding="utf-8")
+    return run_dir
+
+
+def issues_for(tmp_path, config, mutate):
+    return run_io.validate_run(run_io.load_run(write_bundle(tmp_path, config, mutate=mutate)),
+                               config)
+
+
+def test_valid_bundle_round_trips(tmp_path, config):
+    run_dir = write_bundle(tmp_path, config)
+    bundle = run_io.load_run(run_dir)
+    assert run_io.validate_run(bundle, config) == []
+    assert bundle.audio.dtype == np.float32 and bundle.audio.ndim == 1
+    assert bundle.vibration.size == DURATION_S * 25600
+    assert bundle.audio_fs_hz == 24000.0
+    assert set(bundle.telemetry["signal"]) == set(run_io.TELEMETRY_UNITS)
+
+
+def test_row_vector_is_rejected(tmp_path, config):
+    def mutate(parts):
+        parts["mat"]["audio"] = parts["mat"]["audio"].T
+    with pytest.raises(ValueError, match="column vector"):
+        run_io.load_run(write_bundle(tmp_path, config, mutate=mutate))
+
+
+def test_double_waveform_is_rejected(tmp_path, config):
+    def mutate(parts):
+        parts["mat"]["vibration"] = parts["mat"]["vibration"].astype(np.float64)
+    with pytest.raises(ValueError, match="float32"):
+        run_io.load_run(write_bundle(tmp_path, config, mutate=mutate))
+
+
+@pytest.mark.parametrize(
+    ("description", "mutate", "expected"),
+    [
+        ("short audio", lambda p: p["mat"].update(audio=p["mat"]["audio"][:-10]), "samples"),
+        ("too many NaN", lambda p: p["mat"]["vibration"].__setitem__(slice(0, 6000), np.nan),
+         "non-finite"),
+        ("unrecorded NaN", lambda p: p["mat"]["vibration"].__setitem__((5, 0), np.nan),
+         "missing samples"),
+        ("infinite", lambda p: p["mat"]["audio"].__setitem__((5, 0), np.inf), "infinite"),
+        ("changed value", lambda p: p["mat"]["audio"].__setitem__((100, 0), 0.5), "sum"),
+        ("missing signal", lambda p: p.update(rows=[r for r in p["rows"] if r[1] != "load"]),
+         "'load' missing"),
+        ("wrong unit", lambda p: p.update(rows=[
+            (t, s, v, "kPa" if s == "load" else u, ok) for t, s, v, u, ok in p["rows"]]), "unit"),
+        ("unsorted", lambda p: p["rows"].reverse(), "sorted"),
+        ("valid but empty", lambda p: p["rows"].__setitem__(0, (*p["rows"][0][:2], None,
+                                                                 *p["rows"][0][3:])), "empty"),
+        ("wrong rate", lambda p: p["mat"].update(audio_fs_hz=48000.0), "sample rate"),
+        ("not synthetic", lambda p: p["metadata"].update(synthetic=False), "synthetic"),
+        ("missing key", lambda p: p["metadata"].pop("clock"), "missing clock"),
+    ],
+)
+def test_contract_violations_are_reported(tmp_path, config, description, mutate, expected):
+    issues = issues_for(tmp_path, config, mutate)
+    assert any(expected in issue for issue in issues), (description, issues)
+
+
+def test_missing_value_marked_invalid_is_accepted(tmp_path, config):
+    def mutate(parts):
+        t, signal, _, unit, _ = parts["rows"][0]
+        parts["rows"][0] = (t, signal, None, unit, 0)
+    assert issues_for(tmp_path, config, mutate) == []
+
+
+def test_declared_gap_is_valid_and_clipping_is_a_warning(tmp_path, config):
+    def mutate(parts):
+        audio = parts["mat"]["audio"]
+        audio[1000:1500] = np.nan
+        audio[0:1000] = 1.0
+        summary = _summary(audio)
+        summary["n_missing"] = 500
+        summary["sum"] = float(np.nansum(audio.astype(np.float64)))
+        summary["sum_sq"] = float(np.nansum(np.square(audio.astype(np.float64))))
+        parts["metadata"]["waveform_summary"]["audio"] = summary
+    bundle = run_io.load_run(write_bundle(tmp_path, config, mutate=mutate))
+    assert run_io.validate_run(bundle, config) == []
+    warnings = run_io.run_warnings(bundle, config)
+    assert any("clipped" in w for w in warnings) and any("missing" in w for w in warnings)
+
+
+def test_manifest_records_hashes(tmp_path, config):
+    run_dir = write_bundle(tmp_path, config)
+    manifest = json.loads(run_io.write_manifest(tmp_path, [run_dir]).read_text())
+    entry = manifest["runs"]["run_00001"]["waveforms.mat"]
+    assert len(entry["sha256"]) == 64
+    assert entry["bytes"] == (run_dir / "waveforms.mat").stat().st_size
+
+
+def test_loader_does_not_reference_evaluation_truth():
+    source = Path(run_io.__file__).read_text(encoding="utf-8")
+    code = source.split('"""', 2)[2]  # skip the module docstring that names it
+    assert "evaluation_truth" not in code and "_events.json" not in code

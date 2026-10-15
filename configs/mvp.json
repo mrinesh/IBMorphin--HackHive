@@ -55,13 +55,13 @@
   },
   "dataset": {
     "master_seed": 20261015,
-    "integration_runs": 12,
+    "integration_runs": 13,
     "integration_duration_s": 20,
-    "core_duration_s": 45,
-    "engine_count": 60,
+    "core_duration_s": 30,
+    "engine_count": 30,
     "runs_per_engine": 8,
-    "split_engines": {"train": 36, "tuning": 8, "calibration": 8, "test": 8},
-    "challenge_runs": 32
+    "split_engines": {"train": 18, "tuning": 4, "calibration": 4, "test": 4},
+    "challenge_runs": 16
   },
   "conditions": ["normal", "misfire", "knock_like", "valve_clearance_like"],
   "inference_context_fields": ["rpm", "load", "throttle"]

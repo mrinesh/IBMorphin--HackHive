@@ -19,11 +19,72 @@
   install was stopped because large downloads were slow, not because of a
   dependency compatibility error. Partial cache downloads are retained for reuse.
 
+## 2026-10-15: macOS environment inventory
+
+- Development continues on macOS (Python 3.13.2, uv 0.9.7) as well as Windows.
+- MATLAB R2026b is installed at `/Applications/MATLAB_R2026b.app` (not on PATH);
+  the MATLAB VS Code extension is also installed.
+- Only base MATLAB is installed. Signal Processing, Statistics and Machine
+  Learning, Simulink, and Powertrain Blockset are licensed but not installed.
+- The full Python analysis/dashboard stack is installed and imports on macOS.
+- Signal Processing Toolbox and Statistics and Machine Learning Toolbox were
+  then installed and verified; Simulink and Powertrain Blockset remain uninstalled.
+
+## 2026-10-15: first integration batch
+
+- Organizers explicitly allow team-generated synthetic data.
+- The first batch is 3 runs × 20 s instead of 12; each starts normal and
+  switches to one fault at 8 s, so all four conditions appear. More runs later.
+- MATLAB does not hash files (no portable SHA-256 without Java in this
+  install); Python `validate-runs` writes `data/raw/manifest.json`.
+- MATLAB may store integer-valued doubles compactly in MAT files; Python reads
+  with `scipy.io.loadmat(..., mat_dtype=True)` so dtype checks see MATLAB classes.
+- Events are keyed by crank angle, so a misfire's RPM dip shifts later events in
+  every stream consistently.
+
+## 2026-10-15: integration batch extended to 13 runs
+
+- 13 runs × 20 s on 4 virtual engines. engine_001-003 are training engines
+  (3 normal-only runs, 2 runs per fault); engine_004 is held out (one
+  normal-only run and one run per fault). The split is in
+  `configs/integration_batch.json` (`engine_splits`) and is engine-level.
+- Normal runs record `onset_s` and `affected_cylinder` as null in the truth.
+- The temporary model trained on this batch is a pipeline check, not an
+  evaluation; four engines cannot support performance claims.
+
+## 2026-10-15: final 30-hour plan and core dataset
+
+- About 30 hours remain. Submission: code repository, demo video (recorded by
+  the user), and written report. The demo runs on the macOS development machine.
+- Core dataset `core_v1`: 30 engines × 8 runs × 30 s (2 per class), split
+  18 train / 4 tuning / 4 calibration / 4 test, plus 16 challenge runs on the
+  test engines (reserved RPM bands 3,000-3,500 and 800-900, 2× noise, shifted
+  resonance, mild severity 0.15-0.3). Chosen by the user instead of 60 × 45 s.
+- Scenarios are sampled (`sample_scenarios.m`) from distributions shared by all
+  classes. A classifier on the observable scenario parameters scored 0.233
+  balanced accuracy across engine folds (chance 0.25).
+- Generator 0.2.0 adds recovery intervals, accelerated valve degradation
+  (simulated time scale), unrelated impacts, combustion timing jitter, clipping,
+  waveform gaps, and telemetry dropouts. Clock offsets/drift remain deferred.
+- Clipping and declared gaps are data-quality warnings, not contract violations.
+
+## 2026-10-15: v1 model frozen and scored
+
+- v1 model trained only on train engines, tuned on tuning engines, calibrated
+  on calibration engines; test engines scored once (see TESTING.md).
+- Feature version stays 0.1.0: two valve-oriented features were tried and
+  rejected because they lowered tuning results.
+- Checklist §7 goals: met core macro-F1 (0.835), core false alerts (0 per
+  normal minute, small denominator), processing p95 (13 ms). Missed: knock
+  (0.74) and valve (0.71) recall, challenge macro-F1 (0.384), and p95 alert
+  latency (14.8 s overall; slow-onset degradation runs dominate).
+- No further changes are made against test results; any redesign would need
+  fresh test data.
+
 ## Open decisions
 
 - Assign team owners and record the actual hackathon deadline.
-- Confirm organizer expectations for team-generated data and replay.
-- Record MATLAB release and usable specialized products.
+- Confirm organizer expectations for recorded-data replay in the demo.
 - Revisit dataset scale only after timing the small integration batch.
 
 ## Initialization verification

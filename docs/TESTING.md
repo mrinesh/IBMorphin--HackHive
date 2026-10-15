@@ -1,7 +1,7 @@
 # Verification status and checks still required
 
-Updated: 15 October 2026. This record covers project initialization, not a working
-engine-diagnostics pipeline.
+Updated: 15 October 2026. This record covers initialization and the first integration
+batch, not a working engine-diagnostics pipeline.
 
 ## Completed verification
 
@@ -12,8 +12,39 @@ engine-diagnostics pipeline.
 | Environment doctor | Passed setup checks; finds MATLAB R2026b on PATH | Reports missing optional packages and MATLAB discovery separately |
 | Dependency lock | Offline consistency check passed | 50 packages resolved; only setup/test dependencies installed |
 | Source compilation | Passed | Python syntax under `src/` and `tests/` |
-| MATLAB initializer | Passed in MATLAB R2026b (26.2.0.3386108) via `matlab -batch` | Loaded `configs/mvp.json`; Nyquist assertions passed |
-| MATLAB products/licenses | Signal Processing (`butter`, `pwelch`) and Statistics and ML (`fitcknn`) executed | Installed: MATLAB, MATLAB Copilot, Signal Processing, Statistics and ML. Simulink, Powertrain Blockset, AUTOSAR Blockset not installed |
+| Windows MATLAB initializer (2026-10-15) | Passed | `initialize_project()` ran in R2026b (26.2.0.3386108) via `matlab -batch`; config loaded, Nyquist assertions passed. MATLAB R2026b bin added to user PATH; `doctor` finds it |
+| Windows MATLAB products (2026-10-15) | Passed | `ver` lists MATLAB, MATLAB Copilot, Signal Processing, Statistics and ML; `butter`, `pwelch`, `fitcknn` executed. Simulink, Powertrain Blockset, AUTOSAR Blockset not installed |
+| macOS full Python stack (2026-10-15) | Passed | `uv sync --locked --all-extras --group quality` on Python 3.13.2 / uv 0.9.7; NumPy 2.5.4, SciPy 1.18.1, scikit-learn 1.9.1, pandas, PyArrow, Streamlit, Plotly import |
+| macOS pytest and Ruff (2026-10-15) | Passed | 9 tests passed; `ruff check .` reported no issues |
+| MATLAB initializer (2026-10-15) | Passed | `initialize_project()` ran in R2026b (26.2) via `/Applications/MATLAB_R2026b.app/bin/matlab -batch`; config loaded |
+| MATLAB product inventory (2026-10-15) | Recorded | `ver` lists only MATLAB and MATLAB Copilot. `license('test')` is true for Signal, Simulink, Statistics, and Powertrain Blockset, but these are licensed, not installed: `butter`, `pwelch`, `hann`, `envelope`, `fitcsvm` are undefined |
+| MATLAB toolboxes installed (2026-10-15) | Passed | `ver` now lists Signal Processing Toolbox and Statistics and Machine Learning Toolbox; `butter`, `pwelch`, `hann`, `envelope`, `fitcsvm` (RBF), and `kurtosis` executed |
+| MATLAB MCP connection (2026-10-15) | Passed | `evaluate_matlab_code` and `detect_matlab_toolboxes` attach to R2026b after `shareMATLABSession` |
+| MATLAB generator static analysis (2026-10-15) | Passed | `checkcode` reports no messages on all 16 `.m` files |
+| Integration batch generation (2026-10-15) | Passed | 3 runs x 20 s (misfire, knock-like, valve-clearance-like, onset 8 s); ~6.5 s per run; `waveforms.mat` ~3.6 MB, telemetry 40 KB, truth 0.3-0.75 MB per run |
+| MATLAB run validation (2026-10-15) | Passed | `validate_run_matlab` on all 3: dtype/length, no clipping (peaks 13-17% of full scale), combustion count within 0.1% of RPM-derived expectation, faulted events only after onset, knock 5-9 kHz band power x2.13 after onset |
+| Generator reproducibility (2026-10-15) | Passed | Regenerating run 1 gave identical arrays, telemetry CSV, and truth JSON (`isequal`) |
+| Aliasing (2026-10-15) | Passed with note | Noise-free render: energy above 0.9 x Nyquist is -42 to -57 dB of total; full alias-free proof not attempted |
+| Integration batch extended (2026-10-15) | Passed | 13 runs on 4 engines (train engine_001-003, test engine_004): 4 normal-only, 3 each of misfire/knock-like/valve-clearance-like; 80.6 s total; 48 MB public + 6.8 MB truth. Runs 1-3 regenerated bit-identical. `validate_run_matlab` 13/13; Python `validate-runs` 13/13 |
+| Knock signature check (2026-10-15) | Passed | Event-locked 5-9 kHz energy after knocked vs unknocked combustion: x7.07, x3.67, x4.22. The earlier whole-band before/after check failed two valid runs (x1.33, x1.25) because normal valve modes and RPM ramps share that band, so it was replaced |
+| Feature path (2026-10-15) | Passed | `build-features`: 481 windows from 13 runs in 5.7 s (~12 ms/window), all quality `ok`, no NaN. Unit tests: sine RMS/crest/kurtosis and band placement, impulsive and missing-firing fixtures, quality states, causal slicing, past-only telemetry context, label boundaries, features module imports no label/truth code |
+| Temporary model pipeline check (2026-10-15) | Ran; not an evaluation | Trained on engine_001-003 (348 clean windows), checked on held-out engine_004 (133). SVM macro-F1 0.984; accepted decisions macro-F1 0.986 at 0.857 coverage; 5.5% of normal windows exceed the anomaly threshold. Ablations: telemetry-only 0.609, audio+context 0.984, vibration+context 0.745 (knock recall 0.05), fused without context 0.991. One held-out engine and clean synthetic faults make these scores optimistic |
+| Alert persistence and model rules (2026-10-15) | Passed | Unit tests: confirm after 2 consistent faults, clear after 3 normals, uncertain/bad quality hold state; training uses only clean training windows; faults accepted only when SVM and anomaly detector agree |
+| Replay (2026-10-15) | Passed | Replay features equal offline features exactly (max difference 0) on all 481 windows of 13 runs. Held-out engine_004: normal run no alert; misfire alert 1.5 s, knock 1.0 s, valve 2.0 s after onset (valve 13/37 updates uncertain). Processing p50 12.0 ms, p95 13.2 ms, max 40.4 ms (fast); 1x replay of run_00011 took 21.2 s wall for 20 s, p50 24.3 / p95 34.0 ms. Tests: offline equality, decisions unchanged by samples after t, alert sequence, reset |
+| Truth null encoding (2026-10-15) | Fixed | Normal-run truth wrote `onset_s: []`; now `null` (MATLAB `jsonencode` writes NaN as null). Regenerated 13 runs; waveforms unchanged; 13/13 valid |
+| Dashboard (2026-10-15) | Passed (automated only) | Streamlit 1.66 `AppTest`: banner renders; seek to 12 s on run_00012 yields live decisions to 12.0 s and a knock alert; Play advances stream time at ~1x. Headless server health check OK, bound to localhost with usage stats off. Not yet viewed in a browser by a person |
+| Generator validation suite (2026-10-15) | Passed | `validate_generator()`: firing frequency error 0.50/0.25/0.17% at 1,000/2,000/3,000 RPM; audio-vibration lag 1.75 ms vs 1.80 ms configured; noise-free energy above 0.9 x Nyquist -53.1 dB audio, -44.3 dB vibration; bit-identical regeneration. Severity sweeps (after/before onset at severity 0.2/0.5/0.8): misfire 3.39/4.31/5.00, knock 1.06/1.47/2.61, valve 1.02/1.06/1.10 - valve and low-severity knock signatures are weak |
+| MATLAB/Python feature agreement (2026-10-15) | Passed | 18 reference values (log RMS, 5-7 kHz band fraction, high-band envelope kurtosis; both modalities; 3 core_v1 runs) agree to 9.0e-15 relative difference |
+| Core scenario shortcut gate (2026-10-15) | Passed | Random forest on observable scenario parameters (RPM/load level and change, profile kind, impact rate, data problems): 0.233 balanced accuracy across 5 engine folds (chance 0.25) |
+| core_v1 generation (2026-10-15) | Passed | 256 runs (240 core + 16 challenge) in 12.4 min with 3 MATLAB workers; 0 quarantined; 1.3 GB public + 260 MB truth. `validate-runs` 256/256 (35 runs with declared data-quality warnings); `validate_run_matlab` 256/256 with 10 faint knock runs (severity 0.16-0.41, event-locked ratio down to 1.14). Manifest SHA-256 16a90def96a5…, scenarios e78dce9518a2… |
+| v1 training (2026-10-15) | Passed | 4,956 of 7,124 clean training windows (class-balanced); tuning macro-F1 0.829-0.833 over the C/gamma grid (selected C=30, gamma=0.03); tuning replay 0.128 false alerts/normal min, sustained recall 0.769, latency p50 1.77 s; selected p_min 0.7, anomaly quantile 0.95, no fault gate, confirm 2. Bit-reproducible. A feature-0.2 variant (cycle periodicity, 2-9 kHz centroid) was rejected on tuning (macro-F1 0.811, recall 0.577) |
+| v1 final test evaluation (2026-10-15) | Ran once on 4 held-out engines; model SHA-256 805e7559bc6a… | **Core (32 runs, 1,568 clean windows):** macro-F1 0.835; accepted 0.859 at 0.788 coverage; recall knock 0.74 / misfire 0.78 / normal 0.95 / valve 0.71; precision 0.96 / 1.00 / 0.86 / 0.74. Replay: 0 false-alert episodes in 7.76 normal minutes, 6 wrong-class episodes, sustained recall 17/28 = 0.607, latency p50 2.39 s / p95 14.78 s, processing p95 13.0 ms. Degradation indicator Spearman vs true severity median 0.906 (4 runs; 1 clipped run had no ok windows). **Challenge (16 runs):** macro-F1 0.384, knock recall 0, 0.73 false alerts/normal min, sustained recall 0.286. **Ablations (core):** telemetry-only 0.199, audio+context 0.823, vibration+context 0.757, fused without context 0.832, fused 0.837. Re-run with `--force` only to fix degradation reporting for the clipped run; all other results identical |
+| Dashboard v1 and presets (2026-10-15) | Passed (automated) | AppTest renders all 7 presets on core_v1 with the v1 model, seeks each to 24 s, and shows calibrated confidence; integration dataset still works. Preset notes verified against replay (e.g. misfire evidence led by audio firing-peak variation z=15.9; knock by audio high-band envelope kurtosis z=10.8). Server-side render 112 ms median / 177 ms max per tick; local health check OK |
+| Reproducible pipeline (2026-10-15) | Passed | `scripts/run_pipeline.sh` (validate, features, train) in 3.1 min reproduced the feature table (SHA-256 b638614240a2…) and model (805e7559bc6a…) bit for bit |
+| Submission sample (2026-10-15) | Built | `artifacts/submission_sample.zip`, 38 MB: 7 preset runs + truth, v1 model, final and training reports (not tracked) |
+| Review figures (2026-10-15) | Inspected | `plot_run_overview` spectrograms/zooms show the intended knock band, weak misfire strokes, and shifted valve impacts |
+| MATLAB/Python handoff (2026-10-15) | Passed | `validate-runs`: all 3 runs valid in Python (column orientation, float32 class, sample counts/rates, t0, summary sums/first/last vs MATLAB, telemetry units/rates/order); manifest written |
+| Run I/O tests (2026-10-15) | Passed | 31 tests with extras (17 contract-violation/loader tests, 5 on real exported runs); 9 passed, 2 skipped in a base-only isolated env; Ruff clean |
 
 The first pytest attempt failed because the agent's Windows sandbox denied access
 to pytest temporary/cache directories. All nine tests passed when run with normal
@@ -23,9 +54,14 @@ filesystem access. This was an environment restriction, not a passing sandbox ru
 
 | Component | Required check | Current reason/status |
 |---|---|---|
-| Simulink-based products | Install and license-check before any dependency on Simulink, Powertrain, or AUTOSAR Blockset | Not installed on this machine |
-| Full Python stack | Run `uv sync --locked --all-extras --group quality`, then import scientific/dashboard packages | Full install stopped during slow downloads; extras are locked but not installed |
-| Ruff | Run `uv run --all-extras --group quality ruff check .` | Quality tool not installed or executed |
+| Simulink / Powertrain Blockset | Install only if the optional Simulink comparison is pursued | Licensed but not installed; not required for the MVP |
+| Context shortcut | Decorrelate scenario RPM/load from condition, then repeat the telemetry-only ablation | Confirmed: telemetry-only recall 0.94 misfire / 0.95 valve on the held-out engine because scenarios use class-distinctive RPM/load ranges. Waveform-only features score 0.991, so the model does not need context, but scenarios must be decorrelated before any evaluation |
+| Anomaly threshold and margin | Tune on a separate tuning partition | Threshold is the 99th percentile of training normal scores; margin 0.3 is untuned |
+| Replay with nonzero stream offsets | Support `t0_s != 0` and clock drift in replay | Replay rejects nonzero `t0_s`; all current runs use 0 |
+| Dashboard visual review | Open in a browser and rehearse normal -> fault -> alert -> evidence | Only automated AppTest and health checks have run |
+| Robustness settings | Generate and validate clock offsets/drift, missing telemetry, and clipping end to end | The format supports them; the generator does not produce them yet |
+| MATLAB discovery in `doctor` | Add `/Applications/MATLAB_*.app/bin` to PATH or teach `doctor` to search it | `matlab` is not on PATH on macOS, so `doctor` reports it missing (fixed on Windows via user PATH) |
+| Full Python stack on Windows | Repeat the extras install, imports, pytest, and Ruff on the original Windows machine | Verified on macOS only |
 | Other Python versions | Exercise initialization on each version claimed as supported | Only Python 3.13.7 has been tested; package declares 3.11-3.13 |
 
 ## Required checks at later milestones
@@ -34,8 +70,6 @@ These components do not exist yet; they must not be described as tested features
 
 | Milestone | Verification needed |
 |---|---|
-| MATLAB integration batch | Repeatable generation; shapes, units, event timing, bandwidth, and cross-modal consistency |
-| MATLAB/Python handoff | MAT Version 7 import; vector orientation, float32 values, sample rates, offsets, and telemetry parsing |
 | Signal processing | Analytical fixtures, PSD scaling, causal filtering, no future samples, and offline/replay equivalence |
 | Data partitions | Engine/run isolation before overlapping windows; preprocessing fitted on training only |
 | Modeling | Held-out results, modality ablations, shortcut probes, uncertainty handling, and failure analysis |
@@ -47,7 +81,8 @@ These components do not exist yet; they must not be described as tested features
 ```powershell
 uv run engine-diagnostics doctor
 uv run engine-diagnostics validate-config
-uv run pytest
+uv run --all-extras engine-diagnostics validate-runs
+uv run --all-extras pytest
 uv lock --check --offline
 ```
 
