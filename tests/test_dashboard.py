@@ -123,3 +123,30 @@ def test_cross_engine_panel_shows_leave_one_engine_out_report():
     table = next(d.value for d in app.dataframe if "features" in d.value.columns)
     assert set(table["features"]) == {"fused", "waveform_only"}
     assert "pooled" in set(table["held-out engine"])
+
+
+V2_MODEL = ROOT / "artifacts/models/multifault_v2.joblib"
+
+
+@pytest.mark.skipif(not V2_MODEL.is_file() or not (ROOT / "data/raw/core_v2").is_dir(),
+                    reason="needs core_v2 runs and the v2 model")
+def test_core_v2_shows_one_probability_and_alert_row_per_fault():
+    import json
+
+    truths = ROOT / "evaluation_truth/core_v2"
+    run_id = next(json.loads(p.read_text(encoding="utf-8"))["run_id"]
+                  for p in sorted(truths.glob("run_*_events.json"))
+                  if len(json.loads(p.read_text(encoding="utf-8"))["conditions"]) == 3)
+    app = AppTest.from_file(str(APP), default_timeout=120).run()
+    widget(app.sidebar.selectbox, "Dataset").set_value("core_v2").run()
+    widget(app.sidebar.selectbox, "Run").set_value(run_id).run()
+    widget(app.sidebar.slider, "Seek (s)").set_value(29.0).run()
+    widget(app.sidebar.button, "Seek").click().run()
+    assert not app.exception
+    record = app.session_state["records"][-1]
+    assert record["model_version"] == "v2.0.0"
+    assert set(record["probabilities"]) == {"misfire", "knock_like", "valve_clearance_like"}
+    assert isinstance(record["alerts"], list)
+    assert {m.label for m in app.metric} >= {"P(misfire)", "P(knock_like)",
+                                             "P(valve_clearance_like)", "Faults detected"}
+    assert len([e for e in app.error if "ALERT" in e.value]) == len(record["alerts"])
