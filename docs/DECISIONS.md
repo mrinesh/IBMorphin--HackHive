@@ -81,6 +81,27 @@
 - No further changes are made against test results; any redesign would need
   fresh test data.
 
+## 2026-10-16: simultaneous faults (core_v2 and v2 model)
+
+- Runs may now carry 0, 1, 2, or all 3 faults at once, each with its own onset,
+  cylinder, severity, recovery, and degradation. All data is still generated in
+  MATLAB; Python only reads, validates, extracts features, trains, and scores.
+- New dataset `core_v2` (engines 031-060, own master seed, generator 0.3.0)
+  instead of regenerating core_v1, so the frozen v1 model, its data, and its
+  one-time test result stay intact, and v2 is scored on engines nobody has seen.
+  Per engine: 2 normal, each single fault, each pair, and the triple (9 runs);
+  16 mild multi-fault challenge runs on the test engines.
+- Model: one calibrated detector per fault (present vs absent) with its own
+  threshold and alert, chosen over one class per combination. Per-fault
+  detectors handle any combination, including rarer ones, from the same
+  training windows; a combination class needs examples of every combination
+  and cannot name an unseen one. Faults raise and clear alerts independently.
+- Physical interaction modeled: a misfired stroke cannot also knock. Other
+  interactions (e.g. valve wear changing combustion) are not modeled.
+- Generator check: in every pair and the triple, each fault keeps at least
+  half of its single-fault signature effect (weakest: valve-clearance in the
+  triple, 52%).
+
 ## Open decisions
 
 - Assign team owners and record the actual hackathon deadline.

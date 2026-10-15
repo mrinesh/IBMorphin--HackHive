@@ -15,6 +15,7 @@ runs and model exist:
 | Dataset | Runs | Model |
 |---|---|---|
 | `core_v1` (final) | `data/raw/core_v1` | `artifacts/models/diagnostic_v1.joblib` (`engine-diagnostics train`) |
+| `core_v2` (multi-fault) | `data/raw/core_v2` | `artifacts/models/multifault_v2.joblib` (`engine-diagnostics train-multi`) |
 | `integration_v1` | `data/raw` | `artifacts/models/temporary.joblib` (`engine-diagnostics train-temporary`) |
 
 ## Files
@@ -40,6 +41,13 @@ misfire; misfire with recovery; accelerated valve degradation; a waveform gap;
 and a missed mild-knock challenge run (a stated limitation).
 
 ## Panels
+
+For `core_v2` the v2 model reports each fault separately: one calibrated
+probability per fault, a "Faults detected" count, one alert banner per active
+fault (each confirmed and cleared on its own), and a per-fault decision
+timeline (dot detected, x uncertain, square active alert). The truth overlay
+shades each fault's own active intervals.
+
 
 - Permanent "SYNTHETIC DATA — RECORDED REPLAY" banner; model/feature versions
 - 3D view (Three.js): a neon wireframe car that flies into a detailed inline-4
@@ -71,6 +79,55 @@ and a missed mild-knock challenge run (a stated limitation).
   default, loaded separately, never passed to the engine)
 - Three largest robust deviations from the normal reference of the same RPM/load
   bin (v1)
+- Evidence panel per active alert (`runtime/evidence.py`): a fault-specific claim
+  for sound, vibration, and RPM (e.g. misfire: irregular firing rhythm, repeated
+  abnormal pulses, accompanying RPM fluctuation), each rated supports / weak / not
+  seen from robust z-scores of the model's own features, plus an overall assessment.
+  The weak, missing, or burst firings and RPM dips are shaded in the panel's chart
+  and, in the same colors, on the waveform and RPM charts. RPM is "not expected" for
+  knock and valve faults. Valve-clearance evidence is usually weak, matching the model
+
+## Health timeline (deterioration demonstration)
+
+Below the decision timeline, a live chart tracks, relative to the healthy baseline of
+the same RPM/load range (`runtime/health.py`): firing-rhythm irregularity (sound),
+high-frequency impulsiveness (vibration), and the model's overall anomaly score. Each
+line is smoothed over the last 2 s of good windows (causal) and divided by its
+developing threshold, so 1.0 is the boundary. A stage ribbon shows healthy →
+developing anomaly (a line stays at or above 1 without a confirmed alert) →
+persistent fault (the model's confirmed alert), plus no data for failed-quality
+windows, and a text summary lists the transitions. Thresholds (z = 4 for both
+features; the model's own anomaly threshold) were set on core_v1 tuning engines.
+All progression is simulated, so the chart is labeled a deterioration
+demonstration and makes no forecast or remaining-useful-life claim.
+
+## Fault-injection lab
+
+Sidebar **Mode → Fault-injection lab** (needs core_v1 runs, their evaluation truth,
+and the v1 model). Judges set, then press **Apply and replay**:
+
+- Engine RPM: picks a clean healthy core_v1 recording (tuning, calibration, or test
+  engine; never a classifier training engine) nearest the chosen RPM
+- Injected fault: none, misfire, or knock-like bursts, with severity, onset, and
+  cylinder. Injection (`src/engine_diagnostics/lab.py`) reuses the generator's source
+  model and settings on the base run's own combustion schedule: misfire removes
+  85-97% of the rendered combustion transient on the chosen cylinder and adds the
+  RPM dip; knock adds damped 5.5-8.5 kHz bursts 10-20 degrees after combustion.
+  Stroke probability and burst strength follow the generator's severity mapping.
+  Valve-clearance injection is not offered (needs the full generator)
+- Background noise: total sensor noise 1-5x the recording's (2x = challenge runs)
+- Sensor availability: microphone, accelerometer, or RPM telemetry stop at a chosen
+  time, producing `missing_waveform` or `stale_telemetry` (no prediction, alert held)
+- Random seed for reproducible injections
+
+Everything modified is labeled: a dashed "FAULT-INJECTION LAB — INJECTED / SIMULATED
+SIGNALS" banner listing each change, "LAB: injected/modified" on waveform titles, and
+the injected interval and sensor-failure time on the timeline (known to the lab,
+hidden from the model). A **Lab response** box compares detection latency and
+decisions with a full replay of the unmodified recording. The modified run goes
+through the unchanged replay path (features, model, alerts, evidence panels).
+Approximation: per-engine sensor gain/resonance variation is not reproduced, and a
+misfire's RPM dip does not re-time later events.
 - Simulated valve-wear indicator: 5 s rolling mean of the calibrated
   valve-clearance probability (accelerated simulation, not remaining life)
 - "Hold out this run's engine" (integration dataset, training engines only): replays with a model

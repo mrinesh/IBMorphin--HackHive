@@ -42,5 +42,5 @@ artifacts/*.zip
 reports/generated/*
 !reports/generated/.gitkeep
 
-# graphify knowledge graph output
+# Graphify knowledge-graph output (regenerate locally with /graphify)
 graphify-out/

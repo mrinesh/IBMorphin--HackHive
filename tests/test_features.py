@@ -31,7 +31,7 @@ def tone(freq, amplitude, fs, seconds=2.0):
 
 def features_of(waves, config, context=CONTEXT, fresh=True):
     result = F.extract_window(waves, RATES, context, fresh, SCALES, 2.0, config)
-    return dict(zip(F.feature_names(), result.features, strict=True)), result.quality
+    return dict(zip(F.all_feature_names(), result.features, strict=True)), result.quality
 
 
 def test_feature_names_are_unique_and_exclude_bookkeeping():
@@ -131,3 +131,29 @@ def test_inference_modules_never_import_labels_or_truth():
         imported |= {a.name for node in ast.walk(tree) if isinstance(node, ast.Import)
                      for a in node.names}
         assert not any("labels" in name or "dataset" in name for name in imported if name)
+
+
+def test_stroke_sync_excess_locates_a_one_cylinder_burst():
+    """Combustion pulses every 180 degrees; a 7 kHz burst ~20 degrees later on one cylinder."""
+    fs, rpm = 25600, 1800.0
+    period = 30 / rpm  # one firing per 180 crank degrees
+    t = np.arange(round(2.0 * fs)) / fs
+    x = np.zeros_like(t)
+    rng = np.random.default_rng(1)
+    for k, start in enumerate(np.arange(0.003, 2.0 - period, period)):
+        rel = t - start
+        on = rel >= 0
+        x[on] += np.sin(2 * np.pi * 600 * rel[on]) * np.exp(-rel[on] / 0.004)
+        if k % 4 == 1:  # the same cylinder every fourth stroke
+            burst = rel - 20 / (6 * rpm)
+            hit = burst >= 0
+            x[hit] += 0.5 * np.sin(2 * np.pi * 7000 * burst[hit]) * np.exp(-burst[hit] / 0.0008)
+    x += 0.001 * rng.normal(size=x.size)
+    names = F.sync_feature_names()
+    values = dict(zip(names, F._stroke_sync_features(x, fs, rpm), strict=True))
+    high = {n: v for n, v in values.items() if n.startswith("sync_high_")}
+    assert max(high, key=high.get) == "sync_high_cyl_excess_15_30"
+    assert values["sync_ref_jitter"] < 0.05
+    # Without the burst no stroke group stands out.
+    assert F._stroke_sync_features(x * 0, fs, rpm).tolist() == [0.0] * len(names)
+    assert np.isnan(F._stroke_sync_features(x, fs, float("nan"))).sum() == 0

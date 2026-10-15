@@ -137,3 +137,108 @@ def evaluate_final(model, table: pd.DataFrame, truths: dict[str, dict], raw_dir:
                                          svm.predict(core[names].to_numpy()), model.classes)
         report["ablations"][name] = {"macro_f1": metrics["macro_f1"], "recall": metrics["recall"]}
     return report
+
+
+def multi_window_metrics(model, rows: pd.DataFrame) -> dict[str, Any]:
+    """Per-fault and set-level window metrics for a multi-fault model."""
+    from engine_diagnostics.models.multifault import multilabel_metrics
+    from engine_diagnostics.pipeline.labels import FAULTS
+
+    clean = rows[rows["quality"] == "ok"]
+    results = model.predict(clean[model.feature_names].to_numpy())
+    y_true = clean[[f"y_{f}" for f in FAULTS]].to_numpy(dtype=float)
+    y_pred = np.array([[f in r["detected"] for f in FAULTS] for r in results])
+    return {**multilabel_metrics(y_true, y_pred, list(FAULTS)),
+            "excluded_windows": {"non_ok_quality": int((rows["quality"] != "ok").sum())}}
+
+
+def single_label_baseline(model, rows: pd.DataFrame) -> dict[str, Any]:
+    """A one-class model (frozen v1) on the same windows: its accepted class as the set."""
+    from engine_diagnostics.models.multifault import multilabel_metrics
+    from engine_diagnostics.pipeline.labels import FAULTS
+
+    clean = rows[rows["quality"] == "ok"]
+    results = model.predict(clean[model.feature_names].to_numpy())
+    y_true = clean[[f"y_{f}" for f in FAULTS]].to_numpy(dtype=float)
+    y_pred = np.array([[r["accepted"] == f for f in FAULTS] for r in results])
+    return {"model_version": model.model_version,
+            **multilabel_metrics(y_true, y_pred, list(FAULTS))}
+
+
+def multi_replay_metrics(model, run_ids: list[str], raw_dir: Path, truths: dict[str, dict],
+                         config: dict) -> dict[str, Any]:
+    """Replay every run; score each fault's alert episodes against its own intervals."""
+    from engine_diagnostics.pipeline.labels import FAULTS, fault_intervals, fault_window_labels
+
+    window_s, step_s = config["analysis"]["window_s"], config["analysis"]["step_s"]
+    per_fault = {f: [] for f in FAULTS}
+    runs, latencies = [], []
+    for run_id in run_ids:
+        records = replay_run(load_run(raw_dir / run_id), model, config)
+        truth = truths[run_id]
+        times = [r["t_end_s"] for r in records]
+        labels = fault_window_labels(truth, np.array(times), window_s)
+        intervals = fault_intervals(truth)
+        caught = {}
+        for fault in FAULTS:
+            alerts = [fault if fault in r.get("alerts", []) else None for r in records]
+            own = {"condition": fault, "active_intervals": intervals.get(fault, [])}
+            score = score_run(times, alerts, list(np.where(labels[fault] == 0, "normal", "other")),
+                              own, window_s, step_s)
+            per_fault[fault].append(score)
+            if fault in intervals and score["sustained"]:
+                caught[fault] = all(e["detected"] for e in score["sustained"])
+        runs.append({"run_id": run_id, "faults": sorted(intervals),
+                     "sustained_caught": caught,
+                     "false_alert_episodes": {f: per_fault[f][-1]["false_alert_episodes"]
+                                              for f in FAULTS}})
+        latencies += [r["processing_ms"] for r in records]
+    by_count = {}
+    for n in range(len(FAULTS) + 1):
+        group = [r for r in runs if len(r["faults"]) == n]
+        judged = [r for r in group if r["sustained_caught"]]
+        if group:
+            by_count[str(n)] = {
+                "runs": len(group),
+                "runs_all_sustained_faults_alerted": (
+                    sum(all(r["sustained_caught"].values()) for r in judged) / len(judged)
+                    if judged else None),
+                "runs_with_any_false_alert": sum(
+                    any(r["false_alert_episodes"].values()) for r in group) / len(group),
+            }
+    return {"per_fault": {f: summarize(s) for f, s in per_fault.items()},
+            "by_active_faults": by_count,
+            "processing_ms_p50": float(np.percentile(latencies, 50)),
+            "processing_ms_p95": float(np.percentile(latencies, 95)),
+            "runs": runs}
+
+
+def evaluate_final_multi(model, table: pd.DataFrame, truths: dict[str, dict], raw_dir: Path,
+                         config: dict, model_path: Path, baseline=None) -> dict[str, Any]:
+    test = table[table["split"] == "test"]
+    report = {
+        "status": "FINAL multi-fault evaluation on held-out test engines; synthetic data only",
+        "model_version": model.model_version, "feature_version": model.feature_version,
+        "model_sha256": sha256(model_path),
+        "dataset_manifest_sha256": (sha256(raw_dir / "manifest.json")
+                                    if (raw_dir / "manifest.json").is_file() else None),
+        "test_engines": sorted(test["engine_id"].unique()),
+        "settings": {"thresholds": model.thresholds, "bands": model.bands,
+                     "confirm_updates": model.confirm_updates,
+                     "clear_updates": model.clear_updates,
+                     "anomaly_threshold": model.anomaly_threshold,
+                     "svm": model.notes.get("svm_selected")},
+    }
+    for subset in ("core", "challenge"):
+        rows = test[test["subset"] == subset]
+        if rows.empty:
+            continue
+        report[subset] = {
+            "runs": int(rows["run_id"].nunique()),
+            "windows": multi_window_metrics(model, rows),
+            "replay": multi_replay_metrics(model, sorted(rows["run_id"].unique()), raw_dir,
+                                           truths, config),
+        }
+        if baseline is not None:
+            report[subset]["single_label_baseline"] = single_label_baseline(baseline, rows)
+    return report

@@ -1,0 +1,409 @@
+{
+  "batch_id": "core_v2",
+  "generator_version": "0.3.0",
+  "duration_s": 30,
+  "warmup_s": 0.25,
+  "master_seed": 20261016,
+  "generator_params": {
+    "control_rate_hz": 1000,
+    "profile": {
+      "rpm_wander_rpm": 8,
+      "load_wander": 0.01,
+      "wander_cutoff_hz": 0.5,
+      "throttle_offset_pct": 4,
+      "throttle_per_load_pct": 95
+    },
+    "events": {
+      "combustion_offset_deg": 8,
+      "intake_valve_close_deg": 580,
+      "exhaust_valve_close_deg": 370,
+      "combustion_intensity_cv": 0.05,
+      "valve_intensity_cv": 0.1,
+      "valve_jitter_deg": 0.3,
+      "combustion_jitter_deg": 0.2
+    },
+    "sources": {
+      "combustion": {
+        "freq_hz": [
+          600,
+          1800,
+          3500
+        ],
+        "tau_s": [
+          0.004,
+          0.002,
+          0.001
+        ],
+        "ramp_s": 0.0004
+      },
+      "valve_impact": {
+        "freq_hz": [
+          2500,
+          4200,
+          6500
+        ],
+        "tau_s": [
+          0.0008,
+          0.0005,
+          0.0003
+        ],
+        "ramp_s": 0.0002
+      },
+      "knock_burst": {
+        "freq_range_hz": [
+          5000,
+          9000
+        ],
+        "tau_range_s": [
+          0.0006,
+          0.0015
+        ],
+        "ramp_s": 0.00025
+      },
+      "unrelated_impact": {
+        "freq_range_hz": [
+          1000,
+          9000
+        ],
+        "tau_range_s": [
+          0.0002,
+          0.001
+        ],
+        "ramp_s": 0.0002,
+        "amplitude_range": [
+          0.3,
+          1.2
+        ]
+      }
+    },
+    "faults": {
+      "misfire": {
+        "base_probability": 0.15,
+        "probability_per_severity": 0.6,
+        "residual_range": [
+          0.03,
+          0.15
+        ],
+        "rpm_dip_rpm": 12,
+        "rpm_dip_sigma_s": 0.03
+      },
+      "knock_like": {
+        "base_probability": 0.3,
+        "probability_per_severity": 0.5,
+        "delay_range_deg": [
+          10,
+          20
+        ],
+        "freq_jitter_hz": 150
+      },
+      "valve_clearance_like": {
+        "timing_shift_deg": 3,
+        "extra_jitter_deg": 1.5,
+        "freq_scale_per_severity": 0.25,
+        "tau_scale_per_severity": -0.3,
+        "amplitude_spread": 0.5
+      }
+    },
+    "engine_variation": {
+      "knock_freq_range_hz": [
+        5500,
+        8500
+      ],
+      "sensor_gain_cv": 0.1,
+      "resonance_shift_cv": 0.05,
+      "coolant_start_range_c": [
+        86,
+        90
+      ],
+      "coolant_target_c": 92,
+      "coolant_tau_s": 120,
+      "ltft_offset_range_pct": [
+        -3,
+        3
+      ]
+    },
+    "sensors": {
+      "audio": {
+        "full_scale": 1.0,
+        "gain": 0.1,
+        "delay_s": 0.002,
+        "combustion_gains": [
+          1.0,
+          0.5,
+          0.2
+        ],
+        "valve_gains": [
+          0.3,
+          0.25,
+          0.15
+        ],
+        "knock_gain": 0.35,
+        "orders": [
+          2,
+          4,
+          6
+        ],
+        "order_amplitudes": [
+          0.25,
+          0.08,
+          0.04
+        ],
+        "resonance_hz": [
+          800,
+          2500
+        ],
+        "resonance_mix": 0.6,
+        "colored_noise_rms": 0.004,
+        "noise_lowpass_hz": 3000,
+        "white_noise_rms": 0.001,
+        "impact_gain": 0.3
+      },
+      "vibration": {
+        "full_scale": 500,
+        "gain": 20,
+        "delay_s": 0.0002,
+        "combustion_gains": [
+          0.4,
+          0.8,
+          0.6
+        ],
+        "valve_gains": [
+          0.8,
+          0.7,
+          0.6
+        ],
+        "knock_gain": 1.0,
+        "orders": [
+          2,
+          4,
+          6
+        ],
+        "order_amplitudes": [
+          0.1,
+          0.05,
+          0.03
+        ],
+        "resonance_hz": [
+          3000,
+          7000
+        ],
+        "resonance_mix": 0.8,
+        "colored_noise_rms": 0.6,
+        "noise_lowpass_hz": 5000,
+        "white_noise_rms": 0.15,
+        "impact_gain": 0.8
+      }
+    },
+    "telemetry": {
+      "rpm_noise_rpm": 3,
+      "load_noise_pct": 0.5,
+      "throttle_noise_pct": 0.3,
+      "coolant_noise_c": 0.05,
+      "stft_noise_pct": 1.0,
+      "ltft_drift_pct_per_s": 0.002
+    }
+  },
+  "engine_splits": {
+    "train": [
+      "engine_031",
+      "engine_032",
+      "engine_033",
+      "engine_034",
+      "engine_035",
+      "engine_036",
+      "engine_037",
+      "engine_038",
+      "engine_039",
+      "engine_040",
+      "engine_041",
+      "engine_042",
+      "engine_043",
+      "engine_044",
+      "engine_045",
+      "engine_046",
+      "engine_047",
+      "engine_048"
+    ],
+    "tuning": [
+      "engine_049",
+      "engine_050",
+      "engine_051",
+      "engine_052"
+    ],
+    "calibration": [
+      "engine_053",
+      "engine_054",
+      "engine_055",
+      "engine_056"
+    ],
+    "test": [
+      "engine_057",
+      "engine_058",
+      "engine_059",
+      "engine_060"
+    ]
+  },
+  "fault_sets": [
+    {
+      "faults": [],
+      "runs_per_engine": 2
+    },
+    {
+      "faults": [
+        "misfire"
+      ],
+      "runs_per_engine": 1
+    },
+    {
+      "faults": [
+        "knock_like"
+      ],
+      "runs_per_engine": 1
+    },
+    {
+      "faults": [
+        "valve_clearance_like"
+      ],
+      "runs_per_engine": 1
+    },
+    {
+      "faults": [
+        "misfire",
+        "knock_like"
+      ],
+      "runs_per_engine": 1
+    },
+    {
+      "faults": [
+        "misfire",
+        "valve_clearance_like"
+      ],
+      "runs_per_engine": 1
+    },
+    {
+      "faults": [
+        "knock_like",
+        "valve_clearance_like"
+      ],
+      "runs_per_engine": 1
+    },
+    {
+      "faults": [
+        "misfire",
+        "knock_like",
+        "valve_clearance_like"
+      ],
+      "runs_per_engine": 1
+    }
+  ],
+  "sampling": {
+    "scenario_substream": 2199023255552,
+    "rpm_range": [
+      800,
+      3500
+    ],
+    "load_range": [
+      0.2,
+      0.8
+    ],
+    "profile_kinds": [
+      "steady",
+      "ramp",
+      "step"
+    ],
+    "profile_probabilities": [
+      0.3,
+      0.4,
+      0.3
+    ],
+    "ramp_rpm_span": [
+      150,
+      900
+    ],
+    "ramp_load_span": [
+      0.05,
+      0.25
+    ],
+    "step_load_span": [
+      0.1,
+      0.3
+    ],
+    "step_duration_s": 1.0,
+    "onset_range_s": [
+      6,
+      22
+    ],
+    "severity_range": [
+      0.25,
+      0.9
+    ],
+    "recovery_probability": 0.35,
+    "recovery_duration_s": [
+      2,
+      5
+    ],
+    "degradation_probability_valve": 0.5,
+    "degradation_severity": [
+      0.1,
+      0.9
+    ]
+  },
+  "robustness": {
+    "unrelated_impact_rate_hz": [
+      0.2,
+      2.0
+    ],
+    "clipping_probability": 0.04,
+    "clipping_gain": [
+      8,
+      12
+    ],
+    "missing_gap_probability": 0.06,
+    "missing_gap_s": [
+      0.1,
+      0.4
+    ],
+    "telemetry_dropout_probability": 0.06,
+    "telemetry_dropout_s": [
+      0.5,
+      2.0
+    ]
+  },
+  "challenge": {
+    "rpm_ranges": [
+      [
+        3000,
+        3500
+      ],
+      [
+        800,
+        900
+      ]
+    ],
+    "noise_scale": 2.0,
+    "resonance_shift": 1.1,
+    "severity_range": [
+      0.15,
+      0.3
+    ],
+    "fault_sets": [
+      [
+        "misfire",
+        "knock_like"
+      ],
+      [
+        "misfire",
+        "valve_clearance_like"
+      ],
+      [
+        "knock_like",
+        "valve_clearance_like"
+      ],
+      [
+        "misfire",
+        "knock_like",
+        "valve_clearance_like"
+      ]
+    ]
+  }
+}

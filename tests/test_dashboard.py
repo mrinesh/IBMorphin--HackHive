@@ -58,9 +58,10 @@ def test_play_advances_stream_time_in_real_time():
 V1_MODEL = ROOT / "artifacts/models/diagnostic_v1.joblib"
 
 
-@pytest.mark.skipif(not V1_MODEL.is_file() or not (ROOT / "data/raw/core_v1").is_dir(),
-                    reason="needs core_v1 runs and the v1 model")
-def test_every_demo_preset_renders_with_v1_panels():
+@pytest.mark.skipif(not V1_MODEL.is_file() or not (ROOT / "data/raw/core_v1").is_dir()
+                    or not (ROOT / "artifacts/models/multifault_v2.joblib").is_file(),
+                    reason="needs core_v1/core_v2 runs and the v1 and v2 models")
+def test_every_demo_preset_renders_with_its_model_panels():
     import json
 
     presets = json.loads((ROOT / "configs/demo_presets.json").read_text(encoding="utf-8"))
@@ -75,7 +76,68 @@ def test_every_demo_preset_renders_with_v1_panels():
         assert not app.exception, preset["name"]
         records = app.session_state["records"]
         assert records and "probability" in records[-1]
-        assert any(m.label == "Calibrated confidence" for m in app.metric)
+        expected = "P(misfire)" if preset["dataset"] == "core_v2" else "Calibrated confidence"
+        assert any(m.label == expected for m in app.metric), preset["name"]
+
+
+@pytest.mark.skipif(not V1_MODEL.is_file() or not (ROOT / "data/raw/core_v1/run_00228").is_dir(),
+                    reason="needs core_v1 runs and the v1 model")
+def test_active_alert_shows_linked_evidence_panel():
+    app = AppTest.from_file(str(APP), default_timeout=120).run()
+    widget(app.sidebar.selectbox, "Dataset").set_value("core_v1").run()
+    widget(app.sidebar.selectbox, "Run").set_value("run_00228").run()  # misfire preset
+    widget(app.sidebar.slider, "Seek (s)").set_value(19.0).run()
+    widget(app.sidebar.button, "Seek").click().run()
+    assert not app.exception
+    assert app.session_state["records"][-1]["alert"] == "misfire"
+    assert any(s.value == "Evidence for active alerts" for s in app.subheader)
+    text = " ".join(m.value for m in app.markdown)
+    assert "Possible misfire" in text
+    for claim in ("irregular firing rhythm", "repeated abnormal pulses",
+                  "accompanying fluctuation", "Assessment:"):
+        assert claim in text
+
+
+@pytest.mark.skipif(not V1_MODEL.is_file() or not (ROOT / "data/raw/core_v1").is_dir()
+                    or not (ROOT / "evaluation_truth/core_v1").is_dir(),
+                    reason="needs core_v1 runs, truth, and the v1 model")
+def test_fault_injection_lab_labels_injected_signals_and_shows_response():
+    app = AppTest.from_file(str(APP), default_timeout=180).run()
+    widget(app.sidebar.radio, "Mode").set_value("Fault-injection lab").run()
+    assert not app.exception
+    widget(app.sidebar.button, "Apply and replay").click().run()  # default: misfire 0.5 at 8 s
+    widget(app.sidebar.slider, "Seek (s)").set_value(12.0).run()
+    widget(app.sidebar.button, "Seek").click().run()
+    assert not app.exception
+    state = app.session_state
+    assert state["lab"].fault == "misfire" and state["bundle"].run_id.startswith("lab:")
+    text = " ".join(m.value for m in app.markdown)
+    assert "FAULT-INJECTION LAB" in text and "INJECTED misfire" in text
+    assert "Lab response" in text and "Unmodified recording" in text
+    assert state["records"][-1]["alert"] == "misfire"
+    assert not any("evaluation truth" in c.label for c in app.sidebar.checkbox)
+
+    widget(app.sidebar.radio, "Mode").set_value("Recorded replay").run()
+    assert not app.exception
+    assert app.session_state["lab"] is None
+    assert "FAULT-INJECTION LAB" not in " ".join(m.value for m in app.markdown)
+
+
+@pytest.mark.skipif(not V1_MODEL.is_file() or not (ROOT / "data/raw/core_v1/run_00216").is_dir(),
+                    reason="needs core_v1 runs and the v1 model")
+def test_health_timeline_tracks_stages_and_states_no_rul_claim():
+    app = AppTest.from_file(str(APP), default_timeout=120).run()
+    widget(app.sidebar.selectbox, "Dataset").set_value("core_v1").run()
+    widget(app.sidebar.selectbox, "Run").set_value("run_00216").run()  # valve degradation
+    widget(app.sidebar.slider, "Seek (s)").set_value(24.0).run()
+    widget(app.sidebar.button, "Seek").click().run()
+    assert not app.exception
+    summary = next(m.value for m in app.markdown if m.value.startswith("**Health stages so far:**"))
+    assert summary.split("**")[2].strip().startswith("healthy")
+    assert "persistent fault at" in summary
+    caption = " ".join(c.value for c in app.caption)
+    assert "deterioration demonstration" in caption
+    assert "no forecast or remaining-useful-life claim" in caption
 
 
 needs_holdout = pytest.mark.skipif(
@@ -143,3 +205,30 @@ def test_scenario_cards_load_the_tagged_preset_and_play_label_follows_state():
     widget(app.sidebar.button, "Play").click().run()
     assert app.session_state["playing"]
     assert any(b.label == "Pause" for b in app.sidebar.button)
+
+
+V2_MODEL = ROOT / "artifacts/models/multifault_v2.joblib"
+
+
+@pytest.mark.skipif(not V2_MODEL.is_file() or not (ROOT / "data/raw/core_v2").is_dir(),
+                    reason="needs core_v2 runs and the v2 model")
+def test_core_v2_shows_one_probability_and_alert_row_per_fault():
+    import json
+
+    truths = ROOT / "evaluation_truth/core_v2"
+    run_id = next(json.loads(p.read_text(encoding="utf-8"))["run_id"]
+                  for p in sorted(truths.glob("run_*_events.json"))
+                  if len(json.loads(p.read_text(encoding="utf-8"))["conditions"]) == 3)
+    app = AppTest.from_file(str(APP), default_timeout=120).run()
+    widget(app.sidebar.selectbox, "Dataset").set_value("core_v2").run()
+    widget(app.sidebar.selectbox, "Run").set_value(run_id).run()
+    widget(app.sidebar.slider, "Seek (s)").set_value(29.0).run()
+    widget(app.sidebar.button, "Seek").click().run()
+    assert not app.exception
+    record = app.session_state["records"][-1]
+    assert record["model_version"] == "v2.0.0"
+    assert set(record["probabilities"]) == {"misfire", "knock_like", "valve_clearance_like"}
+    assert isinstance(record["alerts"], list)
+    assert {m.label for m in app.metric} >= {"P(misfire)", "P(knock_like)",
+                                             "P(valve_clearance_like)", "Faults detected"}
+    assert len([e for e in app.error if "ALERT" in e.value]) == len(record["alerts"])
