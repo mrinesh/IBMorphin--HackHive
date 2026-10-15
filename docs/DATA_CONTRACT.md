@@ -155,7 +155,7 @@ A window is labeled only when it lies inside one truth segment; otherwise it is
 ## Temporary model
 
 `engine-diagnostics train-temporary` writes `artifacts/models/temporary.joblib`
-(model version `temporary-0.1.0`, feature version, ordered feature names,
+(model version `temporary-0.2.0`, feature version, ordered feature names,
 training runs) and `reports/generated/temporary_model_report.json`. Each window
 decision has `predicted` (SVM class), `margin`, `anomaly_score`, `anomalous`,
 and `accepted` (the class, or `uncertain` when the SVM and the normal baseline

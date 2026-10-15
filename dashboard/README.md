@@ -36,6 +36,14 @@ and a missed mild-knock challenge run (a stated limitation).
   bin (v1)
 - Simulated valve-wear indicator: 5 s rolling mean of the calibrated
   valve-clearance probability (accelerated simulation, not remaining life)
+- "Hold out this run's engine" (integration dataset, training engines only): replays with a model
+  refitted without that engine (`fit_holdout_model`, version suffix
+  `-without-<engine>`), so a fault on an unseen engine can be watched live.
+  Needs `data/processed/integration_v1_features.parquet`; refitting takes about a
+  second and is cached per engine
+- Cross-engine check: per-engine and pooled leave-one-engine-out macro-F1 and
+  recall for fused and waveform-only features, plus the pooled fused confusion
+  matrix, read from `reports/generated/temporary_model_report.json`
 
 Play, pause, restart, speed, and seek are in the sidebar. Seek resets buffers and
 alert state and re-processes from the start. Predictions are computed live by
