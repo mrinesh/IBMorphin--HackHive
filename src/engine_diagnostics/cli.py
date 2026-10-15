@@ -1,4 +1,4 @@
-"""Workspace diagnostics and configuration validation; no generated sensor data."""
+"""Workspace diagnostics, configuration validation, and run-bundle validation."""
 
 import argparse
 import importlib.metadata
@@ -52,8 +52,37 @@ def _doctor(root: Path) -> int:
         print(f"[INFO] MATLAB executable found: {matlab}; product licenses are not verified")
     else:
         print("[INFO] MATLAB not on PATH; run matlab/initialize_project.m in MATLAB")
-    print("Project stage: initialized. Sensor generation, models, and dashboard remain planned.")
+    print("Project stage: integration batch. Features, models, and dashboard remain planned.")
     return 0 if healthy else 1
+
+
+def _validate_runs(raw_dir: Path, config: dict) -> int:
+    try:
+        from engine_diagnostics.data import run_io
+    except ImportError as error:
+        print(f"validate-runs needs the analysis extra ({error.name} missing); run "
+              "`uv sync --locked --all-extras`", file=sys.stderr)
+        return 1
+    run_dirs = run_io.find_runs(raw_dir) if raw_dir.is_dir() else []
+    if not run_dirs:
+        print(f"No run_NNNNN directories in {raw_dir}", file=sys.stderr)
+        return 1
+    failures = 0
+    for run_dir in run_dirs:
+        try:
+            issues = run_io.validate_run(run_io.load_run(run_dir), config)
+        except (OSError, ValueError) as error:
+            issues = [str(error)]
+        failures += bool(issues)
+        print(f"[OK] {run_dir.name}" if not issues else f"[INVALID] {run_dir.name}")
+        for issue in issues:
+            print(f"  {issue}")
+    if failures:
+        print(f"{failures} of {len(run_dirs)} runs invalid; manifest not written")
+        return 1
+    manifest = run_io.write_manifest(raw_dir, run_dirs)
+    print(f"{len(run_dirs)} runs valid; manifest written to {manifest}")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -65,6 +94,10 @@ def main(argv: list[str] | None = None) -> int:
     validate = commands.add_parser("validate-config", help="Validate the shared scenario settings")
     validate.add_argument("config", type=Path, nargs="?", default=Path("configs/mvp.json"))
     validate.add_argument("--schema", type=Path, default=Path("schemas/project-config.schema.json"))
+    runs = commands.add_parser("validate-runs", help="Validate exported run bundles")
+    runs.add_argument("raw_dir", type=Path, nargs="?", default=Path("data/raw"))
+    runs.add_argument("--config", type=Path, default=Path("configs/mvp.json"))
+    runs.add_argument("--schema", type=Path, default=Path("schemas/project-config.schema.json"))
     args = parser.parse_args(argv)
     if args.command == "doctor":
         return _doctor(args.root.resolve())
@@ -73,6 +106,8 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError) as error:
         print(f"Configuration error: {error}", file=sys.stderr)
         return 1
+    if args.command == "validate-runs":
+        return _validate_runs(args.raw_dir, config)
     print(json.dumps({
         "status": "valid",
         "schema_version": config["schema_version"],

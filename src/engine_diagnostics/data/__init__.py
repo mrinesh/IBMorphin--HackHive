@@ -1,1 +1,1 @@
-"""Namespace for future MAT import and run validation."""
+"""MAT/CSV/JSON run-bundle import and validation (see run_io)."""

@@ -17,8 +17,8 @@ Execution tracker. Checked items have been completed; unchecked items remain fut
 - [ ] Confirm the four MVP conditions and record excluded features: real acquisition, current sensing, CNNs, combined-fault classification, and remaining-useful-life prediction.
 - [ ] Record assumptions: four-cylinder four-stroke engine; 800–3,500 RPM; normalized load 0.2–0.8; warm operation.
 - [ ] Confirm organizer expectations for team-generated synthetic data, MATLAB simulation, and recorded-data replay; track unanswered questions without blocking independent work.
-- [ ] Record MATLAB release and installed products using `ver`; verify required functions can actually run under the available licenses.
-- [ ] Check Signal Processing Toolbox and Simulink availability; check Powertrain Blockset only if considering an existing powertrain example.
+- [x] Record MATLAB release and installed products using `ver`; verify required functions can actually run under the available licenses. See `docs/TESTING.md`.
+- [x] Check Signal Processing Toolbox and Simulink availability; check Powertrain Blockset only if considering an existing powertrain example. Signal installed; Simulink licensed, not installed.
 - [ ] Establish a pinned Python environment with NumPy, SciPy, pandas, scikit-learn, Streamlit, Plotly, PyArrow, and pytest. The configuration/test environment is installed; the full stack is locked and enabled with `uv sync --locked --all-extras --group quality`.
 - [x] Choose one authoritative configuration format, preferably JSON readable by both MATLAB and Python. See `configs/mvp.json` and its schema.
 - [x] Create an assumption/decision log and a deferred-feature backlog. See `docs/DECISIONS.md` and Section 10.
@@ -36,8 +36,8 @@ Execution tracker. Checked items have been completed; unchecked items remain fut
 - [x] Define acoustic units as normalized sensor units and vibration as nominal simulated m/s²; document that neither is calibrated against a real engine.
 - [x] Define telemetry fields and rates: RPM 50 Hz; throttle/load 10 Hz; coolant 1 Hz; short-/long-term fuel trims 2 Hz.
 - [x] Define elapsed-time origin, sample indexing, start offsets, clock corrections, missing-data flags, and field freshness limits. See `docs/DATA_CONTRACT.md`.
-- [ ] Export waveform arrays as numeric `single` arrays in per-run MAT files explicitly saved as Version 7 (`-v7`).
-- [ ] Export telemetry as CSV and metadata as JSON; Python can convert telemetry to Parquet after validation.
+- [x] Export waveform arrays as numeric `single` arrays in per-run MAT files explicitly saved as Version 7 (`-v7`).
+- [x] Export telemetry as CSV and metadata as JSON; Python can convert telemetry to Parquet after validation.
 - [x] Keep fault schedules, severity, source-event times, affected cylinders, and seeds in evaluation-only files. Specified in `docs/DATA_CONTRACT.md`; enforced when the generator exists.
 - [x] Define run IDs, engine IDs, configuration versions, schema versions, and file checksums. See `docs/DATA_CONTRACT.md`.
 - [ ] Define ordered model feature names and prediction-record fields, including window time, status, score, alert, and model version.
@@ -54,9 +54,9 @@ Execution tracker. Checked items have been completed; unchecked items remain fut
 
 **Owners:** MATLAB, ML, and dashboard leads. **Dependency:** Phase 2. **Timing:** achieve within the first 20% of elapsed project time.
 
-- [ ] Create a small integration batch: approximately 12 runs of 20 seconds, covering normal operation and simple examples of each modeled fault.
-- [ ] Use a shared event schedule to keep audio, vibration, and telemetry synchronized.
-- [ ] Export from MATLAB and verify the round trip in Python.
+- [x] Create a small integration batch: approximately 12 runs of 20 seconds, covering normal operation and simple examples of each modeled fault. First version: 3 runs, each normal then one fault at 8 s; extend to 12 later.
+- [x] Use a shared event schedule to keep audio, vibration, and telemetry synchronized.
+- [x] Export from MATLAB and verify the round trip in Python. `engine-diagnostics validate-runs`.
 - [ ] Implement a minimal common Python feature path using RMS, envelope variation, and broad band energies.
 - [ ] Train a temporary baseline/classifier using separate runs; do not present early scores as final evaluation.
 - [ ] Replay one run at 1× speed using trailing two-second windows and 0.5-second updates.
@@ -72,9 +72,9 @@ Execution tracker. Checked items have been completed; unchecked items remain fut
 
 **Owner:** MATLAB/data-generation lead. **Dependency:** Phase 3 contracts proven. **Timing:** approximately 20% of effort.
 
-- [ ] Build the generator as reusable MATLAB functions driven by configuration, not an undocumented interactive workspace.
+- [x] Build the generator as reusable MATLAB functions driven by configuration, not an undocumented interactive workspace.
 - [ ] Generate RPM/load trajectories for steady operation, idle-like operation, gradual ramps, and load transitions.
-- [ ] Integrate RPM into crank angle and schedule combustion events across the 720-degree four-stroke cycle.
+- [x] Integrate RPM into crank angle and schedule combustion events across the 720-degree four-stroke cycle.
 - [ ] Include normal combustion variability, shaft-order components, ordinary valve impacts, structural ringing, and colored noise.
 - [ ] Render acoustic and vibration channels through different gains, delays, filters, and resonances; avoid scaled copies.
 - [ ] Model misfire by weakening/suppressing selected combustion events and sharing their mechanical consequences across modalities.
@@ -86,7 +86,7 @@ Execution tracker. Checked items have been completed; unchecked items remain fut
 - [ ] Add sensor gain/placement variation, resonance variation, background noise, unrelated impacts, drift, clipping, and missing-data cases.
 - [ ] Add timing jitter, small clock offsets, and drift as explicit robustness settings.
 - [ ] Band-limit rendered impulses before downsampling; verify aliasing is controlled.
-- [ ] Use reproducible independent random streams for operating state, fault events, and each sensor's noise.
+- [x] Use reproducible independent random streams for operating state, fault events, and each sensor's noise.
 - [ ] Save resolved configuration, generator version, engine/run identifiers, and seed references for every run.
 - [ ] Document which equations are physically motivated, which parameter mappings are heuristic, and which require measurements.
 

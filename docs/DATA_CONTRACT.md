@@ -25,7 +25,7 @@ label, fault schedule, severity, or seeds.
 
 | File | Fields and rules |
 |---|---|
-| `waveforms.mat` | Version 7 (`-v7`); numeric `single` column vectors `audio` and `vibration`; `double` scalars `audio_fs_hz`, `vibration_fs_hz`, `audio_t0_s`, `vibration_t0_s` |
+| `waveforms.mat` | Version 7 (`-v7`); numeric `single` column vectors `audio` and `vibration`; `double` scalars `audio_fs_hz`, `vibration_fs_hz`, `audio_t0_s`, `vibration_t0_s`. MATLAB may store integer-valued doubles compactly; read with `loadmat(..., mat_dtype=True)` |
 | `telemetry.csv` | Long-form columns `t_s,signal,value,unit,valid` (see Telemetry) |
 | `metadata.json` | Public run description (see Metadata) |
 | `manifest.json` | SHA-256 and byte size of every public file, per run |

@@ -3,10 +3,12 @@
 MATLAB/Python project for the Honeywell hackathon problem on engine signature
 extraction and pattern recognition.
 
-**Current stage: initialization.** The workspace, shared settings, configuration
-validator, and environment-check CLI are available. The synthetic generator,
-dataset, signal-processing features, models, and dashboard are subsequent
-milestones. No diagnostic performance has been measured.
+**Current stage: first integration batch.** A config-driven MATLAB generator
+produces synchronized audio, vibration, and telemetry runs (3 × 20 s: normal
+then misfire, knock-like, or valve-clearance-like), and Python loads and
+validates them against the data contract. Signal-processing features, models,
+and the dashboard are subsequent milestones. No diagnostic performance has been
+measured.
 
 ## Quick start
 
@@ -49,9 +51,19 @@ addpath('matlab');
 project = initialize_project();
 ```
 
-This loads the same JSON settings and prints the installed products. MATLAB
-execution and specialized toolbox licenses must be verified in that session.
-MATLAB is not currently discoverable on this machine's PATH. See
+This loads the same JSON settings and prints the installed products. Generate
+and check the integration batch (requires Signal Processing Toolbox):
+
+```matlab
+runs = generate_integration_batch();   % data/raw and evaluation_truth
+```
+
+```powershell
+uv run --all-extras engine-diagnostics validate-runs
+uv run --all-extras pytest
+```
+
+On macOS MATLAB is at `/Applications/MATLAB_R2026b.app` and not on PATH. See
 [MATLAB setup](matlab/README.md).
 
 ## Structure
@@ -91,10 +103,10 @@ validator checks schema, sampling limits, window relationships, and split counts
 
 ## Next milestone
 
-Generate a small synchronized integration batch in MATLAB, export numeric MAT
-Version 7/CSV/JSON, and prove Python import and one complete replay path before
-generating the full dataset. The handoff is specified in
-[DATA_CONTRACT.md](docs/DATA_CONTRACT.md).
+Implement the minimal Python feature path (RMS, envelope variation, band
+energies), a temporary baseline/classifier on separate runs, and a 1× replay of
+one run. Extend the integration batch (normal-only runs, more seeds) before
+training. The handoff is specified in [DATA_CONTRACT.md](docs/DATA_CONTRACT.md).
 
 ## Project documents
 

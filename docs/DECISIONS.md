@@ -30,10 +30,22 @@
 - Signal Processing Toolbox and Statistics and Machine Learning Toolbox were
   then installed and verified; Simulink and Powertrain Blockset remain uninstalled.
 
+## 2026-10-15: first integration batch
+
+- Organizers explicitly allow team-generated synthetic data.
+- The first batch is 3 runs × 20 s instead of 12; each starts normal and
+  switches to one fault at 8 s, so all four conditions appear. More runs later.
+- MATLAB does not hash files (no portable SHA-256 without Java in this
+  install); Python `validate-runs` writes `data/raw/manifest.json`.
+- MATLAB may store integer-valued doubles compactly in MAT files; Python reads
+  with `scipy.io.loadmat(..., mat_dtype=True)` so dtype checks see MATLAB classes.
+- Events are keyed by crank angle, so a misfire's RPM dip shifts later events in
+  every stream consistently.
+
 ## Open decisions
 
 - Assign team owners and record the actual hackathon deadline.
-- Confirm organizer expectations for team-generated data and replay.
+- Confirm organizer expectations for recorded-data replay in the demo.
 - Revisit dataset scale only after timing the small integration batch.
 
 ## Initialization verification
