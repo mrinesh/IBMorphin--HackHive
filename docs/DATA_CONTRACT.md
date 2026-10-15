@@ -134,10 +134,22 @@ Telemetry units and rates are listed under Telemetry.
 - Never supply seed, run/engine ID, severity, fault schedule, or latent crank
   truth as a classifier feature.
 
+## Features
+
+Ordered model input names are `engine_diagnostics.pipeline.features.feature_names()`
+(`FEATURE_VERSION` 0.1.0): 14 per modality (`audio_*`, `vibration_*`) plus
+`ctx_rpm`, `ctx_load`, `ctx_throttle`. Each decision time `t` uses waveform
+samples in `[t-2, t)` and the latest valid telemetry strictly before `t`. A
+window's quality is `ok`, `clipped`, `missing_waveform`, or `stale_telemetry`.
+The labeled table (`build-features`) adds bookkeeping columns `run_id`,
+`engine_id`, `split`, `t_end_s`, `label`, `quality`; these are never model inputs.
+A window is labeled only when it lies inside one truth segment; otherwise it is
+`transition` and excluded from training.
+
 ## Deferred
 
-Ordered model feature names and prediction-record fields (window time, status,
-score, alert, model version) are defined with the feature and replay milestone.
+Prediction-record fields (window time, status, score, alert, model version)
+are defined with the replay milestone.
 
 ## Integration batch checks
 

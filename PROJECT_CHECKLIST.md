@@ -57,7 +57,7 @@ Execution tracker. Checked items have been completed; unchecked items remain fut
 - [x] Create a small integration batch: approximately 12 runs of 20 seconds, covering normal operation and simple examples of each modeled fault. 13 runs on 4 engines: 4 normal-only and 9 normal-then-fault; engine_004 held out.
 - [x] Use a shared event schedule to keep audio, vibration, and telemetry synchronized.
 - [x] Export from MATLAB and verify the round trip in Python. `engine-diagnostics validate-runs`.
-- [ ] Implement a minimal common Python feature path using RMS, envelope variation, and broad band energies.
+- [x] Implement a minimal common Python feature path using RMS, envelope variation, and broad band energies. `pipeline/features.py`, version 0.1.0, 31 features.
 - [ ] Train a temporary baseline/classifier using separate runs; do not present early scores as final evaluation.
 - [ ] Replay one run at 1× speed using trailing two-second windows and 0.5-second updates.
 - [ ] Display telemetry, two waveforms, one spectrum, and actual computed predictions.

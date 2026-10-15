@@ -85,6 +85,26 @@ def _validate_runs(raw_dir: Path, config: dict) -> int:
     return 0
 
 
+def _build_features(args, config: dict) -> int:
+    try:
+        from engine_diagnostics.pipeline.dataset import build_feature_table
+        from engine_diagnostics.pipeline.features import FEATURE_VERSION
+    except ImportError as error:
+        print(f"build-features needs the analysis extra ({error.name} missing)", file=sys.stderr)
+        return 1
+    try:
+        table = build_feature_table(args.raw_dir, args.truth_dir, args.batch_config, config)
+    except (OSError, ValueError) as error:
+        print(f"Feature build failed: {error}", file=sys.stderr)
+        return 1
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    table.to_parquet(args.output, index=False)
+    counts = table.groupby(["split", "label"]).size()
+    print(f"{len(table)} windows, feature version {FEATURE_VERSION} -> {args.output}")
+    print(counts.to_string())
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Engine diagnostics project initialization tools")
     parser.add_argument("--version", action="version", version=__version__)
@@ -98,6 +118,14 @@ def main(argv: list[str] | None = None) -> int:
     runs.add_argument("raw_dir", type=Path, nargs="?", default=Path("data/raw"))
     runs.add_argument("--config", type=Path, default=Path("configs/mvp.json"))
     runs.add_argument("--schema", type=Path, default=Path("schemas/project-config.schema.json"))
+    build = commands.add_parser("build-features", help="Labeled window features for all runs")
+    build.add_argument("--raw-dir", type=Path, default=Path("data/raw"))
+    build.add_argument("--truth-dir", type=Path, default=Path("evaluation_truth"))
+    build.add_argument("--batch-config", type=Path, default=Path("configs/integration_batch.json"))
+    build.add_argument("--output", type=Path,
+                       default=Path("data/processed/integration_v1_features.parquet"))
+    build.add_argument("--config", type=Path, default=Path("configs/mvp.json"))
+    build.add_argument("--schema", type=Path, default=Path("schemas/project-config.schema.json"))
     args = parser.parse_args(argv)
     if args.command == "doctor":
         return _doctor(args.root.resolve())
@@ -108,6 +136,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if args.command == "validate-runs":
         return _validate_runs(args.raw_dir, config)
+    if args.command == "build-features":
+        return _build_features(args, config)
     print(json.dumps({
         "status": "valid",
         "schema_version": config["schema_version"],
