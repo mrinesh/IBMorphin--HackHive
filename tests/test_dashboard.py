@@ -58,9 +58,10 @@ def test_play_advances_stream_time_in_real_time():
 V1_MODEL = ROOT / "artifacts/models/diagnostic_v1.joblib"
 
 
-@pytest.mark.skipif(not V1_MODEL.is_file() or not (ROOT / "data/raw/core_v1").is_dir(),
-                    reason="needs core_v1 runs and the v1 model")
-def test_every_demo_preset_renders_with_v1_panels():
+@pytest.mark.skipif(not V1_MODEL.is_file() or not (ROOT / "data/raw/core_v1").is_dir()
+                    or not (ROOT / "artifacts/models/multifault_v2.joblib").is_file(),
+                    reason="needs core_v1/core_v2 runs and the v1 and v2 models")
+def test_every_demo_preset_renders_with_its_model_panels():
     import json
 
     presets = json.loads((ROOT / "configs/demo_presets.json").read_text(encoding="utf-8"))
@@ -75,7 +76,8 @@ def test_every_demo_preset_renders_with_v1_panels():
         assert not app.exception, preset["name"]
         records = app.session_state["records"]
         assert records and "probability" in records[-1]
-        assert any(m.label == "Calibrated confidence" for m in app.metric)
+        expected = "P(misfire)" if preset["dataset"] == "core_v2" else "Calibrated confidence"
+        assert any(m.label == expected for m in app.metric), preset["name"]
 
 
 needs_holdout = pytest.mark.skipif(

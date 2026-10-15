@@ -47,5 +47,26 @@
     "run_id": "run_00247",
     "start_s": 4,
     "note": "Challenge run on a held-out engine: reserved high-RPM band, 2x noise, severity 0.16. The model misses this knock; challenge knock recall was 0."
+  },
+  {
+    "name": "8. Three simultaneous faults (multi-fault v2)",
+    "dataset": "core_v2",
+    "run_id": "run_00252",
+    "start_s": 8,
+    "note": "Held-out engine_058. Valve-clearance-like on cylinder 4 from 10.4 s, then misfire on cylinder 3 from 20.6 s and knock-like on cylinder 1 from 21.6 s. Each fault has its own detector and alert: valve alerts at 13.0 s, misfire at 22.0 s, knock at 22.5 s, so all three alerts are active together from 22.5 s. The valve alert drops out briefly twice after 24 s while its probability dips to about 0.7."
+  },
+  {
+    "name": "9. Misfire and knock starting together (multi-fault v2)",
+    "dataset": "core_v2",
+    "run_id": "run_00240",
+    "start_s": 6,
+    "note": "Held-out engine_057. Knock-like on cylinder 1 from 8.2 s and mild misfire (severity 0.28) on cylinder 4 from 9.6 s, during an RPM ramp. Misfire alerts at 11.5 s and knock at 15.0 s; both alerts then stay active side by side to the end."
+  },
+  {
+    "name": "10. Limitation: valve fault missed next to knock (multi-fault v2)",
+    "dataset": "core_v2",
+    "run_id": "run_00251",
+    "start_s": 9,
+    "note": "Held-out engine_058. Limitation. Knock-like from 10.8 s and a severe valve-clearance-like fault from 14.1 s, both on cylinder 4. Knock alerts at 12.5 s. The valve alert fires at 14.0 s, before the valve fault exists, so it was triggered by the knock on the same cylinder; scoring counts it as a false alert and the real valve fault as not separately detected. Valve is v2's weakest detector (window recall 0.62 on test engines)."
   }
 ]
