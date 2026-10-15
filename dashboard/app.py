@@ -113,6 +113,14 @@ def run_engines(raw_dir: str) -> dict[str, str]:
 
 
 @st.cache_resource
+def load_truth_cached(dataset: str, run_id: str) -> dict:
+    """Evaluation truth for the review overlay only; never passed to the engine."""
+    from engine_diagnostics.pipeline.labels import load_truth  # evaluation only
+
+    return load_truth(DATASETS[dataset]["truth"], run_id)
+
+
+@st.cache_resource
 def load_holdout_model(engine_id: str):
     return fit_holdout_model(pd.read_parquet(FEATURES_PATH), engine_id)
 
@@ -346,8 +354,11 @@ def live_view():
     cards = telemetry_cards(t_now)
     view_col, diag_col = st.columns([3, 2], gap="medium")
     with view_col, st.container(key="viewport"):
-        engine3d.render({"t": t_now, "playing": bool(state.playing),
-                         "rpm": next(c["value"] for c in cards if c["label"] == "RPM")})
+        engine3d.render(engine3d.scene_state(
+            latest, model, t_now=t_now, playing=bool(state.playing),
+            rpm=next(c["value"] for c in cards if c["label"] == "RPM"),
+            firing_order=config["engine"]["firing_order"],
+            truth=load_truth_cached(dataset, run_id) if show_truth else None))
     with diag_col:
         st.html(theme.status_card_html(explain.diagnose(latest, model, confirm)))
 
@@ -440,9 +451,7 @@ def live_view():
                                               "color": theme.TOKENS["rose"]},
                                       name="active alert"))
     if show_truth:
-        from engine_diagnostics.pipeline.labels import load_truth  # evaluation only
-
-        truth = load_truth(DATASETS[dataset]["truth"], run_id)
+        truth = load_truth_cached(dataset, run_id)
         intervals = truth.get("active_intervals") or []
         if intervals and not isinstance(intervals[0], list):
             intervals = [intervals]

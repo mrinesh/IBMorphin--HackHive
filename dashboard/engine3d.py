@@ -7,7 +7,83 @@ it. Three.js and the scene module are served from dashboard/static (no CDN), and
 browser caches the dynamic import, so reruns do not re-download or re-evaluate them.
 """
 
+import math
+from typing import Any
+
 import streamlit as st
+
+from dashboard import explain
+from dashboard.theme import CLASS_META, TOKENS, class_meta
+
+FAULTS = ("misfire", "knock_like", "valve_clearance_like")
+
+
+def scene_state(record: dict[str, Any] | None, model, *, t_now: float, playing: bool,
+                rpm: float | None, firing_order: list[int],
+                truth: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Small JSON state for the 3D view, derived only from model output and sensor data.
+
+    The effect is the confirmed alert class if there is one, else an accepted fault.
+    Its intensity is the model's calibrated confidence for that class (v1), or the
+    evidence level / 3 for the temporary model, or 0.45 while an alert is only held.
+    `vibration_ratio` is this window's vibration RMS over the normal-reference RMS.
+    `truth` (evaluation truth) is only passed when the overlay is on, and only its
+    affected cylinder during an active fault interval reaches the browser.
+    """
+    state: dict[str, Any] = {"t": round(t_now, 2), "playing": playing,
+                             "rpm": None if rpm is None else round(rpm, 1),
+                             "firing_order": list(firing_order), "effect": None,
+                             "intensity": 0.0, "vibration_ratio": 1.0, "alert": None,
+                             "edge_color": TOKENS["cyan"], "status_text": "Model: warming up",
+                             "truth_cylinder": None}
+    if record is not None:
+        quality, accepted, alert = record["quality"], record["accepted"], record.get("alert")
+        effect = alert if alert in FAULTS else accepted if accepted in FAULTS else None
+        if effect and effect == accepted and quality == "ok":
+            if "probability" in record:
+                intensity = record["probability"]
+            else:
+                strength = explain.evidence_strength(record, model)
+                intensity = strength["level"] / 3 if strength else 0.45
+        else:
+            intensity = 0.45 if effect else 0.0
+        meta = CLASS_META[effect] if effect else class_meta(accepted, quality)
+        if quality != "ok":
+            status = "Model: no decision (data quality)"
+        elif accepted in FAULTS:
+            confidence = (f" · confidence {record['probability']:.2f}"
+                          if "probability" in record else "")
+            status = f"Model: {CLASS_META[accepted]['label']}{confidence}"
+        else:
+            status = f"Model: {class_meta(accepted)['label']}"
+        if alert and alert != accepted:
+            status += f" · alert held: {CLASS_META.get(alert, {'label': alert})['label']}"
+        if effect:
+            status += " · cylinder not identified by the model"
+        state.update(effect=effect, intensity=round(float(intensity), 3), alert=alert,
+                     edge_color=meta["color"], status_text=status,
+                     vibration_ratio=_vibration_ratio(record, model))
+    if truth is not None:
+        intervals = truth.get("active_intervals") or []
+        if intervals and not isinstance(intervals[0], list):
+            intervals = [intervals]
+        active = any(a <= t_now <= b for a, b in intervals)
+        cylinder = truth.get("affected_cylinder")
+        if active and truth.get("condition") in FAULTS and isinstance(cylinder, int):
+            state["truth_cylinder"] = cylinder
+    return state
+
+
+def _vibration_ratio(record: dict[str, Any], model) -> float:
+    """Current vibration RMS relative to the normal reference (1.0 when unknown)."""
+    name = "vibration_log_rms"
+    if record["quality"] != "ok" or name not in model.baseline_names:
+        return 1.0
+    (median, _), _ = explain.reference_stats(record, model)
+    value = record["features"][model.feature_names.index(name)]
+    ratio = 10 ** (value - median[model.baseline_names.index(name)])
+    return round(float(ratio), 3) if math.isfinite(ratio) else 1.0
+
 
 _HTML = """
 <div class="engine3d-root" tabindex="0" role="img"
