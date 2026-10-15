@@ -38,6 +38,7 @@ artifacts/models/*
 !artifacts/models/.gitkeep
 artifacts/logs/*
 !artifacts/logs/.gitkeep
+artifacts/*.zip
 reports/generated/*
 !reports/generated/.gitkeep
 
