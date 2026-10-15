@@ -145,3 +145,36 @@ h1, h2, h3, h4 { letter-spacing: 0.04em; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
   .stApp::after { display: none; }
 }
+
+/* Evidence strength, why and background sections of the diagnosis card */
+.strength { display: grid; gap: 0.4rem; }
+.strength-head { display: flex; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; }
+.strength-label {
+  font-family: "Fira Code", monospace; font-size: 0.8rem; font-weight: 600;
+  color: var(--strength);
+}
+.segments { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.segments i { height: 7px; border-radius: 2px; background: rgba(148, 163, 184, 0.18); }
+.segments i.on { background: var(--strength); box-shadow: 0 0 10px var(--strength); }
+.strength ul, .why ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 0.2rem; }
+.strength li { display: flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; }
+.strength li.met { color: var(--hud-text); }
+.strength li.met .hud-icon { color: var(--hud-green); }
+.strength li.unmet { color: var(--hud-muted); }
+.sr {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.why ol { counter-reset: why; }
+.why li {
+  counter-increment: why; font-size: 0.84rem; line-height: 1.4; padding-left: 1.4rem;
+  position: relative;
+}
+.why li::before {
+  content: counter(why); position: absolute; left: 0; top: 0.05rem; width: 1rem; height: 1rem;
+  border: 1px solid var(--hud-line); border-radius: 3px; font: 600 0.7rem/1rem "Fira Code";
+  text-align: center; color: var(--hud-cyan);
+}
+.about p { margin: 0.2rem 0 0; font-size: 0.84rem; line-height: 1.45; }
+.about .checks { margin-top: 0.3rem; font-size: 0.8rem; color: var(--hud-muted); }
+.about .checks b { color: var(--hud-text); font-weight: 600; }

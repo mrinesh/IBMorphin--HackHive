@@ -264,23 +264,14 @@ if held_out:
                f"this run's engine is new to it. Synthetic check, not a real-world claim.")
 
 
-def reference_stats(record):
-    """Normal reference for this window: operating bin (v1) or global (temporary)."""
-    if hasattr(model, "bin_stats"):
-        ctx = record["context"]
-        key = model.operating_bin(ctx["rpm"], ctx["load"])
-        return model.bin_stats.get(key, model.global_stats), key in model.bin_stats
-    return (model.baseline_median, model.baseline_scale), False
-
-
 def evidence_table(record) -> tuple[pd.DataFrame, bool]:
-    names = model.baseline_names
-    values = np.array([record["features"][model.feature_names.index(n)] for n in names])
-    (median, scale), matched = reference_stats(record)
-    z = (values - median) / scale
-    top = np.argsort(-np.abs(z))[:3]
-    table = pd.DataFrame({"feature": [names[k] for k in top], "value": values[top].round(4),
-                          "normal median": median[top].round(4), "robust z": z[top].round(1)})
+    """Three largest robust deviations (same rows as the diagnosis card's 'why')."""
+    rows, matched = explain.evidence(record, model)
+    table = pd.DataFrame({"feature": [r["feature"] for r in rows],
+                          "meaning": [explain.describe_feature(r["feature"]) for r in rows],
+                          "value": [round(r["value"], 4) for r in rows],
+                          "normal median": [round(r["median"], 4) for r in rows],
+                          "robust z": [round(r["z"], 1) for r in rows]})
     return table, matched
 
 

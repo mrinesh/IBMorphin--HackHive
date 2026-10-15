@@ -165,7 +165,6 @@ def status_card_html(diagnosis: dict) -> str:
                   f'Alert: {escape(alert)}</span>' if alert else
                   f'<span class="pill" style="color:{TOKENS["green"]}">{icon("check", 14)}'
                   f"No active alert</span>")
-    extra = diagnosis.get("extra_html", "")
     return (
         f'<section class="hud-card status" aria-label="Current diagnosis">'
         f'<div class="hud-label">Model decision · {escape(diagnosis["model_version"])}</div>'
@@ -175,10 +174,51 @@ def status_card_html(diagnosis: dict) -> str:
         f"</div></div></div>"
         f"<div>{alert_pill}</div>"
         f'<div class="status-grid">{"".join(rows)}</div>'
-        f"{extra}"
+        f"{_strength_html(diagnosis.get('strength'))}"
+        f"{_why_html(diagnosis.get('why'), diagnosis.get('why_ref'))}"
+        f"{_about_html(diagnosis.get('about'))}"
         f'<div class="status-note">{escape(diagnosis["note"])}</div>'
         f"</section>"
     )
+
+
+def _strength_html(strength: dict | None) -> str:
+    """Three-segment meter plus the criteria behind it (each with icon and text)."""
+    if not strength:
+        return ""
+    level = strength["level"]
+    color = {3: TOKENS["rose"], 2: TOKENS["amber"]}.get(level, TOKENS["slate"])
+    if strength["for"] == "Normal":
+        color = TOKENS["green"] if level == 3 else color
+    segments = "".join(f'<i class="{"on" if k < level else ""}"></i>' for k in range(3))
+    items = "".join(
+        f'<li class="{"met" if ok else "unmet"}">{icon("check" if ok else "help", 13)}'
+        f'<span>{escape(text)}</span><span class="sr">{"met" if ok else "not met"}</span></li>'
+        for text, ok in strength["criteria"])
+    return (f'<div class="strength" style="--strength:{color}">'
+            f'<div class="strength-head"><span class="hud-label">Evidence strength for '
+            f'{escape(strength["for"])}</span><span class="strength-label">'
+            f'{escape(strength["label"])} · {level}/3</span></div>'
+            f'<div class="segments" role="img" aria-label="{level} of 3 criteria met">'
+            f"{segments}</div><ul>{items}</ul></div>")
+
+
+def _why_html(why: list[str] | None, reference: str | None) -> str:
+    if not why:
+        return ""
+    items = "".join(f"<li>{escape(line)}</li>" for line in why)
+    return (f'<div class="why"><div class="hud-label">Why · largest deviations '
+            f'({escape(reference or "")})</div><ol>{items}</ol></div>')
+
+
+def _about_html(about: dict | None) -> str:
+    if not about:
+        return ""
+    checks = (f'<div class="checks"><b>Typical checks on a real engine:</b> '
+              f'{escape(about["checks"])}</div>' if about.get("checks") else "")
+    return (f'<div class="about"><div class="hud-label">What {escape(about["class"])} means · '
+            f'general background, not model output</div><p>{escape(about["means"])}</p>'
+            f"{checks}</div>")
 
 
 def sparkline_svg(values: list[float]) -> str:

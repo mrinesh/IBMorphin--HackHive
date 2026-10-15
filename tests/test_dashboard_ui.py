@@ -73,3 +73,47 @@ def test_cards_escape_text_and_format_values():
          "value": None, "history": []},
     ])
     assert "2,940" in tele and "FRESH 0.0s" in tele and "NO DATA" in tele and "<svg" not in tele
+
+
+def test_evidence_strength_is_a_checklist_of_model_criteria():
+    confirmed = explain.evidence_strength(record(alert="knock_like"), V1)
+    assert (confirmed["level"], confirmed["label"]) == (3, "Confirmed")
+    assert confirmed["criteria"][0] == ("Confidence 0.82 ≥ 0.70", True)
+    unconfirmed = explain.evidence_strength(record(anomalous=False), V1)
+    assert (unconfirmed["level"], unconfirmed["label"]) == (1, "Weak")
+    normal = explain.evidence_strength(record(predicted="normal", accepted="normal",
+                                              anomalous=False), V1)
+    assert normal["for"] == "Normal" and normal["level"] == 3
+    temp = {k: v for k, v in record(margin=0.1).items() if k != "probability"}
+    assert explain.evidence_strength(temp, TEMPORARY)["criteria"][0] == ("Margin 0.10 < 0.40",
+                                                                         False)
+    assert explain.evidence_strength(record(quality="clipped"), V1) is None
+
+
+def test_evidence_ranks_finite_robust_deviations_from_the_normal_reference():
+    import numpy as np
+
+    model = SimpleNamespace(
+        baseline_names=["audio_firing_peak_cv", "vibration_env_cv_high", "audio_crest",
+                        "audio_log_rms"],
+        feature_names=["audio_firing_peak_cv", "vibration_env_cv_high", "audio_crest",
+                       "audio_log_rms", "ctx_rpm"],
+        baseline_median=np.array([0.1, 1.0, 3.0, 0.0]),
+        baseline_scale=np.array([0.01, 0.5, 1.0, 1.0]))
+    window = record(features=[0.25, 0.0, np.nan, 0.5, 2000.0])
+    rows, matched = explain.evidence(window, model)
+    assert not matched
+    assert [r["feature"] for r in rows] == ["audio_firing_peak_cv", "vibration_env_cv_high",
+                                            "audio_log_rms"]  # NaN feature skipped
+    assert rows[0]["z"] == pytest.approx(15.0)
+    assert explain.evidence_sentence(rows[0]) == (
+        "Audio cycle-to-cycle variation of firing pulses is far above normal (z = +15.0)")
+    assert explain.evidence_sentence(rows[1]).startswith(
+        "Vibration burstiness of the 5-10 kHz envelope is slightly below normal")
+
+
+def test_background_text_is_marked_as_not_model_output():
+    card = theme.status_card_html(explain.diagnose(record(), V1, 2))
+    assert "general background, not model output" in card
+    assert "Typical checks on a real engine" in card
+    assert "Evidence strength for Knock-like" in card
