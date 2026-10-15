@@ -11,10 +11,10 @@ from streamlit.testing.v1 import AppTest  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "dashboard/app.py"
 
-pytestmark = pytest.mark.skipif(
+needs_integration = pytest.mark.skipif(
     not (ROOT / "artifacts/models/temporary.joblib").is_file()
     or not any((ROOT / "data/raw").glob("run_*")),
-    reason="needs generated runs and train-temporary output",
+    reason="needs the integration runs and train-temporary output",
 )
 
 
@@ -22,6 +22,7 @@ def widget(widgets, label):
     return next(w for w in widgets if w.label == label)
 
 
+@needs_integration
 def test_dashboard_renders_banner_and_seeks_with_live_predictions():
     app = AppTest.from_file(str(APP), default_timeout=60).run()
     assert not app.exception
@@ -38,6 +39,7 @@ def test_dashboard_renders_banner_and_seeks_with_live_predictions():
     assert any("ALERT" in e.value for e in app.error)
 
 
+@needs_integration
 def test_play_advances_stream_time_in_real_time():
     import time
 
