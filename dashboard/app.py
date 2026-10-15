@@ -69,6 +69,7 @@ SCENARIOS = {
     "misfire": ":material/local_fire_department: Misfire",
     "valve_clearance_like": ":material/graphic_eq: Valve-train impacts",
 }
+MODALITY_TITLES = {"audio": "Sound", "vibration": "Vibration"}
 TELEMETRY_CARDS = [  # signal, label, value format, unit
     ("rpm", "RPM", ",.0f", "rpm"), ("load", "Load", ".1f", "%"),
     ("throttle", "Throttle", ".1f", "%"), ("coolant_temp", "Coolant", ".1f", "°C"),
@@ -314,6 +315,11 @@ def telemetry_cards(t_now: float) -> list[dict]:
     return cards
 
 
+def label(class_name: str | None) -> str:
+    """Readable class name (e.g. knock_like -> Knock-like) for display only."""
+    return theme.CLASS_META.get(class_name, {}).get("label", class_name or "-")
+
+
 @st.fragment(run_every=TICK_S)
 def live_view():
     rendered = time.perf_counter()
@@ -329,15 +335,19 @@ def live_view():
     confirm = getattr(model, "confirm_updates", config["runtime"]["confirm_fault_updates"])
 
     if latest and latest["alert"]:
-        st.error(f"ALERT: {latest['alert']} (confirmed by {confirm} consistent updates)",
-                 icon=":material/warning:")
+        st.error(f"ALERT: {label(latest['alert'])} detected — confirmed by {confirm} "
+                 "consistent updates", icon=":material/warning:")
     else:
-        st.success("No active alert", icon=":material/check_circle:")
+        st.success("No active alert — the engine sounds normal so far",
+                   icon=":material/check_circle:")
 
     cols = st.container(key="readout").columns(7)
-    cols[0].metric("Stream time", f"{t_now:.2f} s")
-    cols[1].metric("Accepted", latest["accepted"] if latest else "warming up")
-    cols[2].metric("Classifier", (latest["predicted"] or "-") if latest else "-")
+    cols[0].metric("Replay time", f"{t_now:.1f} s")
+    cols[1].metric("Decision", label(latest["accepted"]) if latest else "Warming up",
+                   help="What the model accepts for this window after its confidence and "
+                        "anomaly checks.")
+    cols[2].metric("Best guess", label(latest["predicted"]) if latest else "-",
+                   help="The classifier's top class before the acceptance checks.")
     if has_probability:
         cols[3].metric("Calibrated confidence", f"{latest['probability']:.2f}",
                        help=f"Accepted only if ≥ {model.probability_min:.2f}; calibrated on "
@@ -345,11 +355,15 @@ def live_view():
     else:
         cols[3].metric("Decision margin", f"{latest['margin']:.2f}" if latest else "-")
     cols[4].metric("Anomaly score", f"{latest['anomaly_score']:.2f}" if latest else "-",
-                   help=f"Threshold {model.anomaly_threshold:.2f}")
-    cols[5].metric("Quality", latest["quality"] if latest else "-")
-    cols[6].metric("Processing / display",
+                   help=f"How unusual this window is compared with normal running. "
+                        f"Threshold {model.anomaly_threshold:.2f}.")
+    cols[5].metric("Signal quality",
+                   ("Good" if latest["quality"] == "ok"
+                    else latest["quality"].replace("_", " ").capitalize()) if latest else "-")
+    cols[6].metric("Response time",
                    f"{latest['processing_ms']:.0f} / {state.get('render_ms', 0):.0f} ms"
-                   if latest else "-")
+                   if latest else "-",
+                   help="Model processing per decision / dashboard update time (server).")
 
     cards = telemetry_cards(t_now)
     view_col, diag_col = st.columns([3, 2], gap="medium")
@@ -365,15 +379,15 @@ def live_view():
     st.html(theme.telemetry_cards_html(cards))
 
     signals_tab, frequency_tab, telemetry_tab, timeline_tab = st.tabs([
-        ":material/show_chart: Signals", ":material/equalizer: Frequency · FFT / STFT",
-        ":material/speed: Telemetry", ":material/timeline: Timeline & evidence"])
+        ":material/graphic_eq: Sound & vibration", ":material/equalizer: Frequencies (FFT / STFT)",
+        ":material/speed: Engine data", ":material/timeline: History & evidence"])
 
     engine = state.engine
     window_s = config["analysis"]["window_s"]
     waves = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.08,
-                          subplot_titles=[f"{m} (last {window_s:g} s, display decimated "
-                                          f"{DISPLAY_DECIMATION}x)" for m in MODALITIES]
-                          + ["vibration high-band envelope (5-10 kHz)"])
+                          subplot_titles=[f"{MODALITY_TITLES[m]} · last {window_s:g} s"
+                                          for m in MODALITIES]
+                          + ["Sharp vibration impacts (5-10 kHz envelope)"])
     psd = go.Figure()
     for row, m in enumerate(MODALITIES, start=1):
         fs = engine.rates[m]
@@ -397,7 +411,7 @@ def live_view():
                                 row=3, col=1)
     waves.update_layout(height=470, showlegend=False, margin={"t": 40, "b": 20})
     waves.update_xaxes(title_text="stream time (s)", row=3, col=1)
-    psd.update_layout(height=380, title="Welch PSD of the current window (FFT, dB)",
+    psd.update_layout(height=380, title="Frequency content now (FFT power, dB)",
                       xaxis_title="kHz", yaxis_title="dB", margin={"t": 50, "b": 20},
                       legend={"orientation": "h", "y": 1.02, "x": 1, "xanchor": "right"})
     signals_tab.plotly_chart(waves, width="stretch")
@@ -415,7 +429,7 @@ def live_view():
         spec = go.Figure(go.Heatmap(x=ts + offset, y=f / 1000, z=10 * np.log10(sxx + 1e-20),
                                     colorscale="Inferno", colorbar={"title": "dB"}))
         spec.update_layout(height=380,
-                           title=f"Vibration STFT spectrogram (last {SPECTROGRAM_S:g} s)",
+                           title=f"Vibration frequencies over the last {SPECTROGRAM_S:g} s (STFT)",
                            xaxis_title="s", yaxis_title="kHz", margin={"t": 50, "b": 20})
         spec_col.plotly_chart(spec, width="stretch")
     else:
@@ -461,9 +475,11 @@ def live_view():
         note = (f"evaluation truth: {truth['condition']}" if intervals
                 else "evaluation truth: normal run")
         timeline.add_annotation(x=duration / 2, y=1.1, yref="paper", text=note, showarrow=False)
-    timeline.update_layout(height=280, title="Decision timeline (model output)",
+    timeline.update_layout(height=280, title="What the model decided over time",
                            xaxis={"range": [0, duration], "title": "s"},
-                           yaxis={"categoryorder": "array", "categoryarray": CLASS_ORDER},
+                           yaxis={"categoryorder": "array", "categoryarray": CLASS_ORDER,
+                                  "tickvals": CLASS_ORDER,
+                                  "ticktext": [label(c) for c in CLASS_ORDER]},
                            legend={"orientation": "h", "y": 1.12, "x": 1, "xanchor": "right"},
                            margin={"t": 60, "b": 20})
     timeline_tab.plotly_chart(timeline, width="stretch")
@@ -471,7 +487,7 @@ def live_view():
     lower_left, lower_right = timeline_tab.columns(2)
     if latest and latest["quality"] == "ok":
         table, matched = evidence_table(latest)
-        lower_left.subheader("Evidence: deviations from the normal reference")
+        lower_left.subheader("Biggest differences from normal")
         lower_left.dataframe(table, hide_index=True)
         lower_left.caption(
             ("Reference: training normal windows in the same RPM/load bin. " if matched else
@@ -482,7 +498,7 @@ def live_view():
         indicator = valve.rolling(DEGRADATION_WINDOW, min_periods=1).mean()
         trend = go.Figure(go.Scatter(x=[r["t_end_s"] for r in records], y=indicator,
                                      line={"color": theme.TOKENS["violet"], "width": 2}))
-        trend.update_layout(height=260, title="Simulated valve-wear indicator",
+        trend.update_layout(height=260, title="Valve wear trend (simulated)",
                             xaxis={"range": [0, duration], "title": "s"},
                             yaxis={"range": [0, 1], "title": "rolling P(valve)"},
                             margin={"t": 40, "b": 20})

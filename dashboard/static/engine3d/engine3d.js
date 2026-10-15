@@ -83,6 +83,22 @@ function createView(root) {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   root.prepend(renderer.domElement);
 
+  // If the GPU drops the WebGL context (driver reset, memory pressure), hide the blank
+  // canvas, say so, and let Three.js restore it; the scene state is kept.
+  const canvas = renderer.domElement;
+  const notice = root.querySelector('.engine3d-fallback');
+  canvas.addEventListener('webglcontextlost', (event) => {
+    event.preventDefault();
+    canvas.style.visibility = 'hidden';
+    notice.hidden = false;
+    notice.textContent = '3D view paused: the graphics context was reset. Restoring…';
+    stats.contextLost = (stats.contextLost || 0) + 1;
+  });
+  canvas.addEventListener('webglcontextrestored', () => {
+    canvas.style.visibility = '';
+    notice.hidden = true;
+  });
+
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(36, 1, 0.1, 200);
   scene.add(new THREE.HemisphereLight(0x9fd8ff, 0x0a0f1c, 1.0));
@@ -346,12 +362,12 @@ function createView(root) {
 }
 
 function renderHud(hud, data) {
-  const rpm = Number.isFinite(data.rpm) ? `${Math.round(data.rpm).toLocaleString('en-US')} RPM`
-                                        : 'RPM —';
+  const rpm = Number.isFinite(data.rpm) ? `${Math.round(data.rpm).toLocaleString('en-US')} rpm`
+                                        : 'rpm —';
   const order = (data.firing_order || [1, 3, 4, 2]).join('-');
   const speed = `shown at ×1/${Math.round(1 / VISUAL_SPEED)} speed`;
   hud.replaceChildren(
-    line(`Inline-4 · firing ${order} · ${rpm} · ${speed}`),
+    line(`Inline-4 engine · firing order ${order} · ${rpm} · ${speed}`),
     line(data.status_text || '', data.edge_color),
   );
   if (Number.isInteger(data.truth_cylinder)) {
@@ -395,8 +411,8 @@ function fallbackView(root) {
     el('rect', { x, y: 40, width: 50, height: 120, fill: 'rgba(148,163,184,0.06)',
                  stroke: 'rgba(148,163,184,0.35)' }, svg);
     el('text', { x: x + 25, y: 205, 'text-anchor': 'middle', fill: '#94a3b8',
-                 'font-size': 12, 'font-family': 'Fira Code, monospace' }, svg)
-      .textContent = `CYL ${k + 1}`;
+                 'font-size': 12, 'font-family': 'DM Sans, sans-serif' }, svg)
+      .textContent = `Cylinder ${k + 1}`;
     return { glow: el('rect', { x, y: 40, width: 50, height: 16, opacity: 0 }, svg),
              piston: el('rect', { x: x + 3, y: 80, width: 44, height: 26, rx: 3,
                                   fill: '#9fb3c8' }, svg) };

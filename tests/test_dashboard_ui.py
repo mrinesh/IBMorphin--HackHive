@@ -72,7 +72,8 @@ def test_cards_escape_text_and_format_values():
         {"label": "Load", "fmt": ".1f", "unit": "%", "status": "no data", "age_s": None,
          "value": None, "history": []},
     ])
-    assert "2,940" in tele and "FRESH 0.0s" in tele and "NO DATA" in tele and "<svg" not in tele
+    assert "2,940" in tele and ">Live<" in tele and "Last reading 0.0 s ago" in tele
+    assert "No data" in tele and "<svg" not in tele
 
 
 def test_evidence_strength_is_a_checklist_of_model_criteria():

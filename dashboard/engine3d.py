@@ -100,24 +100,25 @@ _HTML = """
 
 _CSS = """
 .engine3d-root {
-  position: relative; width: 100%; height: clamp(300px, 52vw, 460px);
-  border-radius: 6px; overflow: hidden; outline: none;
+  position: relative; width: 100%; height: clamp(300px, 46vw, 640px);
+  border-radius: 16px; overflow: hidden; outline: none;
+  border: 1px solid rgba(148, 163, 184, 0.13);
+  box-shadow: 0 14px 34px -20px rgba(0, 0, 0, 0.75);
   background: radial-gradient(120% 90% at 50% 20%, #0d1b2e 0%, #070b14 70%);
 }
 .engine3d-root:focus-visible { box-shadow: inset 0 0 0 2px #22d3ee; }
 .engine3d-root canvas { display: block; width: 100%; height: 100%; touch-action: none; }
 .engine3d-hud {
-  position: absolute; left: 12px; top: 10px; right: 12px; pointer-events: none;
-  font: 600 11px/1.4 "Fira Code", ui-monospace, monospace; letter-spacing: 0.06em;
-  color: #94a3b8; text-transform: uppercase;
+  position: absolute; left: 16px; top: 14px; right: 16px; pointer-events: none;
+  font: 500 13px/1.5 "DM Sans", system-ui, sans-serif; color: #94a3b8;
 }
 .engine3d-controls {
   position: absolute; right: 10px; bottom: 10px; display: flex; gap: 6px; flex-wrap: wrap;
   justify-content: flex-end;
 }
 .engine3d-controls button {
-  min-height: 36px; min-width: 44px; padding: 0 12px; border-radius: 6px; cursor: pointer;
-  font: 600 12px/1 "Fira Sans", sans-serif; letter-spacing: 0.05em; text-transform: uppercase;
+  min-height: 38px; min-width: 44px; padding: 0 16px; border-radius: 999px; cursor: pointer;
+  font: 600 13px/1 "DM Sans", system-ui, sans-serif;
   color: #e6edf7; background: rgba(7, 11, 20, 0.78); border: 1px solid rgba(34, 211, 238, 0.4);
   transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
   touch-action: manipulation;
@@ -132,13 +133,12 @@ _CSS = """
 }
 .engine3d-fallback[hidden], .engine3d-controls[hidden] { display: none; }
 .engine3d-fallback-status {
-  font: 600 12px/1.5 "Fira Code", ui-monospace, monospace; letter-spacing: 0.04em;
-  color: #94a3b8;
+  font: 500 13px/1.5 "DM Sans", system-ui, sans-serif; color: #94a3b8;
 }
 .engine3d-fallback {
   position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
   justify-content: center; gap: 8px; padding: 16px; background: #070b14;
-  color: #e6edf7; font: 14px/1.5 "Fira Sans", sans-serif; text-align: center;
+  color: #e6edf7; font: 14px/1.5 "DM Sans", system-ui, sans-serif; text-align: center;
 }
 """
 

@@ -103,29 +103,22 @@ def register_plotly_template() -> None:
     overrides = go.layout.Template(layout={
         "paper_bgcolor": "rgba(0,0,0,0)",
         "plot_bgcolor": "rgba(7, 11, 20, 0.55)",
-        "font": {"family": "Fira Code, ui-monospace, monospace", "color": TOKENS["text"],
+        "font": {"family": "DM Sans, system-ui, sans-serif", "color": TOKENS["text"],
                  "size": 12},
-        "title": {"font": {"family": "Fira Sans, sans-serif", "size": 14,
+        "title": {"font": {"family": "Sora, DM Sans, sans-serif", "size": 14,
                            "color": TOKENS["text"]}, "x": 0.01},
         "colorway": [TOKENS["cyan"], TOKENS["magenta"], TOKENS["violet"], TOKENS["amber"],
                      TOKENS["green"], TOKENS["rose"]],
         "xaxis": axis, "yaxis": axis,
         "legend": {"bgcolor": "rgba(0,0,0,0)", "font": {"color": TOKENS["muted"]}},
         "hoverlabel": {"bgcolor": TOKENS["surface_solid"], "bordercolor": TOKENS["cyan"],
-                       "font": {"family": "Fira Code, monospace", "color": TOKENS["text"]}},
+                       "font": {"family": "DM Sans, sans-serif", "color": TOKENS["text"]}},
         "annotationdefaults": {"font": {"color": TOKENS["muted"]}},
     })
     pio.templates["engine_hud"] = pio.templates.merge_templates(pio.templates["plotly_dark"],
                                                                 overrides)
     pio.templates.default = "engine_hud"
 
-
-# Four L-shaped corner brackets drawn with gradients (no extra DOM nodes).
-_BRACKETS = ", ".join(
-    f"linear-gradient(var(--hud-cyan), var(--hud-cyan)) {x} {y} / {w} {h} no-repeat"
-    for x, y in (("left", "top"), ("right", "top"), ("left", "bottom"), ("right", "bottom"))
-    for w, h in (("12px", "1px"), ("1px", "12px"))
-)
 
 _CSS_VARS = ("bg", "surface", "line", "text", "muted", "cyan", "magenta", "rose", "green",
              "amber", "violet")
@@ -135,19 +128,19 @@ def css() -> str:
     """<style> block: token variables from TOKENS, then dashboard/hud.css."""
     variables = "".join(f"--hud-{name}: {TOKENS[name]};" for name in _CSS_VARS)
     sheet = (Path(__file__).with_name("hud.css")).read_text(encoding="utf-8")
-    return f"<style>:root {{{variables} --hud-brackets: {_BRACKETS};}}\n{sheet}</style>"
+    return f"<style>:root {{{variables}}}\n{sheet}</style>"
 
 
 def banner_html() -> str:
     return ('<div class="synthetic-banner" role="note">SYNTHETIC DATA — RECORDED REPLAY'
-            '<small>Simulated engines and sensors. Results do not establish real-engine '
-            'accuracy.</small></div>')
+            '<small>Simulated engines and sensors, replayed from recordings. Results do not '
+            'show real-engine accuracy.</small></div>')
 
 
 def brand_html() -> str:
-    return ('<div class="hud-brand"><h1 class="name">ENGINE<span>//</span>SENSE</h1>'
-            '<div class="tag">Multisensor fault diagnostics · sound · vibration · ECU '
-            'telemetry</div></div>')
+    return ('<div class="hud-brand"><h1 class="name">Engine<span class="accent">Sense</span></h1>'
+            '<div class="tag">Listens to engine sound, vibration and sensor data to spot '
+            'faults early</div></div>')
 
 
 def _bar(fraction: float, color: str, marker: float | None = None) -> str:
@@ -175,7 +168,8 @@ def status_card_html(diagnosis: dict) -> str:
                   f"No active alert</span>")
     return (
         f'<section class="hud-card status" aria-label="Current diagnosis">'
-        f'<div class="hud-label">Model decision · {escape(diagnosis["model_version"])}</div>'
+        f'<div class="hud-label">Model decision <span title="model version">· '
+        f'{escape(diagnosis["model_version"])}</span></div>'
         f'<div class="status-head"><div class="status-badge" style="color:{color}">'
         f'{icon(meta["icon"], 24)}</div><div><div class="status-title" style="color:{color}">'
         f'{escape(meta["label"])}</div><div class="status-sub">{escape(diagnosis["subtitle"])}'
@@ -214,9 +208,14 @@ def _strength_html(strength: dict | None) -> str:
 def _why_html(why: list[str] | None, reference: str | None) -> str:
     if not why:
         return ""
-    items = "".join(f"<li>{escape(line)}</li>" for line in why)
-    return (f'<div class="why"><div class="hud-label">Why · largest deviations '
-            f'({escape(reference or "")})</div><ol>{items}</ol></div>')
+    items = []
+    for line in why:  # "... is far above normal (z = +9.0)": show the z-score quietly
+        text, _, z = line.partition(" (z = ")
+        score = f' <span class="z">z {escape(z.rstrip(")"))}</span>' if z else ""
+        items.append(f"<li>{escape(text)}{score}</li>")
+    return (f'<div class="why"><div class="hud-label">Why the model thinks so · biggest '
+            f'differences from normal ({escape(reference or "")})</div>'
+            f'<ol>{"".join(items)}</ol></div>')
 
 
 def _about_html(about: dict | None) -> str:
@@ -252,12 +251,13 @@ def telemetry_cards_html(cards: list[dict]) -> str:
     for card in cards:
         status = card["status"]
         css = {"fresh": "ok", "STALE": "stale"}.get(status, "none")
-        text = {"fresh": "FRESH", "STALE": "STALE", "no data": "NO DATA"}[status]
-        age = f" {card['age_s']:.1f}s" if card.get("age_s") is not None else ""
+        text = {"fresh": "Live", "STALE": "Stale", "no data": "No data"}[status]
+        age = (f' title="Last reading {card["age_s"]:.1f} s ago"'
+               if card.get("age_s") is not None else "")
         value = "—" if card["value"] is None else f"{card['value']:{card['fmt']}}"
         items.append(
             f'<div class="hud-card tele"><div class="row"><span class="hud-label">'
-            f'{escape(card["label"])}</span><span class="fresh {css}">{text}{age}</span></div>'
+            f'{escape(card["label"])}</span><span class="fresh {css}"{age}>{text}</span></div>'
             f'<div class="val">{value}<span class="unit">{escape(card["unit"])}</span></div>'
             f'{sparkline_svg(card["history"])}</div>')
     return (f'<div class="tele-grid" role="group" aria-label="Latest telemetry">'

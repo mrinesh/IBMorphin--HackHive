@@ -5,8 +5,8 @@ uv run --all-extras streamlit run dashboard/app.py
 ```
 
 `.streamlit/config.toml` keeps the server on `localhost`, disables usage
-statistics, sets the dark HUD theme, and turns on static serving for
-`dashboard/static` (bundled Fira Sans, Fira Code and Orbitron fonts, OFL; and
+statistics, sets the dark soft-UI theme, and turns on static serving for
+`dashboard/static` (bundled DM Sans and Sora fonts, OFL; and
 Three.js 0.185.1, MIT), so the dashboard needs no internet connection. Restart
 the server after editing `theme.py`, `explain.py` or `engine3d.py`: a running
 server keeps the modules it already imported. The app lists every dataset whose
@@ -22,7 +22,7 @@ runs and model exist:
 | File | Role |
 |---|---|
 | `app.py` | Layout, replay loop (unchanged `ReplayEngine` path), charts |
-| `theme.py`, `hud.css` | Design tokens, HUD styles, Plotly template, HTML cards |
+| `theme.py`, `hud.css` | Design tokens, soft-UI styles, Plotly template, HTML cards |
 | `explain.py` | Diagnosis card text: uncertain reasons, evidence, evidence strength |
 | `engine3d.py`, `static/engine3d/engine3d.js` | Three.js engine and car view (components v2) |
 
