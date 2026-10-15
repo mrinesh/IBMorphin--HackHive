@@ -35,13 +35,13 @@ Execution tracker. Checked items have been completed; unchecked items remain fut
 - [x] Freeze audio at 24 kHz and single-axis vibration at 25.6 kHz; use 45-second core runs. See `configs/mvp.json`.
 - [x] Define acoustic units as normalized sensor units and vibration as nominal simulated m/s²; document that neither is calibrated against a real engine.
 - [x] Define telemetry fields and rates: RPM 50 Hz; throttle/load 10 Hz; coolant 1 Hz; short-/long-term fuel trims 2 Hz.
-- [ ] Define elapsed-time origin, sample indexing, start offsets, clock corrections, missing-data flags, and field freshness limits.
+- [x] Define elapsed-time origin, sample indexing, start offsets, clock corrections, missing-data flags, and field freshness limits. See `docs/DATA_CONTRACT.md`.
 - [ ] Export waveform arrays as numeric `single` arrays in per-run MAT files explicitly saved as Version 7 (`-v7`).
 - [ ] Export telemetry as CSV and metadata as JSON; Python can convert telemetry to Parquet after validation.
-- [ ] Keep fault schedules, severity, source-event times, affected cylinders, and seeds in evaluation-only files.
-- [ ] Define run IDs, engine IDs, configuration versions, schema versions, and file checksums.
+- [x] Keep fault schedules, severity, source-event times, affected cylinders, and seeds in evaluation-only files. Specified in `docs/DATA_CONTRACT.md`; enforced when the generator exists.
+- [x] Define run IDs, engine IDs, configuration versions, schema versions, and file checksums. See `docs/DATA_CONTRACT.md`.
 - [ ] Define ordered model feature names and prediction-record fields, including window time, status, score, alert, and model version.
-- [ ] Plan a round-trip check for shape, dtype, sample rate, timestamps, and numeric values after Python import.
+- [x] Plan a round-trip check for shape, dtype, sample rate, timestamps, and numeric values after Python import. Uses `waveform_summary` in metadata.
 - [x] Document orientation explicitly: one sample dimension per channel; convert MATLAB column vectors consistently in Python. See `docs/DATA_CONTRACT.md`.
 
 **Compatibility note:** MATLAB supports explicit MAT-file versions. SciPy's `loadmat` supports versions through 7.2 but does not implement the HDF5-based 7.3 interface. Per-run Version 7 numeric arrays avoid adding a separate HDF5 reader. See [MATLAB save documentation](https://www.mathworks.com/help/matlab/ref/save.html) and [SciPy loadmat documentation](https://docs.scipy.org/doc/scipy/reference/generated/scipy.io.loadmat.html).
