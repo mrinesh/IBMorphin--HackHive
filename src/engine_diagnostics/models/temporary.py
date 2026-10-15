@@ -76,11 +76,15 @@ def trainable(table: pd.DataFrame, split: str) -> pd.DataFrame:
     return rows.reset_index(drop=True)
 
 
-def fit_svm(train: pd.DataFrame, names: list[str]):
-    # Give each source engine equal total influence so engines with more windows
-    # do not dominate the shared decision boundary.
+def engine_balanced_weights(train: pd.DataFrame) -> np.ndarray:
+    """Per-window weights giving each engine equal total weight (mean weight 1)."""
     domain_sizes = train.groupby("engine_id")["engine_id"].transform("size").to_numpy()
-    sample_weight = len(train) / (train["engine_id"].nunique() * domain_sizes)
+    return len(train) / (train["engine_id"].nunique() * domain_sizes)
+
+
+def fit_svm(train: pd.DataFrame, names: list[str]):
+    # Equal engine influence: engines with more windows do not dominate the boundary.
+    sample_weight = engine_balanced_weights(train)
     model = make_pipeline(StandardScaler(),
                           SVC(kernel="rbf", C=10.0, gamma="scale", class_weight="balanced",
                               decision_function_shape="ovr"))
@@ -206,7 +210,8 @@ def evaluate_leave_one_engine_out(table: pd.DataFrame, classes: list[str]) -> di
             "engines": per_engine,
         }
     return {
-        "status": "synthetic leave-one-engine-out domain generalization check; not a real-world claim",
+        "status": ("synthetic leave-one-engine-out domain generalization check; "
+                   "not a real-world claim"),
         "source_engines": sorted(source["engine_id"].unique()),
         "protocol": "train on all but one training engine, evaluate on the unseen engine",
         "results": results,

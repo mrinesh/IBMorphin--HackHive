@@ -77,3 +77,22 @@ def test_accepted_decision_requires_agreement():
     assert report["svm"]["macro_f1"] > 0.9
     assert set(report["ablations"]) == set(T.ABLATIONS)
     assert "not a performance claim" in report["status"]
+    assert "cross_domain" in report
+
+
+def test_engine_weights_give_each_engine_equal_total():
+    table = T.trainable(synthetic_table(), "train")
+    table = pd.concat([table, table[table["engine_id"] == "engine_001"]], ignore_index=True)
+    weights = T.engine_balanced_weights(table)
+    totals = pd.Series(weights).groupby(table["engine_id"]).sum()
+    assert totals["engine_001"] == pytest.approx(totals["engine_002"])
+    assert weights.mean() == pytest.approx(1.0)
+
+
+def test_leave_one_engine_out_holds_out_only_training_engines():
+    report = T.evaluate_leave_one_engine_out(synthetic_table(), CLASSES)
+    assert report["source_engines"] == ["engine_001", "engine_002"]
+    assert set(report["results"]) == {"fused", "waveform_only"}
+    for part in report["results"].values():
+        assert sorted(part["engines"]) == report["source_engines"]
+        assert part["pooled"]["windows"] == len(T.trainable(synthetic_table(), "train"))
