@@ -12,6 +12,10 @@ engine-diagnostics pipeline.
 | Environment doctor | Passed setup checks | Reports missing optional packages and MATLAB discovery separately |
 | Dependency lock | Offline consistency check passed | 50 packages resolved; only setup/test dependencies installed |
 | Source compilation | Passed | Python syntax under `src/` and `tests/` |
+| macOS full Python stack (2026-10-15) | Passed | `uv sync --locked --all-extras --group quality` on Python 3.13.2 / uv 0.9.7; NumPy 2.5.4, SciPy 1.18.1, scikit-learn 1.9.1, pandas, PyArrow, Streamlit, Plotly import |
+| macOS pytest and Ruff (2026-10-15) | Passed | 9 tests passed; `ruff check .` reported no issues |
+| MATLAB initializer (2026-10-15) | Passed | `initialize_project()` ran in R2026b (26.2) via `/Applications/MATLAB_R2026b.app/bin/matlab -batch`; config loaded |
+| MATLAB product inventory (2026-10-15) | Recorded | `ver` lists only MATLAB and MATLAB Copilot. `license('test')` is true for Signal, Simulink, Statistics, and Powertrain Blockset, but these are licensed, not installed: `butter`, `pwelch`, `hann`, `envelope`, `fitcsvm` are undefined |
 
 The first pytest attempt failed because the agent's Windows sandbox denied access
 to pytest temporary/cache directories. All nine tests passed when run with normal
@@ -21,10 +25,9 @@ filesystem access. This was an environment restriction, not a passing sandbox ru
 
 | Component | Required check | Current reason/status |
 |---|---|---|
-| MATLAB initializer | Run `addpath('matlab'); project = initialize_project();` from the repository root in MATLAB | MATLAB not discoverable on this machine's PATH; function not executed |
-| MATLAB products/licenses | Record release, inspect `ver`, and exercise required specialized functions | MATLAB access is assumed; individual licenses remain unverified |
-| Full Python stack | Run `uv sync --locked --all-extras --group quality`, then import scientific/dashboard packages | Full install stopped during slow downloads; extras are locked but not installed |
-| Ruff | Run `uv run --all-extras --group quality ruff check .` | Quality tool not installed or executed |
+| MATLAB toolboxes | Install licensed Signal Processing (and optionally Statistics/Simulink) via Add-On Explorer, then re-run `ver` and exercise `butter`/`pwelch` | Licensed but not installed; generator must use base MATLAB until installed |
+| MATLAB discovery in `doctor` | Add `/Applications/MATLAB_*.app/bin` to PATH or teach `doctor` to search it | `matlab` is not on PATH on macOS, so `doctor` reports it missing |
+| Full Python stack on Windows | Repeat the extras install and imports on the original Windows machine | Verified on macOS only |
 | Other Python versions | Exercise initialization on each version claimed as supported | Only Python 3.13.7 has been tested; package declares 3.11-3.13 |
 
 ## Required checks at later milestones

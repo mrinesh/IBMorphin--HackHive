@@ -19,11 +19,21 @@
   install was stopped because large downloads were slow, not because of a
   dependency compatibility error. Partial cache downloads are retained for reuse.
 
+## 2026-10-15: macOS environment inventory
+
+- Development continues on macOS (Python 3.13.2, uv 0.9.7) as well as Windows.
+- MATLAB R2026b is installed at `/Applications/MATLAB_R2026b.app` (not on PATH);
+  the MATLAB VS Code extension is also installed.
+- Only base MATLAB is installed. Signal Processing, Statistics and Machine
+  Learning, Simulink, and Powertrain Blockset are licensed but not installed.
+- The full Python analysis/dashboard stack is installed and imports on macOS.
+
 ## Open decisions
 
 - Assign team owners and record the actual hackathon deadline.
 - Confirm organizer expectations for team-generated data and replay.
-- Record MATLAB release and usable specialized products.
+- Install the licensed Signal Processing Toolbox, or keep the generator
+  base-MATLAB-only (Python/SciPy already covers reference DSP).
 - Revisit dataset scale only after timing the small integration batch.
 
 ## Initialization verification
