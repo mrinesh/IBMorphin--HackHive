@@ -1,0 +1,2 @@
+# Keep downloaded wheels and build artifacts within this workspace.
+cache-dir = ".uv-cache"

@@ -1,0 +1,42 @@
+# Python and local tools
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.uv-cache/
+.cache/
+build/
+dist/
+.coverage
+htmlcov/
+
+# Local configuration and editors
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
+Thumbs.db
+.DS_Store
+
+# MATLAB temporary files
+*.asv
+*.m~
+slprj/
+*.slxc
+
+# Generated data and experiment artifacts
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+evaluation_truth/*
+!evaluation_truth/README.md
+artifacts/models/*
+!artifacts/models/.gitkeep
+artifacts/logs/*
+!artifacts/logs/.gitkeep
+reports/generated/*
+!reports/generated/.gitkeep

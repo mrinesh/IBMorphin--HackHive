@@ -1,0 +1,68 @@
+{
+  "schema_version": "1.0",
+  "project_name": "Multisensor Engine Signature Extraction and Fault Recognition",
+  "engine": {
+    "cylinders": 4,
+    "strokes": 4,
+    "displacement_l": 1.6,
+    "firing_order": [1, 3, 4, 2],
+    "rpm_min": 800,
+    "rpm_max": 3500,
+    "load_min": 0.2,
+    "load_max": 0.8
+  },
+  "streams": {
+    "audio": {
+      "sample_rate_hz": 24000,
+      "channels": 1,
+      "unit": "normalized_sensor_units"
+    },
+    "vibration": {
+      "sample_rate_hz": 25600,
+      "channels": 1,
+      "unit": "nominal_m_per_s2"
+    },
+    "telemetry_rates_hz": {
+      "rpm": 50,
+      "load": 10,
+      "throttle": 10,
+      "coolant_temp": 1,
+      "short_term_fuel_trim": 2,
+      "long_term_fuel_trim": 2
+    }
+  },
+  "analysis": {
+    "window_s": 2.0,
+    "step_s": 0.5,
+    "audio_low_hz": 20,
+    "vibration_low_hz": 5,
+    "high_hz": 10000,
+    "fft_window": "hann",
+    "welch_segment_samples": 8192,
+    "welch_overlap_fraction": 0.5,
+    "stft_segment_samples": 2048,
+    "stft_hop_samples": 512
+  },
+  "runtime": {
+    "packet_s": 0.04,
+    "confirm_fault_updates": 2,
+    "clear_fault_updates": 3,
+    "processing_p95_goal_ms": 250,
+    "rpm_max_age_s": 0.1,
+    "load_throttle_max_age_s": 0.3,
+    "max_missing_fraction": 0.01,
+    "max_clipped_fraction": 0.005
+  },
+  "dataset": {
+    "master_seed": 20261015,
+    "integration_runs": 12,
+    "integration_duration_s": 20,
+    "core_duration_s": 45,
+    "engine_count": 60,
+    "runs_per_engine": 8,
+    "split_engines": {"train": 36, "tuning": 8, "calibration": 8, "test": 8},
+    "challenge_runs": 32
+  },
+  "conditions": ["normal", "misfire", "knock_like", "valve_clearance_like"],
+  "inference_context_fields": ["rpm", "load", "throttle"]
+}
