@@ -114,8 +114,8 @@ function truth = build_truth(batchConfig, scenario, events, durationS, masterSee
     truth.affected_cylinder = scenario.affected_cylinder;
     truth.severity = scenario.severity;
     if strcmp(condition, 'normal')
-        truth.onset_s = [];             % encoded as null
-        truth.affected_cylinder = [];
+        truth.onset_s = NaN;            % jsonencode writes NaN as null ([] would be [])
+        truth.affected_cylinder = NaN;
         truth.severity = 0;
         truth.active_intervals = zeros(0, 2);
         truth.label_timeline = struct('start_s', 0, 'end_s', durationS, 'label', 'normal');

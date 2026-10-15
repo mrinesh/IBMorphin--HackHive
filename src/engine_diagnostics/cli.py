@@ -137,6 +137,60 @@ def _train_temporary(args) -> int:
     return 0
 
 
+def _replay(args, config: dict) -> int:
+    try:
+        import joblib
+        import numpy as np
+
+        from engine_diagnostics.data.run_io import load_run, validate_run
+        from engine_diagnostics.runtime.replay import prediction_log, replay_run
+    except ImportError as error:
+        print(f"replay needs the analysis extra ({error.name} missing)", file=sys.stderr)
+        return 1
+    run_dir = args.raw_dir / args.run_id
+    if not args.model.is_file():
+        print(f"{args.model} not found; run train-temporary first", file=sys.stderr)
+        return 1
+    bundle = load_run(run_dir)
+    issues = validate_run(bundle, config)
+    if issues:
+        print("\n".join(issues), file=sys.stderr)
+        return 1
+    model = joblib.load(args.model)
+    print(f"SYNTHETIC DATA - RECORDED REPLAY | {args.run_id} | {model.model_version} | "
+          f"speed {'fast' if not args.speed else f'{args.speed:g}x'}")
+
+    def show(d):
+        alert = d["alert"] or "-"
+        print(f"t={d['t_end_s']:5.1f}s  {d['quality']:8s}  svm={d['predicted'] or '-':21s} "
+              f"accepted={d['accepted']:21s} anomaly={d['anomaly_score']:5.2f}  "
+              f"ALERT={alert:21s} {d['processing_ms']:5.1f} ms")
+
+    records = replay_run(bundle, model, config, speed=args.speed, on_decision=show)
+    log = prediction_log(records)
+    args.log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = args.log_dir / f"{args.run_id}_predictions.csv"
+    log.to_csv(log_path, index=False)
+    ms = log["processing_ms"].to_numpy()
+    print(f"{len(log)} decisions; processing p50 {np.percentile(ms, 50):.1f} ms, "
+          f"p95 {np.percentile(ms, 95):.1f} ms; log -> {log_path}")
+
+    truth_path = args.truth_dir / f"{args.run_id}_events.json"
+    if args.with_truth and truth_path.is_file():
+        # Evaluation only: compared after replay, never shown to the engine.
+        truth = json.loads(truth_path.read_text(encoding="utf-8"))
+        alerts = log[log["alert"].notna()]
+        print(f"[evaluation] truth condition {truth['condition']}, onset {truth['onset_s']}")
+        if alerts.empty:
+            print("[evaluation] no alert raised")
+        else:
+            first = alerts.iloc[0]
+            delay = ("" if truth["onset_s"] is None
+                     else f", {first['t_end_s'] - truth['onset_s']:.1f} s after onset")
+            print(f"[evaluation] first alert {first['alert']} at {first['t_end_s']:.1f} s{delay}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Engine diagnostics project initialization tools")
     parser.add_argument("--version", action="version", version=__version__)
@@ -165,6 +219,18 @@ def main(argv: list[str] | None = None) -> int:
     train.add_argument("--model", type=Path, default=Path("artifacts/models/temporary.joblib"))
     train.add_argument("--report", type=Path,
                        default=Path("reports/generated/temporary_model_report.json"))
+    replay = commands.add_parser("replay", help="Replay a recorded run through the model")
+    replay.add_argument("run_id")
+    replay.add_argument("--speed", type=float, default=None,
+                        help="real-time factor, e.g. 1 for 1x; default runs as fast as possible")
+    replay.add_argument("--raw-dir", type=Path, default=Path("data/raw"))
+    replay.add_argument("--model", type=Path, default=Path("artifacts/models/temporary.joblib"))
+    replay.add_argument("--log-dir", type=Path, default=Path("artifacts/logs"))
+    replay.add_argument("--truth-dir", type=Path, default=Path("evaluation_truth"))
+    replay.add_argument("--with-truth", action="store_true",
+                        help="after replay, compare alerts with evaluation truth")
+    replay.add_argument("--config", type=Path, default=Path("configs/mvp.json"))
+    replay.add_argument("--schema", type=Path, default=Path("schemas/project-config.schema.json"))
     args = parser.parse_args(argv)
     if args.command == "doctor":
         return _doctor(args.root.resolve())
@@ -179,6 +245,8 @@ def main(argv: list[str] | None = None) -> int:
         return _validate_runs(args.raw_dir, config)
     if args.command == "build-features":
         return _build_features(args, config)
+    if args.command == "replay":
+        return _replay(args, config)
     print(json.dumps({
         "status": "valid",
         "schema_version": config["schema_version"],

@@ -107,7 +107,8 @@ inference. It contains:
 
 - `schema_version`, `run_id`, `engine_id`, `generator_version`
 - `condition`: one canonical class; `normal` for runs without a fault
-- `onset_s`, `affected_cylinder`, `severity` (0-1, generator-specific meaning)
+- `onset_s`, `affected_cylinder` (`null` for normal runs), `severity` (0-1,
+  generator-specific meaning; 0 for normal runs)
 - `active_intervals`: `[start_s, end_s]` pairs where the fault is applied
 - `label_timeline`: `start_s`, `end_s`, `label` segments (`normal`, a fault
   class, or `transition` for the second around onset)
@@ -155,10 +156,15 @@ decision has `predicted` (SVM class), `margin`, `anomaly_score`, `anomalous`,
 and `accepted` (the class, or `uncertain` when the SVM and the normal baseline
 disagree or the margin is small).
 
-## Deferred
+## Prediction records
 
-Prediction-record fields (window time, status, score, alert, model version)
-are defined with the replay milestone.
+`engine-diagnostics replay` writes `artifacts/logs/<run_id>_predictions.csv`
+with one row per decision: `t_end_s`, `quality`, `predicted`, `margin`,
+`anomaly_score`, `anomalous`, `accepted`, `alert`, `processing_ms`,
+`model_version`, `feature_version`. Replay ingests `runtime.packet_s` packets
+and decides at `window_ends()`; it currently requires `t0_s = 0` for all streams.
+Truth comparison (`--with-truth`) happens after replay and is printed under
+`[evaluation]`.
 
 ## Integration batch checks
 

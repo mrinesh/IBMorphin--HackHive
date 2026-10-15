@@ -59,10 +59,10 @@ Execution tracker. Checked items have been completed; unchecked items remain fut
 - [x] Export from MATLAB and verify the round trip in Python. `engine-diagnostics validate-runs`.
 - [x] Implement a minimal common Python feature path using RMS, envelope variation, and broad band energies. `pipeline/features.py`, version 0.1.0, 31 features.
 - [x] Train a temporary baseline/classifier using separate runs; do not present early scores as final evaluation. `train-temporary`; engine_004 held out.
-- [ ] Replay one run at 1× speed using trailing two-second windows and 0.5-second updates.
+- [x] Replay one run at 1× speed using trailing two-second windows and 0.5-second updates. `engine-diagnostics replay <run> --speed 1`.
 - [ ] Display telemetry, two waveforms, one spectrum, and actual computed predictions.
-- [ ] Confirm inference has no access to labels or hidden simulation variables.
-- [ ] Measure the first processing-latency estimate.
+- [x] Confirm inference has no access to labels or hidden simulation variables. Tests check imports, feature names, and future-sample independence.
+- [x] Measure the first processing-latency estimate. ~12 ms p50 / 13 ms p95 per update (fast replay), 24/34 ms at 1× on the macOS dev machine.
 
 **Artifacts:** integration batch, temporary model, working replay dashboard, handoff check report.
 
