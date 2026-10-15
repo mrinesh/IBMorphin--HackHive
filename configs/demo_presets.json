@@ -1,0 +1,51 @@
+[
+  {
+    "name": "1. Normal operation with a load step",
+    "dataset": "core_v1",
+    "run_id": "run_00226",
+    "start_s": 0,
+    "note": "Held-out engine_029. Healthy run with a load step at ~9.2 s: decisions stay normal and no alert is raised."
+  },
+  {
+    "name": "2. Knock-like bursts, then a load change",
+    "dataset": "core_v1",
+    "run_id": "run_00237",
+    "start_s": 6,
+    "note": "Held-out engine_030. Evaluation truth: knock-like onset 12.5 s (severity 0.71). Alert confirmed at 15.0 s; evidence shows high-band envelope deviations. A load step follows at ~20.4 s and the alert persists."
+  },
+  {
+    "name": "3. Intermittent misfire",
+    "dataset": "core_v1",
+    "run_id": "run_00235",
+    "start_s": 10,
+    "note": "Held-out engine_030. Evaluation truth: misfire onset 15.1 s. Alert at 16.5 s; the top evidence is audio firing-peak variation."
+  },
+  {
+    "name": "4. Misfire with a recovery interval",
+    "dataset": "core_v1",
+    "run_id": "run_00228",
+    "start_s": 14,
+    "note": "Held-out engine_029. Evaluation truth: misfire 17.2-21.5 s, recovery, then misfire again. The alert raises, clears after recovery, and returns."
+  },
+  {
+    "name": "5. Valve clearance: accelerated degradation trend",
+    "dataset": "core_v1",
+    "run_id": "run_00216",
+    "start_s": 0,
+    "note": "Held-out engine_027. Evaluation truth: simulated valve-clearance severity ramps 0.10 to 0.90 from 5.1 s. Watch the wear indicator rise; alert at 11.5 s. Accelerated simulation, not remaining life."
+  },
+  {
+    "name": "6. Data-quality state: waveform gap",
+    "dataset": "core_v1",
+    "run_id": "run_00225",
+    "start_s": 9,
+    "note": "Held-out engine_029. A simulated 0.23 s audio gap at 12.5 s marks the windows ending 12.5-14.5 s 'missing_waveform': no prediction is made for them and the alert state is held."
+  },
+  {
+    "name": "7. Limitation: mild knock at 3,300 rpm (challenge)",
+    "dataset": "core_v1",
+    "run_id": "run_00247",
+    "start_s": 4,
+    "note": "Challenge run on a held-out engine: reserved high-RPM band, 2x noise, severity 0.16. The model misses this knock; challenge knock recall was 0."
+  }
+]

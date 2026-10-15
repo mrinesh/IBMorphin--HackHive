@@ -51,3 +51,26 @@ def test_play_advances_stream_time_in_real_time():
     assert 1.0 <= app.session_state["stream_t"] <= 2.5  # 1x pacing, 40 ms packets
     if app.session_state["stream_t"] < 2.0:  # no decision before a full 2 s window
         assert app.session_state["records"] == []
+
+
+V1_MODEL = ROOT / "artifacts/models/diagnostic_v1.joblib"
+
+
+@pytest.mark.skipif(not V1_MODEL.is_file() or not (ROOT / "data/raw/core_v1").is_dir(),
+                    reason="needs core_v1 runs and the v1 model")
+def test_every_demo_preset_renders_with_v1_panels():
+    import json
+
+    presets = json.loads((ROOT / "configs/demo_presets.json").read_text(encoding="utf-8"))
+    app = AppTest.from_file(str(APP), default_timeout=120).run()
+    for preset in presets:
+        widget(app.sidebar.selectbox, "Demo preset").set_value(preset["name"]).run()
+        assert not app.exception, preset["name"]
+        assert app.session_state["run_id"] == preset["run_id"]
+        assert app.session_state["stream_t"] == pytest.approx(preset["start_s"], abs=0.05)
+        widget(app.sidebar.slider, "Seek (s)").set_value(24.0).run()
+        widget(app.sidebar.button, "Seek").click().run()
+        assert not app.exception, preset["name"]
+        records = app.session_state["records"]
+        assert records and "probability" in records[-1]
+        assert any(m.label == "Calibrated confidence" for m in app.metric)

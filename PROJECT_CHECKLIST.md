@@ -178,17 +178,17 @@ Execution tracker. Checked items have been completed; unchecked items remain fut
 **Owner:** dashboard/integration lead. **Dependency:** Phase 3 shell; final integration depends on Phase 7. **Timing:** approximately 10% of effort; build in parallel where possible.
 
 - [x] Show a permanent “SYNTHETIC DATA — RECORDED REPLAY” banner and run/model versions.
-- [ ] Display RPM, load, throttle, coolant, fuel trims, and freshness/quality status.
-- [ ] Display raw audio and vibration with a short-time zoom.
-- [ ] Display spectra/PSD, a spectrogram, and an impulse envelope.
-- [ ] Show predicted condition, appropriately labeled confidence/score, and alert status.
+- [x] Display RPM, load, throttle, coolant, fuel trims, and freshness/quality status.
+- [x] Display raw audio and vibration with a short-time zoom.
+- [x] Display spectra/PSD, a spectrogram, and an impulse envelope.
+- [x] Show predicted condition, appropriately labeled confidence/score, and alert status.
 - [x] Explain two or three feature deviations against a matched normal reference; avoid claiming a peak proves a fault. Reference is training normal windows, not yet RPM/load-matched.
 - [x] Add prediction/fault timeline and a separate optional truth overlay.
-- [ ] Show the accelerated simulated degradation indicator without a remaining-life claim.
+- [x] Show the accelerated simulated degradation indicator without a remaining-life claim.
 - [x] Add scenario selection, play/pause, restart, and seek with buffer/filter reset and warm-up.
 - [x] Confirm current predictions never consume future replay samples. `tests/test_replay.py`.
 - [x] Decimate display traces while preserving full-rate analytical processing.
-- [ ] Measure inference and display latency on the declared demo machine.
+- [x] Measure inference and display latency on the declared demo machine.
 - [ ] Rehearse normal → RPM/load change → fault onset → signature change → alert → evidence.
 
 **Artifacts:** integrated local dashboard, demo presets, prediction logs, performance report.
