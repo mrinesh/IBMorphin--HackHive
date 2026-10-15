@@ -12,6 +12,8 @@ engine-diagnostics pipeline.
 | Environment doctor | Passed setup checks | Reports missing optional packages and MATLAB discovery separately |
 | Dependency lock | Offline consistency check passed | 50 packages resolved; only setup/test dependencies installed |
 | Source compilation | Passed | Python syntax under `src/` and `tests/` |
+| MATLAB initializer | Passed in MATLAB R2026b (26.2.0.3386108) via `matlab -batch` | Loaded `configs/mvp.json`; Nyquist assertions passed |
+| MATLAB products/licenses | Signal Processing (`butter`, `pwelch`) and Statistics and ML (`fitcknn`) executed | Installed: MATLAB, MATLAB Copilot, Signal Processing, Statistics and ML. Simulink, Powertrain Blockset, AUTOSAR Blockset not installed |
 
 The first pytest attempt failed because the agent's Windows sandbox denied access
 to pytest temporary/cache directories. All nine tests passed when run with normal
@@ -21,8 +23,8 @@ filesystem access. This was an environment restriction, not a passing sandbox ru
 
 | Component | Required check | Current reason/status |
 |---|---|---|
-| MATLAB initializer | Run `addpath('matlab'); project = initialize_project();` from the repository root in MATLAB | MATLAB not discoverable on this machine's PATH; function not executed |
-| MATLAB products/licenses | Record release, inspect `ver`, and exercise required specialized functions | MATLAB access is assumed; individual licenses remain unverified |
+| MATLAB on PATH | Add `C:\Program Files\MATLAB\R2026b\bin` to PATH so `engine-diagnostics doctor` discovers it | Installed but not on PATH; invoked by full path |
+| Simulink-based products | Install and license-check before any dependency on Simulink, Powertrain, or AUTOSAR Blockset | Not installed on this machine |
 | Full Python stack | Run `uv sync --locked --all-extras --group quality`, then import scientific/dashboard packages | Full install stopped during slow downloads; extras are locked but not installed |
 | Ruff | Run `uv run --all-extras --group quality ruff check .` | Quality tool not installed or executed |
 | Other Python versions | Exercise initialization on each version claimed as supported | Only Python 3.13.7 has been tested; package declares 3.11-3.13 |
