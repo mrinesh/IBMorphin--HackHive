@@ -21,7 +21,7 @@ from engine_diagnostics.pipeline.features import (
     telemetry_context,
     window_ends,
 )
-from engine_diagnostics.runtime.alerts import AlertState
+from engine_diagnostics.runtime.alerts import AlertState, MultiAlertState
 
 TELEMETRY_HISTORY_S = 5.0
 
@@ -58,10 +58,18 @@ class ReplayEngine:
         self.rates = {m: metadata["streams"][m]["fs_hz"] for m in MODALITIES}
         self.scales = {m: metadata["streams"][m]["full_scale"] for m in MODALITIES}
         self.decision_times = window_ends(metadata["duration_s"], config)
-        # A model may carry alert persistence tuned on its tuning partition.
-        self.alerts = AlertState(
-            confirm=getattr(model, "confirm_updates", config["runtime"]["confirm_fault_updates"]),
-            clear=getattr(model, "clear_updates", config["runtime"]["clear_fault_updates"]))
+        # A model may carry alert persistence tuned on its tuning partition. A
+        # multi-fault model gets one independent alert per fault.
+        self.multi = hasattr(model, "fault_classes")
+        clear = getattr(model, "clear_updates", config["runtime"]["clear_fault_updates"])
+        if self.multi:
+            self.alerts = MultiAlertState(tuple(model.fault_classes), model.confirm_updates,
+                                          clear)
+        else:
+            self.alerts = AlertState(
+                confirm=getattr(model, "confirm_updates",
+                                config["runtime"]["confirm_fault_updates"]),
+                clear=clear)
         self.reset()
 
     def reset(self) -> None:
@@ -115,9 +123,13 @@ class ReplayEngine:
             result = {"predicted": None, "margin": float("nan"),
                       "anomaly_score": float("nan"), "anomalous": False,
                       "accepted": "uncertain"}
-        alert = self.alerts.update(result["accepted"], window.quality)
+        if self.multi:  # active alerts as a list; `alert` joins them with '+'
+            alerts = self.alerts.update(result.get("fault_decisions", {}), window.quality)
+            extra = {"alerts": alerts, "alert": "+".join(alerts) or None}
+        else:
+            extra = {"alert": self.alerts.update(result["accepted"], window.quality)}
         return {
-            "t_end_s": float(t), "quality": window.quality, **result, "alert": alert,
+            "t_end_s": float(t), "quality": window.quality, **result, **extra,
             "processing_ms": 1000 * (time.perf_counter() - started),
             "model_version": self.model.model_version,
             "feature_version": self.model.feature_version,

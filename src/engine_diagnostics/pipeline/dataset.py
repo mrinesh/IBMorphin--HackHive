@@ -1,8 +1,9 @@
 """Assemble the labeled window feature table for training and scoring.
 
-Bookkeeping columns (run_id, engine_id, split, subset, t_end_s, label, quality)
-sit beside the feature columns; models must select `feature_names()` only.
-`subset` is "challenge" for reserved-condition test runs, otherwise "core".
+Bookkeeping columns (run_id, engine_id, split, subset, t_end_s, label, quality,
+and the per-fault labels y_<fault>) sit beside the feature columns; models must
+select `feature_names()` only. `subset` is "challenge" for reserved-condition
+test runs, otherwise "core".
 """
 
 import json
@@ -13,9 +14,16 @@ import pandas as pd
 
 from engine_diagnostics.data.run_io import find_runs, load_run, validate_run
 from engine_diagnostics.pipeline.features import FEATURE_VERSION, extract_run
-from engine_diagnostics.pipeline.labels import load_truth, window_labels
+from engine_diagnostics.pipeline.labels import (
+    FAULT_COLUMNS,
+    FAULTS,
+    fault_window_labels,
+    load_truth,
+    window_labels,
+)
 
-BOOKKEEPING = ["run_id", "engine_id", "split", "subset", "t_end_s", "label", "quality"]
+BOOKKEEPING = ["run_id", "engine_id", "split", "subset", "t_end_s", "label", "quality",
+               *FAULT_COLUMNS]
 
 
 def engine_splits(batch_config_path: Path) -> dict[str, str]:
@@ -44,8 +52,12 @@ def build_feature_table(raw_dir: Path, truth_dir: Path, batch_config_path: Path,
             raise ValueError(f"{bundle.run_id}: {engine} has no partition")
         features = extract_run(bundle, config)
         truth = load_truth(truth_dir, bundle.run_id)
-        features.insert(0, "label", window_labels(truth, features["t_end_s"].to_numpy(),
-                                                  config["analysis"]["window_s"]))
+        t_end = features["t_end_s"].to_numpy()
+        window_s = config["analysis"]["window_s"]
+        per_fault = fault_window_labels(truth, t_end, window_s)
+        for fault, column in zip(reversed(FAULTS), reversed(FAULT_COLUMNS), strict=True):
+            features.insert(0, column, per_fault[fault])
+        features.insert(0, "label", window_labels(truth, t_end, window_s))
         features.insert(0, "subset", "challenge" if truth.get("challenge") else "core")
         features.insert(0, "split", splits[engine])
         features.insert(0, "engine_id", engine)

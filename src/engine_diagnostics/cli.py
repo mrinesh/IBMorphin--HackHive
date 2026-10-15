@@ -290,6 +290,98 @@ def _evaluate(args, config: dict) -> int:
     return 0
 
 
+def _train_multi(args, config: dict) -> int:
+    try:
+        import joblib
+        import pandas as pd
+
+        from engine_diagnostics.models.multifault import fit_multifault_model
+    except ImportError as error:
+        print(f"train-multi needs the analysis extra ({error.name} missing)", file=sys.stderr)
+        return 1
+    if not args.features.is_file():
+        print(f"{args.features} not found; run build-features first", file=sys.stderr)
+        return 1
+    table = pd.read_parquet(args.features)
+    model = fit_multifault_model(table, _load_truths(table, args.truth_dir), config)
+    args.model.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(model, args.model)
+    notes = model.notes
+    summary = {k: v for k, v in notes.items() if k != "decision_trials"}
+    args.report.parent.mkdir(parents=True, exist_ok=True)
+    args.report.write_text(json.dumps({"model_version": model.model_version, **summary,
+                                       "decision_trials": notes["decision_trials"]},
+                                      indent=2, default=str) + "\n", encoding="utf-8")
+    print(f"{model.model_version}: one detector per fault, "
+          f"{notes['normal_train_windows']} fault-free training windows for the baseline")
+    for fault, chosen in notes["decision_selected"].items():
+        counts = notes["windows"][fault]
+        best = max(notes["svm_search"][fault], key=lambda t: t["tuning_f1"])
+        print(f"  {fault:21s} train {counts['train_used']} ({counts['train_present']} present) "
+              f"| SVM {notes['svm_selected'][fault]} tuning F1 {best['tuning_f1']:.3f} "
+              f"| threshold {chosen['threshold']} band {chosen['band']} "
+              f"confirm {chosen['confirm_updates']}")
+        print(f"  {'':21s} tuning: false alerts/fault-free min "
+              f"{chosen['false_alerts_per_normal_minute']:.3f}, sustained recall "
+              f"{chosen['sustained_recall']}, latency p50 {chosen['latency_p50_s']} s")
+        if not notes["false_alert_limit_met_on_tuning"][fault]:
+            print(f"  WARNING: no {fault} setting met the false-alert limit on tuning runs")
+    print(f"model -> {args.model}\nreport -> {args.report}")
+    return 0
+
+
+def _evaluate_multi(args, config: dict) -> int:
+    try:
+        import joblib
+        import pandas as pd
+
+        from engine_diagnostics.final_evaluation import evaluate_final_multi
+    except ImportError as error:
+        print(f"evaluate-multi needs the analysis extra ({error.name} missing)", file=sys.stderr)
+        return 1
+    if args.report.is_file() and not args.force:
+        print(f"{args.report} exists: the test set has already been scored. Use --force "
+              "only to reproduce the same frozen model's result.", file=sys.stderr)
+        return 1
+    table = pd.read_parquet(args.features)
+    model = joblib.load(args.model)
+    baseline = joblib.load(args.baseline) if args.baseline.is_file() else None
+    report = evaluate_final_multi(model, table, _load_truths(table, args.truth_dir),
+                                  args.raw_dir, config, args.model, baseline)
+    args.report.parent.mkdir(parents=True, exist_ok=True)
+    args.report.write_text(json.dumps(report, indent=2, default=str) + "\n", encoding="utf-8")
+    print(report["status"])
+    for subset in ("core", "challenge"):
+        if subset not in report:
+            continue
+        part = report[subset]
+        windows, replay = part["windows"], part["replay"]
+        print(f"[{subset}] {part['runs']} runs | window macro-F1 {windows['macro_f1']:.3f}, "
+              f"exact set {windows['exact_set']:.3f}")
+        for n, group in windows["by_active_faults"].items():
+            print(f"  {n} active: {group['windows']:5d} windows | exact set "
+                  f"{group['exact_set']:.3f} | all true faults detected "
+                  f"{group['all_true_detected']:.3f} | no false fault "
+                  f"{group['no_false_fault']:.3f}")
+        for fault, part_f in replay["per_fault"].items():
+            print(f"  replay {fault:21s} sustained recall {part_f['sustained_recall']}, "
+                  f"false alerts/fault-free min {part_f['false_alerts_per_normal_minute']:.3f}, "
+                  f"latency p50 {part_f['latency_p50_s']} s")
+        for n, group in replay["by_active_faults"].items():
+            print(f"  replay {n}-fault runs: {group['runs']}, all sustained faults alerted "
+                  f"{group['runs_all_sustained_faults_alerted']}, any false alert "
+                  f"{group['runs_with_any_false_alert']:.2f}")
+        if "single_label_baseline" in part:
+            base = part["single_label_baseline"]
+            multi = base["by_active_faults"]
+            print(f"  v1 single-label baseline: macro-F1 {base['macro_f1']:.3f}, exact set "
+                  f"{base['exact_set']:.3f}; all true detected at 2/3 active "
+                  f"{multi.get('2', {}).get('all_true_detected')}/"
+                  f"{multi.get('3', {}).get('all_true_detected')}")
+    print(f"report -> {args.report}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Engine diagnostics project initialization tools")
     parser.add_argument("--version", action="version", version=__version__)
@@ -345,7 +437,30 @@ def main(argv: list[str] | None = None) -> int:
     final.add_argument("--report", type=Path,
                        default=Path("reports/generated/final_evaluation_v1.json"))
     final.add_argument("--force", action="store_true")
-    for sub in (fit, final):
+    fit_multi = commands.add_parser(
+        "train-multi", help="Fit the v2 multi-fault model using train/tuning/calibration")
+    fit_multi.add_argument("--features", type=Path,
+                           default=Path("data/processed/core_v2_features.parquet"))
+    fit_multi.add_argument("--truth-dir", type=Path, default=Path("evaluation_truth/core_v2"))
+    fit_multi.add_argument("--model", type=Path,
+                           default=Path("artifacts/models/multifault_v2.joblib"))
+    fit_multi.add_argument("--report", type=Path,
+                           default=Path("reports/generated/training_v2.json"))
+    final_multi = commands.add_parser(
+        "evaluate-multi", help="Score the frozen v2 model once on core_v2 test engines")
+    final_multi.add_argument("--features", type=Path,
+                             default=Path("data/processed/core_v2_features.parquet"))
+    final_multi.add_argument("--truth-dir", type=Path, default=Path("evaluation_truth/core_v2"))
+    final_multi.add_argument("--raw-dir", type=Path, default=Path("data/raw/core_v2"))
+    final_multi.add_argument("--model", type=Path,
+                             default=Path("artifacts/models/multifault_v2.joblib"))
+    final_multi.add_argument("--baseline", type=Path,
+                             default=Path("artifacts/models/diagnostic_v1.joblib"),
+                             help="single-label model scored on the same windows for comparison")
+    final_multi.add_argument("--report", type=Path,
+                             default=Path("reports/generated/final_evaluation_v2.json"))
+    final_multi.add_argument("--force", action="store_true")
+    for sub in (fit, final, fit_multi, final_multi):
         sub.add_argument("--config", type=Path, default=Path("configs/mvp.json"))
         sub.add_argument("--schema", type=Path,
                          default=Path("schemas/project-config.schema.json"))
@@ -369,6 +484,10 @@ def main(argv: list[str] | None = None) -> int:
         return _train(args, config)
     if args.command == "evaluate":
         return _evaluate(args, config)
+    if args.command == "train-multi":
+        return _train_multi(args, config)
+    if args.command == "evaluate-multi":
+        return _evaluate_multi(args, config)
     print(json.dumps({
         "status": "valid",
         "schema_version": config["schema_version"],
