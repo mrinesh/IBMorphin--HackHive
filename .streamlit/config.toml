@@ -2,6 +2,78 @@
 [server]
 address = "localhost"
 headless = true
+# Serves dashboard/static (bundled fonts and Three.js) at app/static, so the
+# dashboard works offline.
+enableStaticServing = true
+
+[client]
+toolbarMode = "minimal"
 
 [browser]
 gatherUsageStats = false
+
+# Dark HUD theme. Tokens mirror dashboard/theme.py.
+[theme]
+base = "dark"
+primaryColor = "#22D3EE"
+backgroundColor = "#070B14"
+secondaryBackgroundColor = "#0F172A"
+textColor = "#E6EDF7"
+linkColor = "#22D3EE"
+borderColor = "#1E3A4C"
+showWidgetBorder = true
+baseRadius = "6px"
+baseFontSize = 15
+font = "Fira Sans"
+codeFont = "Fira Code"
+headingFont = "Orbitron"
+headingFontWeights = [800, 600, 600, 600, 600, 600]
+codeBackgroundColor = "#0B1324"
+dataframeHeaderBackgroundColor = "#0B1324"
+redColor = "#F87171"
+greenColor = "#4ADE80"
+chartCategoricalColors = ["#22D3EE", "#F472B6", "#A78BFA", "#FBBF24", "#4ADE80", "#FB7185"]
+
+[theme.sidebar]
+backgroundColor = "#0A1120"
+secondaryBackgroundColor = "#0F172A"
+
+[[theme.fontFaces]]
+family = "Fira Sans"
+url = "app/static/fonts/fira-sans-latin-400-normal.woff2"
+weight = 400
+
+[[theme.fontFaces]]
+family = "Fira Sans"
+url = "app/static/fonts/fira-sans-latin-500-normal.woff2"
+weight = 500
+
+[[theme.fontFaces]]
+family = "Fira Sans"
+url = "app/static/fonts/fira-sans-latin-600-normal.woff2"
+weight = 600
+
+[[theme.fontFaces]]
+family = "Fira Sans"
+url = "app/static/fonts/fira-sans-latin-700-normal.woff2"
+weight = 700
+
+[[theme.fontFaces]]
+family = "Fira Code"
+url = "app/static/fonts/fira-code-latin-400-normal.woff2"
+weight = 400
+
+[[theme.fontFaces]]
+family = "Fira Code"
+url = "app/static/fonts/fira-code-latin-600-normal.woff2"
+weight = 600
+
+[[theme.fontFaces]]
+family = "Orbitron"
+url = "app/static/fonts/orbitron-latin-600-normal.woff2"
+weight = 600
+
+[[theme.fontFaces]]
+family = "Orbitron"
+url = "app/static/fonts/orbitron-latin-800-normal.woff2"
+weight = 800

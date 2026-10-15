@@ -1,6 +1,7 @@
 [
   {
     "name": "1. Normal operation with a load step",
+    "scenario": "normal",
     "dataset": "core_v1",
     "run_id": "run_00226",
     "start_s": 0,
@@ -8,6 +9,7 @@
   },
   {
     "name": "2. Knock-like bursts, then a load change",
+    "scenario": "knock_like",
     "dataset": "core_v1",
     "run_id": "run_00237",
     "start_s": 6,
@@ -15,6 +17,7 @@
   },
   {
     "name": "3. Intermittent misfire",
+    "scenario": "misfire",
     "dataset": "core_v1",
     "run_id": "run_00235",
     "start_s": 10,
@@ -22,6 +25,7 @@
   },
   {
     "name": "4. Misfire with a recovery interval",
+    "scenario": "misfire",
     "dataset": "core_v1",
     "run_id": "run_00228",
     "start_s": 14,
@@ -29,6 +33,7 @@
   },
   {
     "name": "5. Valve clearance: accelerated degradation trend",
+    "scenario": "valve_clearance_like",
     "dataset": "core_v1",
     "run_id": "run_00216",
     "start_s": 0,
@@ -36,6 +41,7 @@
   },
   {
     "name": "6. Data-quality state: waveform gap",
+    "scenario": "data_quality",
     "dataset": "core_v1",
     "run_id": "run_00225",
     "start_s": 9,
@@ -43,6 +49,7 @@
   },
   {
     "name": "7. Limitation: mild knock at 3,300 rpm (challenge)",
+    "scenario": "limitation",
     "dataset": "core_v1",
     "run_id": "run_00247",
     "start_s": 4,

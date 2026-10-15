@@ -123,3 +123,23 @@ def test_cross_engine_panel_shows_leave_one_engine_out_report():
     table = next(d.value for d in app.dataframe if "features" in d.value.columns)
     assert set(table["features"]) == {"fused", "waveform_only"}
     assert "pooled" in set(table["held-out engine"])
+
+
+@pytest.mark.skipif(not V1_MODEL.is_file() or not (ROOT / "data/raw/core_v1").is_dir(),
+                    reason="needs core_v1 runs and the v1 model")
+def test_scenario_cards_load_the_tagged_preset_and_play_label_follows_state():
+    import json
+
+    presets = json.loads((ROOT / "configs/demo_presets.json").read_text(encoding="utf-8"))
+    app = AppTest.from_file(str(APP), default_timeout=120).run()
+    for tag in ("normal", "knock_like", "misfire", "valve_clearance_like"):
+        expected = next(p for p in presets if p["scenario"] == tag)
+        widget(app.sidebar.segmented_control, "Scenario").set_value(tag).run()
+        assert not app.exception, tag
+        assert app.session_state["preset_select"] == expected["name"]
+        assert app.session_state["run_id"] == expected["run_id"]
+    widget(app.sidebar.selectbox, "Demo preset").set_value(presets[5]["name"]).run()
+    assert app.session_state["scenario"] is None  # data-quality preset has no card
+    widget(app.sidebar.button, "Play").click().run()
+    assert app.session_state["playing"]
+    assert any(b.label == "Pause" for b in app.sidebar.button)

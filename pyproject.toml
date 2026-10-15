@@ -33,6 +33,7 @@ packages = ["src/engine_diagnostics"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+pythonpath = ["."]  # the `dashboard` package (theme, explain) for unit tests
 
 [tool.ruff]
 line-length = 100
