@@ -36,6 +36,9 @@ function events = combustion_schedule(profile, engine, params, stream)
     intensity(isCombustion) = exp(p.combustion_intensity_cv * randn(stream, nnz(isCombustion), 1));
     jitter = zeros(n, 1);
     jitter(~isCombustion) = p.valve_jitter_deg * randn(stream, nnz(~isCombustion), 1);
+    if isfield(p, 'combustion_jitter_deg')  % cycle-to-cycle combustion timing jitter
+        jitter(isCombustion) = p.combustion_jitter_deg * randn(stream, nnz(isCombustion), 1);
+    end
 
     events = struct();
     events.angle_deg = angle + jitter;

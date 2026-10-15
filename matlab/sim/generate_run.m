@@ -7,6 +7,7 @@ function run = generate_run(projectConfig, batchConfig, scenario)
     params = batchConfig.generator_params;
     durationS = batchConfig.duration_s;
     warmupS = batchConfig.warmup_s;
+    scenario = normalize_scenario(scenario, durationS);
     runNumber = sscanf(scenario.run_id, 'run_%d');
     engineNumber = sscanf(scenario.engine_id, 'engine_%d');
     masterSeed = projectConfig.dataset.master_seed;
@@ -16,18 +17,40 @@ function run = generate_run(projectConfig, batchConfig, scenario)
     profile = operating_profile(scenario, durationS, warmupS, params, streams.profile);
     events = combustion_schedule(profile, projectConfig.engine, params, streams.events);
     [events, profile] = apply_fault(events, profile, scenario, params, engineParams, streams.fault);
+    events = add_unrelated_impacts(events, profile, scenario, params, durationS, warmupS, ...
+        streams.disturbance);
 
     audioFs = projectConfig.streams.audio.sample_rate_hz;
     vibrationFs = projectConfig.streams.vibration.sample_rate_hz;
     sensors = params.sensors;
     [audio, audioInfo] = render_sensor(events, profile, sensors.audio, params.sources, ...
         audioFs, durationS, warmupS, streams.audio, ...
-        GainFactor=engineParams.audio_gain, ResonanceFactor=engineParams.audio_resonance);
+        GainFactor=engineParams.audio_gain, ...
+        ResonanceFactor=engineParams.audio_resonance * scenario.resonance_shift, ...
+        NoiseScale=scenario.noise_scale, ClipGain=scenario.clip_gain);
     [vibration, vibrationInfo] = render_sensor(events, profile, sensors.vibration, params.sources, ...
         vibrationFs, durationS, warmupS, streams.vibration, ...
-        GainFactor=engineParams.vibration_gain, ResonanceFactor=engineParams.vibration_resonance);
+        GainFactor=engineParams.vibration_gain, ...
+        ResonanceFactor=engineParams.vibration_resonance * scenario.resonance_shift, ...
+        NoiseScale=scenario.noise_scale);
     telemetry = render_telemetry(profile, projectConfig.streams.telemetry_rates_hz, params, ...
         engineParams, durationS, streams.telemetry);
+
+    % Data-quality problems: a waveform gap (NaN) and a telemetry dropout (invalid rows).
+    gap = scenario.missing_gap_s;
+    if ~isempty(scenario.missing_stream)
+        if strcmp(scenario.missing_stream, 'audio')
+            audio(missing_mask(numel(audio), audioFs, gap)) = NaN;
+        else
+            vibration(missing_mask(numel(vibration), vibrationFs, gap)) = NaN;
+        end
+    end
+    if ~isempty(scenario.dropout_signal)
+        drop = telemetry.signal == string(scenario.dropout_signal) ...
+            & telemetry.t_s >= scenario.dropout_s(1) & telemetry.t_s < scenario.dropout_s(2);
+        telemetry.value(drop) = NaN;
+        telemetry.valid(drop) = 0;
+    end
 
     run = struct();
     run.audio = audio;
@@ -40,6 +63,50 @@ function run = generate_run(projectConfig, batchConfig, scenario)
     run.truth = build_truth(batchConfig, scenario, events, durationS, masterSeed, streamIndices);
     run.profile = profile;
     run.engine_params = engineParams;
+end
+
+function mask = missing_mask(n, fs, gap)
+    t = (0:n - 1)' / fs;
+    mask = t >= gap(1) & t < gap(2);
+end
+
+function events = add_unrelated_impacts(events, profile, scenario, params, durationS, warmupS, stream)
+    % Broadband transients unrelated to the engine cycle (tools, road, body), in every class.
+    n = poissrnd_stream(stream, scenario.impact_rate_hz * (durationS + warmupS));
+    if n == 0
+        return
+    end
+    src = params.sources.unrelated_impact;
+    amplitude = src.amplitude_range;
+    extra = struct();
+    extra.time_s = sort(-warmupS + (durationS + warmupS) * rand(stream, n, 1));
+    extra.angle_deg = interp1(profile.t, profile.theta_deg, extra.time_s);
+    extra.cylinder = zeros(n, 1);
+    extra.kind = repmat("unrelated_impact", n, 1);
+    extra.intensity = amplitude(1) + diff(amplitude) * rand(stream, n, 1);
+    extra.faulted = false(n, 1);
+    extra.freq_scale = ones(n, 1);
+    extra.tau_scale = ones(n, 1);
+    extra.mode_freq_hz = src.freq_range_hz(1) + diff(src.freq_range_hz) * rand(stream, n, 1);
+    extra.mode_tau_s = src.tau_range_s(1) + diff(src.tau_range_s) * rand(stream, n, 1);
+    names = fieldnames(events);
+    for k = 1:numel(names)
+        events.(names{k}) = [events.(names{k}); extra.(names{k})];
+    end
+    events = sort_events(events);
+end
+
+function n = poissrnd_stream(stream, lambda)
+    % Poisson draw from a specific stream (inverse transform; lambda is small).
+    n = 0;
+    p = exp(-lambda);
+    cumulative = p;
+    u = rand(stream);
+    while u > cumulative && n < 1000
+        n = n + 1;
+        p = p * lambda / n;
+        cumulative = cumulative + p;
+    end
 end
 
 function e = draw_engine_params(v, stream)
@@ -89,8 +156,10 @@ function info = stream_info(streamCfg, sensor, n)
 end
 
 function s = summarize(x)
+    % Missing samples (NaN) are excluded from sums and counted separately.
     x = double(x);
-    s = struct('n_samples', numel(x), 'sum', sum(x), 'sum_sq', sum(x .^ 2), ...
+    s = struct('n_samples', numel(x), 'n_missing', nnz(isnan(x)), ...
+        'sum', sum(x, 'omitnan'), 'sum_sq', sum(x .^ 2, 'omitnan'), ...
         'first', x(1), 'last', x(end));
 end
 
@@ -102,30 +171,57 @@ function truth = build_truth(batchConfig, scenario, events, durationS, masterSee
         'intensity', num2cell(events.intensity(inRun)), ...
         'faulted', num2cell(events.faulted(inRun)));
 
+    % NaN fields are written as null by jsonencode ([] would be written as []).
     condition = scenario.condition;
-    onset = scenario.onset_s;
     truth = struct();
     truth.schema_version = '1.0';
     truth.run_id = scenario.run_id;
     truth.engine_id = scenario.engine_id;
+    truth.split = scenario.split;
+    truth.challenge = scenario.challenge;
     truth.generator_version = batchConfig.generator_version;
     truth.condition = condition;
-    truth.onset_s = onset;
+    truth.onset_s = scenario.onset_s;
     truth.affected_cylinder = scenario.affected_cylinder;
     truth.severity = scenario.severity;
+    truth.severity_end = scenario.severity_end;
+    truth.degradation = scenario.degradation;
+    truth.recovery_s = scenario.recovery_s;
+    truth.profile_kind = scenario.profile_kind;
     if strcmp(condition, 'normal')
-        truth.onset_s = NaN;            % jsonencode writes NaN as null ([] would be [])
-        truth.affected_cylinder = NaN;
-        truth.severity = 0;
-        truth.active_intervals = zeros(0, 2);
-        truth.label_timeline = struct('start_s', 0, 'end_s', durationS, 'label', 'normal');
+        intervals = zeros(0, 2);
+    elseif ~isnan(scenario.recovery_s(1))
+        intervals = [scenario.onset_s, scenario.recovery_s(1); scenario.recovery_s(2), durationS];
     else
-        truth.active_intervals = {[onset, durationS]};
-        truth.label_timeline = struct( ...
-            'start_s', {0, onset - 0.5, onset + 0.5}, ...
-            'end_s', {onset - 0.5, onset + 0.5, durationS}, ...
-            'label', {'normal', 'transition', condition});
+        intervals = [scenario.onset_s, durationS];
     end
+    truth.active_intervals = num2cell(intervals, 2);
+    truth.label_timeline = label_timeline(condition, intervals, durationS);
+    truth.disturbances = struct('impact_rate_hz', scenario.impact_rate_hz, ...
+        'clip_gain', scenario.clip_gain, 'noise_scale', scenario.noise_scale, ...
+        'resonance_shift', scenario.resonance_shift, ...
+        'missing_stream', scenario.missing_stream, 'missing_gap_s', scenario.missing_gap_s, ...
+        'dropout_signal', scenario.dropout_signal, 'dropout_s', scenario.dropout_s);
     truth.events = eventList;
     truth.seed = struct('master_seed', masterSeed, 'substreams', streamIndices);
+end
+
+function timeline = label_timeline(condition, intervals, durationS)
+    % Alternate normal and fault segments with a 1 s transition around each change.
+    changes = intervals';
+    changes = changes(changes > 0 & changes < durationS)';
+    edges = [0, reshape([changes - 0.5; changes + 0.5], 1, []), durationS];
+    labels = {};
+    state = 'normal';
+    for k = 1:numel(changes)
+        labels(end + 1:end + 2) = {state, 'transition'};
+        if strcmp(state, 'normal')
+            state = condition;
+        else
+            state = 'normal';
+        end
+    end
+    labels{end + 1} = state;
+    timeline = struct('start_s', num2cell(edges(1:end - 1)), 'end_s', num2cell(edges(2:end)), ...
+        'label', labels);
 end

@@ -8,6 +8,9 @@ function [signal, info] = render_sensor(events, profile, sensor, sources, fs, du
 %   Heuristic parameters; units are nominal, not calibrated.
 %
 %   options.NoiseFree = true omits noise (used for aliasing checks).
+%   options.NoiseScale multiplies both noise levels (challenge runs).
+%   options.ClipGain > 1 boosts the signal before full-scale clipping
+%   (simulated gain misconfiguration).
 
     arguments
         events struct
@@ -21,6 +24,8 @@ function [signal, info] = render_sensor(events, profile, sensor, sources, fs, du
         options.NoiseFree (1,1) logical = false
         options.GainFactor (1,1) double = 1
         options.ResonanceFactor (1,1) double = 1
+        options.NoiseScale (1,1) double = 1
+        options.ClipGain (1,1) double = 1
     end
 
     nOut = round(durationS * fs);
@@ -48,6 +53,13 @@ function [signal, info] = render_sensor(events, profile, sensor, sources, fs, du
                 freq = events.mode_freq_hz(k);
                 tau = events.mode_tau_s(k);
                 gains = sensor.knock_gain;
+            case "unrelated_impact"
+                src = sources.unrelated_impact;
+                freq = events.mode_freq_hz(k);
+                tau = events.mode_tau_s(k);
+                gains = sensor.impact_gain;
+            otherwise
+                error('render_sensor:UnknownKind', 'Unknown event kind "%s".', events.kind(k));
         end
         x = add_transient(x, t, fs, eventTime(k), events.intensity(k) * gains, ...
             freq(:), tau(:), src.ramp_s);
@@ -71,11 +83,11 @@ function [signal, info] = render_sensor(events, profile, sensor, sources, fs, du
     if ~options.NoiseFree
         [bl, al] = butter(2, sensor.noise_lowpass_hz / (fs / 2));
         colored = filter(bl, al, randn(stream, numel(t), 1));
-        colored = colored / std(colored) * sensor.colored_noise_rms;
-        y = y + colored + sensor.white_noise_rms * randn(stream, numel(t), 1);
+        colored = colored / std(colored) * sensor.colored_noise_rms * options.NoiseScale;
+        y = y + colored + sensor.white_noise_rms * options.NoiseScale * randn(stream, numel(t), 1);
     end
 
-    y = y(nWarm + 1:end);
+    y = options.ClipGain * y(nWarm + 1:end);
     assert(all(isfinite(y)), 'render_sensor:NonFinite', 'Rendered signal contains non-finite samples.');
     clipped = abs(y) >= sensor.full_scale;
     y = min(max(y, -sensor.full_scale), sensor.full_scale);

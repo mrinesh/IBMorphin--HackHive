@@ -113,9 +113,12 @@ def test_double_waveform_is_rejected(tmp_path, config):
     ("description", "mutate", "expected"),
     [
         ("short audio", lambda p: p["mat"].update(audio=p["mat"]["audio"][:-10]), "samples"),
-        ("NaN sample", lambda p: p["mat"]["vibration"].__setitem__((5, 0), np.nan), "non-finite"),
+        ("too many NaN", lambda p: p["mat"]["vibration"].__setitem__(slice(0, 6000), np.nan),
+         "non-finite"),
+        ("unrecorded NaN", lambda p: p["mat"]["vibration"].__setitem__((5, 0), np.nan),
+         "missing samples"),
+        ("infinite", lambda p: p["mat"]["audio"].__setitem__((5, 0), np.inf), "infinite"),
         ("changed value", lambda p: p["mat"]["audio"].__setitem__((100, 0), 0.5), "sum"),
-        ("clipping", lambda p: p["mat"]["audio"].__setitem__(slice(0, 1000), 1.0), "clipped"),
         ("missing signal", lambda p: p.update(rows=[r for r in p["rows"] if r[1] != "load"]),
          "'load' missing"),
         ("wrong unit", lambda p: p.update(rows=[
@@ -138,6 +141,22 @@ def test_missing_value_marked_invalid_is_accepted(tmp_path, config):
         t, signal, _, unit, _ = parts["rows"][0]
         parts["rows"][0] = (t, signal, None, unit, 0)
     assert issues_for(tmp_path, config, mutate) == []
+
+
+def test_declared_gap_is_valid_and_clipping_is_a_warning(tmp_path, config):
+    def mutate(parts):
+        audio = parts["mat"]["audio"]
+        audio[1000:1500] = np.nan
+        audio[0:1000] = 1.0
+        summary = _summary(audio)
+        summary["n_missing"] = 500
+        summary["sum"] = float(np.nansum(audio.astype(np.float64)))
+        summary["sum_sq"] = float(np.nansum(np.square(audio.astype(np.float64))))
+        parts["metadata"]["waveform_summary"]["audio"] = summary
+    bundle = run_io.load_run(write_bundle(tmp_path, config, mutate=mutate))
+    assert run_io.validate_run(bundle, config) == []
+    warnings = run_io.run_warnings(bundle, config)
+    assert any("clipped" in w for w in warnings) and any("missing" in w for w in warnings)
 
 
 def test_manifest_records_hashes(tmp_path, config):

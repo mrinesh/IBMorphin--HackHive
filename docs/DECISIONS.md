@@ -52,6 +52,22 @@
 - The temporary model trained on this batch is a pipeline check, not an
   evaluation; four engines cannot support performance claims.
 
+## 2026-10-15: final 30-hour plan and core dataset
+
+- About 30 hours remain. Submission: code repository, demo video (recorded by
+  the user), and written report. The demo runs on the macOS development machine.
+- Core dataset `core_v1`: 30 engines × 8 runs × 30 s (2 per class), split
+  18 train / 4 tuning / 4 calibration / 4 test, plus 16 challenge runs on the
+  test engines (reserved RPM bands 3,000-3,500 and 800-900, 2× noise, shifted
+  resonance, mild severity 0.15-0.3). Chosen by the user instead of 60 × 45 s.
+- Scenarios are sampled (`sample_scenarios.m`) from distributions shared by all
+  classes. A classifier on the observable scenario parameters scored 0.233
+  balanced accuracy across engine folds (chance 0.25).
+- Generator 0.2.0 adds recovery intervals, accelerated valve degradation
+  (simulated time scale), unrelated impacts, combustion timing jitter, clipping,
+  waveform gaps, and telemetry dropouts. Clock offsets/drift remain deferred.
+- Clipping and declared gaps are data-quality warnings, not contract violations.
+
 ## Open decisions
 
 - Assign team owners and record the actual hackathon deadline.

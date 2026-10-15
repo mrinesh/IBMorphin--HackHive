@@ -89,8 +89,9 @@ label, fault schedule, severity, or seeds.
 - `telemetry_signals`: for each signal, `rate_hz` and `unit`
 - `clock`: `offset_s` and `drift_ppm` for `audio`, `vibration`, `telemetry`
 - `waveform_summary.audio` and `waveform_summary.vibration`: `n_samples`,
-  `sum`, `sum_sq`, `first`, `last`, computed in MATLAB in double precision from
-  the exported `single` arrays. Python compares these against the loaded arrays
+  `n_missing`, `sum`, `sum_sq` (both excluding NaN), `first`, `last` (null if
+  NaN), computed in MATLAB in double precision from the exported `single` arrays.
+  Missing waveform samples are NaN; up to 5% per run is allowed. Python compares these against the loaded arrays
   to confirm values survived the export (round-trip check).
 
 ## Checksums
@@ -115,6 +116,10 @@ inference. It contains:
 - `events`: every source event with `time_s`, `cylinder`, `kind`
   (`combustion`, `valve_impact`, `knock_burst`), `intensity`, and `faulted`
 - `seed`: `master_seed` and the random-stream indices used for the run
+- Sampled datasets also record `split`, `challenge`, `profile_kind`,
+  `degradation`, `severity_end`, `recovery_s`, and `disturbances` (impact rate,
+  clip gain, noise scale, resonance shift, waveform gap, telemetry dropout).
+  Event kinds include `unrelated_impact`. `scenarios.json` lists every run.
 
 ## Units and context
 

@@ -4,7 +4,7 @@ function [streams, indices] = make_streams(masterSeed, runNumber, engineNumber)
 %   changing one stage (for example sensor noise) never shifts another.
 %   Run substreams are runNumber*16 + k; engine substreams start at 2^40.
 
-    purposes = ["profile", "events", "fault", "audio", "vibration", "telemetry"];
+    purposes = ["profile", "events", "fault", "audio", "vibration", "telemetry", "disturbance"];
     streams = struct();
     indices = struct();
     for k = 1:numel(purposes)

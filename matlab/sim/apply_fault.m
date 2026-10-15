@@ -5,21 +5,29 @@ function [events, profile] = apply_fault(events, profile, scenario, params, engi
 %   knock_like:           damped 5-9 kHz bursts shortly after combustion.
 %   valve_clearance_like: shifted, sharper, more variable valve impacts whose
 %                         amplitude may rise or fall.
+%   The fault is inactive during scenario.recovery_s. When scenario.degradation
+%   is true, severity ramps linearly from severity to severity_end between
+%   onset and the end of the run (accelerated, simulated deterioration).
 %   Heuristic parameter mappings; not fitted to engine measurements.
 %   Every changed or added event has faulted = true for the evaluation truth.
+%   scenario must already be completed by normalize_scenario.
 
     condition = string(scenario.condition);
     if condition == "normal"
         return
     end
-    severity = scenario.severity;
-    affected = events.time_s >= scenario.onset_s & events.cylinder == scenario.affected_cylinder;
+    rec = scenario.recovery_s;
+    recovering = events.time_s >= rec(1) & events.time_s < rec(2);  % NaN bounds: never
+    affected = events.time_s >= scenario.onset_s & ~recovering ...
+        & events.cylinder == scenario.affected_cylinder;
+    severityAt = @(t) severity_schedule(scenario, t);
     f = params.faults.(condition);
 
     switch condition
         case "misfire"
             candidates = find(affected & events.kind == "combustion");
-            probability = min(f.base_probability + f.probability_per_severity * severity, 1);
+            probability = min(f.base_probability ...
+                + f.probability_per_severity * severityAt(events.time_s(candidates)), 1);
             hit = candidates(rand(stream, numel(candidates), 1) < probability);
             residual = f.residual_range(1) + diff(f.residual_range) * rand(stream, numel(hit), 1);
             events.intensity(hit) = events.intensity(hit) .* residual;
@@ -29,16 +37,18 @@ function [events, profile] = apply_fault(events, profile, scenario, params, engi
 
         case "knock_like"
             candidates = find(affected & events.kind == "combustion");
-            probability = min(f.base_probability + f.probability_per_severity * severity, 1);
+            probability = min(f.base_probability ...
+                + f.probability_per_severity * severityAt(events.time_s(candidates)), 1);
             hit = candidates(rand(stream, numel(candidates), 1) < probability);
             n = numel(hit);
+            severity = severityAt(events.time_s(hit));
             src = params.sources.knock_burst;
             burst = struct();
             burst.angle_deg = events.angle_deg(hit) ...
                 + f.delay_range_deg(1) + diff(f.delay_range_deg) * rand(stream, n, 1);
             burst.cylinder = events.cylinder(hit);
             burst.kind = repmat("knock_burst", n, 1);
-            burst.intensity = severity * (0.6 + 0.8 * rand(stream, n, 1)) .* events.intensity(hit);
+            burst.intensity = severity .* (0.6 + 0.8 * rand(stream, n, 1)) .* events.intensity(hit);
             burst.faulted = true(n, 1);
             burst.freq_scale = ones(n, 1);
             burst.tau_scale = ones(n, 1);
@@ -51,12 +61,13 @@ function [events, profile] = apply_fault(events, profile, scenario, params, engi
         case "valve_clearance_like"
             hit = find(affected & events.kind == "valve_impact");
             n = numel(hit);
+            severity = severityAt(events.time_s(hit));
             events.angle_deg(hit) = events.angle_deg(hit) + f.timing_shift_deg * severity ...
-                + f.extra_jitter_deg * severity * randn(stream, n, 1);
-            events.freq_scale(hit) = 1 + f.freq_scale_per_severity * severity;
-            events.tau_scale(hit) = 1 + f.tau_scale_per_severity * severity;
+                + f.extra_jitter_deg * severity .* randn(stream, n, 1);
+            events.freq_scale(hit) = 1 + f.freq_scale_per_severity .* severity;
+            events.tau_scale(hit) = 1 + f.tau_scale_per_severity .* severity;
             events.intensity(hit) = events.intensity(hit) ...
-                .* max(0.3, 1 + f.amplitude_spread * severity * randn(stream, n, 1));
+                .* max(0.3, 1 + f.amplitude_spread * severity .* randn(stream, n, 1));
             events.faulted(hit) = true;
             events.time_s = crank_event_times(profile, events.angle_deg);
             events = sort_events(events);
@@ -66,6 +77,14 @@ function [events, profile] = apply_fault(events, profile, scenario, params, engi
     end
     % Shifted, delayed, or slowed events can fall beyond the simulated profile.
     events = drop_events(events, isnan(events.time_s));
+end
+
+function severity = severity_schedule(scenario, t)
+    severity = scenario.severity * ones(size(t));
+    if scenario.degradation
+        progress = min(max((t - scenario.onset_s) / (scenario.duration_s - scenario.onset_s), 0), 1);
+        severity = scenario.severity + (scenario.severity_end - scenario.severity) * progress;
+    end
 end
 
 function profile = add_rpm_dips(profile, times, depthFraction, f)

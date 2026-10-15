@@ -73,6 +73,8 @@ class TemporaryModel:
 def trainable(table: pd.DataFrame, split: str) -> pd.DataFrame:
     rows = table[(table["split"] == split) & (table["label"] != "transition")
                  & (table["quality"] == "ok")]
+    if "subset" in rows:
+        rows = rows[rows["subset"] == "core"]
     return rows.reset_index(drop=True)
 
 

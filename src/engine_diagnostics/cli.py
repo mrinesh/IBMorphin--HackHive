@@ -68,15 +68,23 @@ def _validate_runs(raw_dir: Path, config: dict) -> int:
         print(f"No run_NNNNN directories in {raw_dir}", file=sys.stderr)
         return 1
     failures = 0
+    warned = 0
     for run_dir in run_dirs:
+        warnings = []
         try:
-            issues = run_io.validate_run(run_io.load_run(run_dir), config)
+            bundle = run_io.load_run(run_dir)
+            issues = run_io.validate_run(bundle, config)
+            warnings = run_io.run_warnings(bundle, config) if not issues else []
         except (OSError, ValueError) as error:
             issues = [str(error)]
         failures += bool(issues)
-        print(f"[OK] {run_dir.name}" if not issues else f"[INVALID] {run_dir.name}")
-        for issue in issues:
-            print(f"  {issue}")
+        warned += bool(warnings)
+        status = "[INVALID]" if issues else "[WARN]" if warnings else "[OK]"
+        print(f"{status} {run_dir.name}")
+        for message in issues + warnings:
+            print(f"  {message}")
+    if warned:
+        print(f"{warned} runs carry declared data-quality problems (allowed)")
     if failures:
         print(f"{failures} of {len(run_dirs)} runs invalid; manifest not written")
         return 1

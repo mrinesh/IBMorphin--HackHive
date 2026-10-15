@@ -13,6 +13,12 @@ function report = validate_run_matlab(runDir, truthPath)
     telemetry = readtable(fullfile(runDir, 'telemetry.csv'), 'TextType', 'string');
     truth = jsondecode(fileread(truthPath));
     duration = metadata.duration_s;
+    % Declared data-quality problems (sampled datasets) are expected, not failures.
+    declaredClip = isfield(truth, 'disturbances') && truth.disturbances.clip_gain > 1;
+    declaredGap = "";
+    if isfield(truth, 'disturbances') && ~isempty(truth.disturbances.missing_stream)
+        declaredGap = string(truth.disturbances.missing_stream);
+    end
     issues = strings(0, 1);
     metrics = struct();
 
@@ -25,19 +31,21 @@ function report = validate_run_matlab(runDir, truthPath)
         if numel(x) ~= round(duration * fs) || fs ~= config.streams.(name).sample_rate_hz
             issues(end + 1) = name + ": sample count or rate mismatch"; %#ok<AGROW>
         end
-        if ~all(isfinite(x))
-            issues(end + 1) = name + ": non-finite samples"; %#ok<AGROW>
+        missing = mean(isnan(x));
+        if any(isinf(x)) || (missing > 0 && declaredGap ~= name) || missing > 0.05
+            issues(end + 1) = sprintf("%s: non-finite samples (%.4f missing)", name, missing); %#ok<AGROW>
         end
         clipped = mean(abs(x) >= metadata.streams.(name).full_scale);
-        if clipped > config.runtime.max_clipped_fraction
+        if clipped > config.runtime.max_clipped_fraction && ~declaredClip
             issues(end + 1) = sprintf("%s: clipped fraction %.4f", name, clipped); %#ok<AGROW>
         end
-        metrics.(name + "_rms") = rms(double(x));
+        metrics.(name + "_rms") = rms(double(x), 'omitnan');
         metrics.(name + "_peak") = max(abs(double(x)));
+        metrics.(name + "_clipped") = clipped;
     end
 
     % Firing-event rate: a four-stroke engine fires cylinders/2 times per revolution.
-    rpm = telemetry(telemetry.signal == "rpm", :);
+    rpm = telemetry(telemetry.signal == "rpm" & telemetry.valid == 1, :);
     expected = trapz([rpm.t_s; duration], [rpm.value; rpm.value(end)]) / 60 ...
         * config.engine.cylinders / 2;
     kinds = string({truth.events.kind})';
@@ -71,7 +79,7 @@ function report = validate_run_matlab(runDir, truthPath)
             knocked = arrayfun(@(t) any(bursts > t & bursts <= t + 0.005), fired);
             fs = w.vibration_fs_hz;
             [b, a] = butter(4, [5000 9000] / (fs / 2), 'bandpass');
-            energy = filtfilt(b, a, double(w.vibration)) .^ 2;
+            energy = filtfilt(b, a, fillmissing(double(w.vibration), "constant", 0)) .^ 2;
             windowEnergy = arrayfun(@(t) sum(energy(max(1, round(t * fs)) ...
                 + (0:round(0.005 * fs)))), fired(fired < duration - 0.006));
             knocked = knocked(fired < duration - 0.006);

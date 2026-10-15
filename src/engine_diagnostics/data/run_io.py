@@ -33,6 +33,9 @@ REQUIRED_METADATA = (
     "telemetry_signals", "clock", "waveform_summary",
 )
 RUN_ID = re.compile(r"^run_\d{5}$")
+# Missing waveform samples (NaN) are a declared data-quality problem, allowed up to
+# this fraction of a run; windows that contain them are flagged by the feature path.
+MAX_RUN_MISSING_FRACTION = 0.05
 ENGINE_ID = re.compile(r"^engine_\d{3}$")
 
 
@@ -136,24 +139,52 @@ def _check_waveform(bundle: RunBundle, name: str, duration: float, config: dict)
     expected_n = round(duration * expected_fs)
     if x.size != expected_n:
         issues.append(f"{name}: {x.size} samples, expected {expected_n}")
-    if not np.all(np.isfinite(x)):
-        issues.append(f"{name}: non-finite samples")
+    missing = np.isnan(x)
+    if np.isinf(x).any():
+        issues.append(f"{name}: infinite samples")
         return issues
-    clipped = float(np.mean(np.abs(x) >= stream["full_scale"]))
-    if clipped > config["runtime"]["max_clipped_fraction"]:
-        issues.append(f"{name}: clipped fraction {clipped:.4f}")
+    if missing.mean() > MAX_RUN_MISSING_FRACTION:
+        issues.append(f"{name}: non-finite samples ({missing.mean():.4f} missing)")
+        return issues
 
     summary = bundle.metadata["waveform_summary"][name]
     x64 = x.astype(np.float64)
     if summary["n_samples"] != x.size:
         issues.append(f"{name}: summary n_samples {summary['n_samples']} != {x.size}")
+    elif summary.get("n_missing", 0) != int(missing.sum()):
+        issues.append(f"{name}: {int(missing.sum())} missing samples, "
+                      f"MATLAB summary {summary.get('n_missing', 0)}")
     elif x.size:
-        if np.float32(summary["first"]) != x[0] or np.float32(summary["last"]) != x[-1]:
+        if not (_same_sample(summary["first"], x[0]) and _same_sample(summary["last"], x[-1])):
             issues.append(f"{name}: first/last samples differ from MATLAB summary")
-        for key, value in (("sum", x64.sum()), ("sum_sq", np.square(x64).sum())):
+        for key, value in (("sum", np.nansum(x64)), ("sum_sq", np.nansum(np.square(x64)))):
             if not math.isclose(value, summary[key], rel_tol=1e-9, abs_tol=1e-6):
                 issues.append(f"{name}: {key} {value!r} differs from MATLAB {summary[key]!r}")
     return issues
+
+
+def _same_sample(recorded, sample) -> bool:
+    if recorded is None:  # MATLAB writes NaN as null
+        return bool(np.isnan(sample))
+    return bool(np.float32(recorded) == sample)
+
+
+def run_warnings(bundle: RunBundle, config: dict[str, Any]) -> list[str]:
+    """Data-quality findings that do not break the contract (clipping, gaps)."""
+    warnings = []
+    for name in WAVEFORM_STREAMS:
+        x = getattr(bundle, name)
+        stream = bundle.metadata["streams"][name]
+        clipped = float(np.mean(np.abs(x[np.isfinite(x)]) >= stream["full_scale"]))
+        if clipped > config["runtime"]["max_clipped_fraction"]:
+            warnings.append(f"{bundle.run_id}: {name} clipped fraction {clipped:.4f}")
+        missing = float(np.isnan(x).mean())
+        if missing:
+            warnings.append(f"{bundle.run_id}: {name} missing fraction {missing:.4f}")
+    invalid = int((bundle.telemetry["valid"] == 0).sum())
+    if invalid:
+        warnings.append(f"{bundle.run_id}: {invalid} invalid telemetry rows")
+    return warnings
 
 
 def _check_telemetry(telemetry: pd.DataFrame, metadata: dict, duration: float,

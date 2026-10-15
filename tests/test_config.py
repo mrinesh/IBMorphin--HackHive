@@ -19,7 +19,7 @@ def config():
 
 def test_shared_mvp_configuration_is_valid():
     config = load_config(ROOT / "configs/mvp.json", SCHEMA)
-    assert config["dataset"]["engine_count"] == 60
+    assert config["dataset"]["engine_count"] == 30
 
 
 @pytest.mark.parametrize(
@@ -30,7 +30,7 @@ def test_shared_mvp_configuration_is_valid():
         ("analysis", "step_s", 0.333333, "integer sample"),
         ("analysis", "stft_hop_samples", 4096, "STFT hop"),
         ("analysis", "welch_segment_samples", 100000, "spectral segments"),
-        ("dataset", "engine_count", 61, "split counts"),
+        ("dataset", "engine_count", 31, "split counts"),
         ("dataset", "runs_per_engine", 7, "condition classes"),
     ],
 )
