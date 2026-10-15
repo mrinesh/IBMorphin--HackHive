@@ -4,7 +4,7 @@
     "dataset": "core_v1",
     "run_id": "run_00226",
     "start_s": 0,
-    "note": "Held-out engine_029. Healthy run with a load step at ~9.2 s: decisions stay normal and no alert is raised."
+    "note": "Held-out engine_029. Healthy run with a load step at ~9.2 s: decisions are normal or occasionally uncertain, and no alert is raised."
   },
   {
     "name": "2. Knock-like bursts, then a load change",

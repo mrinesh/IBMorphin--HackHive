@@ -3,116 +3,115 @@
 MATLAB/Python project for the Honeywell hackathon problem on engine signature
 extraction and pattern recognition.
 
-**Current stage: first end-to-end milestone (checklist §3).** A config-driven
-MATLAB generator produces synchronized audio, vibration, and telemetry runs
-(13 × 20 s on 4 virtual engines: normal-only, or normal then misfire,
-knock-like, or valve-clearance-like). Python validates them against the data
-contract, extracts window features, trains a temporary baseline/SVM model on
-three engines, and replays runs in 40 ms packets with persistent alerts, in the
-terminal or a local Streamlit dashboard. Scores on the one held-out engine are
-pipeline checks, not diagnostic performance; physical realism is unvalidated.
+A MATLAB simulator generates synchronized microphone, accelerometer, and
+ECU-style telemetry for a four-cylinder engine under normal operation and three
+modeled faults (misfire, knock-like bursts, valve-clearance-like impacts). A
+Python pipeline validates the data, extracts 31 window features, and trains a
+normal-baseline detector plus a calibrated SVM. Recorded runs are replayed in
+40 ms packets through the same code into a local Streamlit evidence dashboard.
+
+On four held-out virtual engines: macro-F1 0.835, no false alerts during normal
+replay, and 13 ms processing per decision; mild faults and the reserved
+challenge conditions are largely missed. **All data is synthetic**; these results
+do not establish real-engine accuracy, physical wear, or remaining useful life.
 
 ## Quick start
 
-Run these commands from the repository root in PowerShell:
+Results and design: [PROJECT_REPORT.md](PROJECT_REPORT.md). Demo walkthrough:
+[docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md).
 
-```powershell
-uv sync --locked
-uv run engine-diagnostics doctor
-uv run engine-diagnostics validate-config
-uv run pytest
-```
-
-Select `.venv\Scripts\python.exe` as the IDE interpreter. The local interpreter is
-Python 3.13; supported package range is 3.11-3.13. Exact dependency versions are
-recorded in `uv.lock`; pytest is included by default. Initial setup installs the
-configuration tools and tests. Install the scientific/dashboard stack before
-starting the integration milestone:
+Run from the repository root (macOS/Linux shell or PowerShell):
 
 ```powershell
 uv sync --locked --all-extras --group quality
-uv run --all-extras --group quality ruff check .
+uv run --all-extras engine-diagnostics doctor
+uv run --all-extras --group quality pytest
 ```
 
-The full environment includes NumPy, SciPy, pandas, PyArrow, scikit-learn,
-Streamlit, Plotly, and Ruff. `doctor` distinguishes optional packages from missing
-setup requirements. Use `uv run --all-extras` for future analysis/dashboard
-commands, so dependency synchronization retains those extras.
+**Dashboard from the sample package (no MATLAB needed).** Unzip
+`submission_sample.zip` (seven held-out demo runs, their evaluation truth, the
+frozen v1 model, and the final reports) at the repository root, then:
 
-With Python instead of `uv`, editable setup is possible using
-`python -m pip install -e .` (or `-e ".[analysis,dashboard]"` for the full stack),
-but use the lockfile workflow for the team's shared
-environment. See the [uv locking/syncing documentation](https://docs.astral.sh/uv/concepts/projects/sync/).
-
-## MATLAB setup
-
-Open MATLAB with the repository root as its current folder:
-
-```matlab
-addpath('matlab');
-project = initialize_project();
+```powershell
+uv run --all-extras streamlit run dashboard/app.py
 ```
 
-This loads the same JSON settings and prints the installed products. Generate
-and check the integration batch (requires Signal Processing Toolbox):
+Choose a demo preset in the sidebar and press Play.
+
+**Full reproduction.** Generate the core dataset in MATLAB (about 40 minutes in
+one process, or split `Runs` across several processes), then run the Python
+pipeline:
 
 ```matlab
-runs = generate_integration_batch();   % data/raw and evaluation_truth
+addpath('matlab'); generate_dataset(); validate_generator();
 ```
 
 ```powershell
-uv run --all-extras engine-diagnostics validate-runs
-uv run --all-extras engine-diagnostics build-features
-uv run --all-extras engine-diagnostics train-temporary
-uv run --all-extras engine-diagnostics replay run_00012 --speed 1 --with-truth
-uv run --all-extras streamlit run dashboard/app.py
-uv run --all-extras pytest
+scripts/run_pipeline.sh            # validate, features, train
+scripts/run_pipeline.sh --final    # also score the test engines once
 ```
 
-On macOS MATLAB is at `/Applications/MATLAB_R2026b.app` and not on PATH. See
-[MATLAB setup](matlab/README.md).
+The pipeline reproduces the feature table and model bit for bit.
+
+## MATLAB setup
+
+Open MATLAB with the repository root as its current folder (requires Signal
+Processing Toolbox; Statistics and Machine Learning Toolbox for `kurtosis`):
+
+```matlab
+addpath('matlab');
+project = initialize_project();          % settings and installed products
+summary = generate_dataset();            % core_v1: data/raw/core_v1, evaluation_truth/core_v1
+report = validate_generator();           % generator checks and MATLAB feature references
+runs = generate_integration_batch();     % optional 13-run integration batch
+```
+
+On macOS MATLAB is at `/Applications/MATLAB_R2026b.app` and not on PATH. For
+command-line batch generation from a path containing an apostrophe, launch
+`matlab -batch` with `-sd` pointing to a symlink without one. See
+[matlab/README.md](matlab/README.md).
+
+## Command reference
+
+| Command | Purpose |
+|---|---|
+| `engine-diagnostics validate-runs <dir>` | Contract validation, warnings, SHA-256 manifest |
+| `engine-diagnostics build-features ...` | Labeled window feature table (Parquet) |
+| `engine-diagnostics train` | v1 model: train/tuning/calibration partitions |
+| `engine-diagnostics evaluate` | One-time test-engine scoring |
+| `engine-diagnostics replay <run> --raw-dir data/raw/core_v1 --model artifacts/models/diagnostic_v1.joblib --truth-dir evaluation_truth/core_v1 --speed 1 --with-truth` | Terminal replay with prediction log |
+| `engine-diagnostics train-temporary` | Temporary model for the integration batch |
+
+Prefix each with `uv run --all-extras`.
 
 ## Structure
 
 ```text
-configs/                   Shared JSON settings
+configs/                   mvp.json (shared settings), core_v1.json, integration_batch.json, demo_presets.json
 schemas/                   Configuration schema
-matlab/                    MATLAB initialization and future generator
-src/engine_diagnostics/    Python CLI and future analysis modules
-dashboard/                 Dashboard workstream notes
-data/raw/                  Future exported run bundles
-data/processed/            Future validated telemetry/features
-evaluation_truth/          Evaluation-only labels and latent truth
-artifacts/models/          Future model bundles
-artifacts/logs/            Future prediction logs
-reports/generated/         Future validation and evaluation reports
-tests/                     Configuration safety checks
-docs/                      Data contract and decisions
+matlab/                    Generator entry points, export, validation, review plots
+matlab/sim/                Scenario sampling, crank/event model, faults, sensor and telemetry rendering
+src/engine_diagnostics/    CLI, data contract, features, labels, models, evaluation, replay
+dashboard/                 Streamlit replay dashboard
+scripts/                   One-shot Python pipeline
+data/raw/                  Exported run bundles (generated, not tracked)
+data/processed/            Feature tables (generated)
+evaluation_truth/          Evaluation-only labels and source events (generated)
+artifacts/                 Models, prediction logs, submission sample (generated)
+reports/generated/         Validation and evaluation reports (generated)
+tests/                     Contract, DSP, leakage, replay, model, and dashboard tests
+docs/                      Data contract, decisions, testing record, demo script
 ```
 
 Generated datasets, virtual environments, private truth, and experiment artifacts
 are ignored by Git. Local commits and verification reporting follow
 [AGENTS.md](AGENTS.md). Publishing or pushing requires a separate instruction.
 
-## Agreed MVP settings
+## Status
 
-- Four classes: normal, misfire, knock-like bursts, valve-clearance-like impacts.
-- Audio at 24 kHz, one vibration axis at 25.6 kHz, and slower telemetry.
-- Two-second analysis windows updated every half-second.
-- MATLAB event-based synthesis and file export; Python owns inference features.
-- Normal-baseline detector plus a feature-based SVM, followed by persistent alerts.
-- Local replay dashboard with signatures, evidence, quality states, and a simulated
-  degradation trend. Physical wear and remaining useful life remain unvalidated.
-
-These are configured intentions, not implemented diagnostic capabilities. The
-validator checks schema, sampling limits, window relationships, and split counts.
-
-## Next milestone
-
-Improve generator fidelity and decorrelate scenario RPM/load from the fault
-class (a telemetry-only model currently finds a shortcut), add robustness
-settings, then generate and freeze the engine-split dataset (checklist §4-§5).
-The handoff is specified in [DATA_CONTRACT.md](docs/DATA_CONTRACT.md).
+The submission prototype is complete; see the acceptance record in
+[PROJECT_REPORT.md](PROJECT_REPORT.md) §11.6. Remaining items are listed in
+[docs/TESTING.md](docs/TESTING.md).
 
 ## Project documents
 

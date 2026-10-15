@@ -1,738 +1,384 @@
 # Multisensor Engine Signature Extraction and Fault Recognition
 
-## Project Report
+## Final Project Report
 
 | Document field | Value |
 |---|---|
 | Project context | Honeywell hackathon: automobile engine data, signature extraction, and pattern recognition |
 | Report date | 15 October 2026 |
-| Document version | 1.0 |
-| Project stage | Initialization scaffold created; diagnostic capabilities remain planned |
-| Assumed software access | MATLAB; individual toolboxes and Simulink to be checked separately |
-| Recommended implementation | MATLAB data generation; Python analysis and ML; Streamlit dashboard |
-| Execution checklist | [PROJECT_CHECKLIST.md](PROJECT_CHECKLIST.md) |
+| Document version | 2.0 (final; supersedes the version 1.0 plan) |
+| Project stage | Implemented prototype; frozen model scored once on held-out synthetic engines |
+| Software | MATLAB R2026b (Signal Processing, Statistics and Machine Learning Toolboxes); Python 3.13 with NumPy, SciPy, pandas, scikit-learn, Streamlit, Plotly |
+| Demo machine | macOS development machine, 8 CPU cores, 16 GB RAM |
+| Detailed records | [docs/TESTING.md](docs/TESTING.md), [docs/DECISIONS.md](docs/DECISIONS.md), [docs/DATA_CONTRACT.md](docs/DATA_CONTRACT.md), [PROJECT_CHECKLIST.md](PROJECT_CHECKLIST.md) |
 
-**Status statement:** The workspace now includes a Python package scaffold, shared JSON configuration and validation, data-contract documentation, and a MATLAB initialization function. This report describes the proposed diagnostic features; it does not claim that the generator, dataset, models, dashboard, or performance targets have been implemented or validated. All numerical performance thresholds are proposed acceptance goals until measured results are recorded.
+**Status statement.** Everything described as implemented below exists in this repository and was executed. All signals are synthetic, produced by our own MATLAB generator; organizers confirmed that team-generated synthetic data is allowed. Reported scores measure recognition of *simulated* patterns on held-out *virtual* engines. They do not establish diagnostic accuracy on a real engine, calibrated physical wear, or remaining useful life.
 
 ## Contents
 
-1. Abstract and executive overview
-2. Problem statement and project objectives
-3. Scope, users, and requirement coverage
-4. Complete feature catalogue
-5. System architecture and data flow
-6. MATLAB simulation and synthetic-data generation
-7. Dataset structure, labeling, and reproducibility
-8. Signal processing and signature extraction
-9. Fault detection, classification, and sensor fusion
-10. Degradation monitoring and prediction boundaries
-11. Dashboard features and user experience
-12. Replay operation, alerts, and latency
-13. Verification and evaluation methodology
-14. Technology, resources, and implementation structure
-15. Execution strategy and project management
-16. Expected deliverables and demonstration
-17. Risks, limitations, and future development
-18. Acceptance and results record
-19. Conclusion
-20. References and glossary
+1. Executive summary
+2. Problem and objectives
+3. What was built
+4. System architecture and data flow
+5. MATLAB synthetic-data generator
+6. Dataset, labels, and reproducibility
+7. Signal processing and signatures
+8. Detection, classification, calibration, and alerts
+9. Replay operation and dashboard
+10. Verification
+11. Results
+12. Limitations and risks
+13. Future work
+14. Reproducing the results
+15. Conclusion
+16. References and glossary
 
-## 1. Abstract and executive overview
+## 1. Executive summary
 
-This project proposes a reproducible engine-condition analysis prototype that combines acoustic signals, mechanical vibration, and numerical operating telemetry. The system will extract time-domain, frequency-domain, and speed-related signatures, establish normal operating references, and recognize selected simulated fault patterns.
+We built a complete, reproducible engine-condition workflow that combines an acoustic channel, one vibration axis, and ECU-like telemetry:
 
-The recommended prototype will distinguish normal operation from intermittent misfire, knock-like combustion bursts, and valve-clearance-like impact behavior. MATLAB will generate synchronized synthetic streams using a shared engine event schedule. Python will validate the exported data, extract features, train a support vector machine (SVM), and perform inference during recorded-data replay. A local dashboard will show raw signals, operating conditions, spectra, spectrograms, condition predictions, alerts, and supporting measurements.
+- **MATLAB generator.** A configuration-driven event-and-response simulator of a four-cylinder, four-stroke engine. It renders synchronized audio (24 kHz), vibration (25.6 kHz), and six telemetry signals for normal operation and three modeled faults: intermittent misfire, knock-like bursts, and valve-clearance-like impacts. Fault onset, severity, intermittence, recovery, accelerated degradation, disturbances, and data-quality problems are all sampled reproducibly.
+- **Python pipeline.** Validates every exported run against a written data contract, extracts 31 interpretable window features (2 s windows every 0.5 s), and trains a normal-baseline detector plus a calibrated RBF support vector machine.
+- **Replay and dashboard.** Recorded runs are replayed in 40 ms packets through exactly the same feature code, model, and persistent-alert logic. A local Streamlit dashboard shows raw signals, spectra, a spectrogram, impulse envelope, telemetry with freshness, live predictions with calibrated confidence, evidence against a matched normal reference, and a simulated valve-wear trend.
 
-The principal deliverable is the complete analytical workflow, including the data generator and its validation evidence. The project will also demonstrate an accelerated simulated degradation trend. It will not equate that trend with measured physical wear or predict remaining useful life without the necessary lifetime evidence.
+**Headline results (4 held-out virtual engines, 32 core test runs, synthetic):**
 
-**Features that define the project:**
+| Measure | Result | Goal | Status |
+|---|---|---|---|
+| Window macro-F1 (4 classes) | 0.835 | ≥ 0.80 | Met |
+| Per-fault window recall | knock 0.74, misfire 0.78, valve 0.71 | each ≥ 0.75 | Missed for knock and valve |
+| False alerts during normal replay | 0 episodes in 7.8 normal minutes; 0 of 8 normal-only runs alerted | ≤ 0.2 per normal minute | Met (small denominator) |
+| Sustained-fault detection | 17 of 28 events (61%) | — | Reported |
+| Alert latency, sustained moderate/severe faults | p50 1.46 s, p95 2.48 s for detected events; 5 of 8 detected | p95 ≤ 4 s | Latency met; 3 of 8 missed |
+| Processing per decision | p95 13 ms | p95 < 250 ms | Met |
+| Degradation indicator vs true severity | median Spearman 0.906 (4 runs) | ≥ 0.7 | Met |
+| Challenge runs (reserved conditions) | macro-F1 0.384; knock recall 0 | ≥ 0.65 | Missed |
+| Telemetry-only shortcut control | macro-F1 0.199 (chance ≈ 0.25) | near chance | Met |
 
-- Synchronized synthetic audio, vibration, and ECU-like telemetry.
-- Configurable MATLAB scenarios with reproducible fault onset, severity, and disturbances.
-- FFT, power spectral density (PSD), STFT, envelope, and approximate order-based analysis.
-- Operating-condition-aware normal-baseline detection.
-- Four-class SVM classification using fused sensor features.
-- Data-quality checks, uncertainty handling, and unsupported-operation states.
-- Causal inference on two-second windows, updated every half-second during replay.
-- An evidence dashboard with fault timelines and a simulated degradation indicator.
-- Engine-separated evaluation, robustness tests, and versioned experiment artifacts.
+The system reliably separates healthy operation from strong faults and explains its alerts, but it misses mild faults and does not generalize to the reserved high-noise, extreme-RPM challenge conditions. Those failures are reported, not tuned away.
 
-## 2. Problem statement and project objectives
+## 2. Problem and objectives
 
-### 2.1 Problem context
+Engine signals change with speed, load, temperature, transmission path, and sensor placement, so a louder signal or a new spectral peak is not by itself a diagnosis. The problem statement asks for multiple sensor streams to be analyzed for recognizable signatures, normal baselines, fault recognition, and wear-related analysis, presented through a dashboard.
 
-Engine signals vary with speed, load, temperature, mechanical transmission paths, and sensor placement. Fault-related changes can overlap with ordinary operating changes. An increase in vibration or the appearance of a spectral peak is therefore insufficient, by itself, to establish a mechanical diagnosis.
+The question the prototype answers for each two-second window is:
 
-The supplied problem statement asks for multiple sensor streams to be analyzed for recognizable signatures and presented through a dashboard. It also motivates normal baselines, fault recognition, and wear-related analysis. The team additionally requires an original synthetic-data generator rather than relying on an unspecified external dataset.
+> Does this window differ from normal operation at these operating conditions, which modeled condition best matches it, and what evidence should an engineer inspect?
 
-### 2.2 Primary objective
+Objectives, all implemented: generate consistent multisensor scenarios in MATLAB; validate and document them; align different-rate streams by timestamp; extract interpretable, operating-condition-aware signatures; detect abnormality separately from classification; classify modeled faults with a CPU-friendly model; display predictions with evidence; measure false alerts, misses, classification quality and latency; demonstrate a condition trend under accelerated simulated deterioration; and package the workflow for an offline demonstration.
 
-Develop a demonstrator that answers:
+## 3. What was built
 
-> Does the current signal window differ from the normal reference for these operating conditions, which modeled condition best matches it, and what evidence should an engineer inspect?
-
-### 2.3 Specific objectives
-
-1. Generate consistent multisensor engine scenarios in MATLAB.
-2. Validate and document the generated data and assumptions.
-3. Align different-rate streams using timestamps.
-4. Extract interpretable signatures that account for RPM and load.
-5. Detect abnormal operation independently of fault classification.
-6. Classify selected modeled faults with a manageable CPU-based model.
-7. Display predictions together with raw signals and supporting evidence.
-8. Measure false alerts, missed events, classification quality, and latency.
-9. Demonstrate a condition indicator during accelerated simulated deterioration.
-10. Package the workflow for reproducibility and an offline hackathon demonstration.
-
-## 3. Scope, users, and requirement coverage
-
-### 3.1 Intended users and decisions
-
-| User | Intended use | Decision supported |
+| Area | Implemented | Not implemented / limited |
 |---|---|---|
-| Maintenance/test engineer | Inspect operating state and abnormal signatures | Whether a pattern warrants further measurement or inspection |
-| Signal-processing engineer | Compare sensor evidence and feature behavior | Whether an extracted signature is stable and informative |
-| ML developer | Evaluate classification and failure cases | Whether model changes improve held-out performance |
-| Hackathon evaluator | Follow a reproducible normal-to-fault demonstration | Whether the proposed workflow addresses the problem coherently |
+| Generator | Crank-angle event model; separate audio/vibration rendering; telemetry; 3 fault mechanisms; onset, severity, intermittence, recovery; accelerated valve degradation; unrelated impacts; combustion timing jitter; per-engine sensor variation; clipping, waveform gaps, telemetry dropouts; challenge settings | Clock offsets/drift; three-axis vibration; Simulink engine model |
+| Data handoff | MAT v7 `single` waveforms, long-form CSV telemetry, JSON metadata, private truth JSON, SHA-256 manifest, MATLAB/Python round-trip summary | — |
+| Features | 31 features: 14 per modality plus RPM/load/throttle context; causal trailing windows | Order tracking with a high-rate tachometer |
+| Models | RPM×load-binned normal baseline; RBF SVM; sigmoid calibration on separate engines; tuned decision and alert rules | CNN comparison; combined faults |
+| Runtime | 40 ms packet replay; quality states; persistent alerts; prediction logs; latency measurement | Live hardware acquisition |
+| Dashboard | Banner, controls, presets, waveforms, envelope, PSD, spectrogram, telemetry freshness, timeline, truth overlay, evidence, wear indicator | Separate "unsupported operating region" state (folded into uncertain/quality) |
+| Evaluation | Engine-level splits; tuning-only model selection; one-time test scoring; ablations; challenge set; failure examples | Confidence intervals by engine resampling |
 
-The prototype will support investigation. It will not issue vehicle-control actions or authoritative repair instructions.
-
-### 3.2 MVP scope
-
-The MVP includes one acoustic channel, one vibration axis, operating telemetry, four operating-condition classes, synthetic-data validation, a normal detector, one SVM classifier, and a local replay dashboard. It includes a degradation indicator as a limited wear-related demonstration.
-
-Genuine microphone/accelerometer acquisition, CAN decoding, electrical-current sensing, combined-fault classification, CNNs, and remaining useful life are outside the MVP.
-
-### 3.3 Requirement traceability
-
-| Supplied requirement | Planned project response | Coverage boundary |
-|---|---|---|
-| Multiple sensor streams | Audio, vibration, RPM/load/throttle/temperature/fuel trims | Synthetic streams |
-| Engine audio signatures | Acoustic waveform, envelope, PSD, spectrogram | Approximated transfer paths |
-| Mechanical vibration | Engine-event excitation and structural response | One simulated accelerometer axis |
-| Numerical telemetry | Timestamped ECU-like operating fields | No actual OBD-II/CAN session |
-| Normal baseline | Robust references conditioned on RPM/load | Supported simulator envelope only |
-| Pattern recognition | Four-class feature-based SVM | Specified modeled conditions |
-| Real-time faults | Causal inference during 1x recorded replay | Hardware acquisition deferred |
-| Component wear | Accelerated simulated condition trend | No calibrated wear or RUL claim |
-| Dashboard | Operating state, raw signals, signatures, prediction, timeline | Local application |
-| Team-generated data | MATLAB generator, configuration, validation, data dictionary | Physical fidelity requires later evidence |
-
-The named CNN, SVM, ANN, and softmax approaches are treated as examples rather than a requirement to implement every model family. Organizer confirmation should be recorded if this interpretation changes.
-
-## 4. Complete feature catalogue
-
-**Status key:** MVP = planned core feature; Conditional = used only when its supporting evidence or software is available; Future = outside the initial implementation. No entry below is a claim of completed implementation.
-
-### 4.1 Simulation and data features
-
-| ID | Feature | What it provides | Status |
-|---|---|---|---|
-| F01 | MATLAB scenario generator | Reusable, configuration-driven generation without physical engine access | MVP |
-| F02 | Shared engine event model | Consistent RPM, crank progression, combustion, and valve events | MVP |
-| F03 | Multisensor synthesis | Separate acoustic and vibration responses plus numerical telemetry | MVP |
-| F04 | Four-condition scenario library | Normal, misfire, knock-like, and valve-clearance-like cases | MVP |
-| F05 | Operating-profile variation | Steady RPM, ramps, load transitions, and normal variability | MVP |
-| F06 | Fault lifecycle control | Configurable onset, intermittence, severity, recovery, and progression | MVP |
-| F07 | Disturbance injection | Noise, placement/gain variation, drift, clipping, missing samples, and timing faults | MVP |
-| F08 | Reproducible dataset packaging | Seeds, versions, checksums, run/engine IDs, schemas, and metadata | MVP |
-| F09 | Generator validation | Structural, timing, bandwidth, consistency, and parameter-sensitivity checks | MVP |
-| F10 | MATLAB-to-Python export | Numeric MAT files, telemetry CSV, and JSON metadata | MVP |
-
-### 4.2 Analysis and recognition features
-
-| ID | Feature | What it provides | Status |
-|---|---|---|---|
-| F11 | Timestamp-based multirate alignment | Consistent analysis intervals across different sampling rates | MVP |
-| F12 | Causal preprocessing and quality gates | Filtering, DC removal, freshness checks, and invalid-data handling | MVP |
-| F13 | Time-domain signature extraction | RMS, crest factor, kurtosis, and envelope/burst statistics | MVP |
-| F14 | Frequency-domain analysis | FFT, Welch PSD, spectral ratios, and band energies | MVP |
-| F15 | Time-frequency analysis | STFT spectrograms showing spectral evolution | MVP |
-| F16 | Approximate RPM-normalized analysis | Broad order features and speed-context interpretation | MVP |
-| F17 | Normal-baseline anomaly detection | Abnormality assessment conditioned on operating state | MVP |
-| F18 | SVM fault classification | Best match among four modeled conditions | MVP |
-| F19 | Sensor feature fusion | Joint acoustic, vibration, and observed operating-context input | MVP |
-| F20 | Uncertainty and support checks | Uncertain, unsupported, and quality-insufficient decision states | MVP |
-| F21 | Calibrated probability display | Probability estimates assessed on independent calibration engines | Conditional |
-| F22 | Persistent alert state machine | Fault confirmation and clearing rules to reduce flickering alerts | MVP |
-| F23 | Simulated degradation indicator | A causal condition trend during accelerated deterioration | MVP, limited wear demonstration |
-
-### 4.3 Dashboard, evaluation, and delivery features
-
-| ID | Feature | What it provides | Status |
-|---|---|---|---|
-| F24 | Controlled recorded replay | Scenario selection, play/pause, restart, seek, and warm-up status | MVP |
-| F25 | Operating-state panel | RPM, load, throttle, coolant, fuel trims, and freshness | MVP |
-| F26 | Interactive signal views | Waveforms, short-time zoom, PSD, spectrogram, and envelope | MVP |
-| F27 | Prediction and evidence panel | Condition, score/status, alert, and matched-normal deviations | MVP |
-| F28 | Fault timeline and truth overlay | Separate predictions, alerts, quality events, and private evaluation truth | MVP |
-| F29 | Latency and prediction logging | Window times, model versions, inference timing, and alert history | MVP |
-| F30 | Independent evaluation and ablations | Engine-level holdouts, modality comparisons, and robustness tests | MVP |
-| F31 | Offline demonstration and fallback | Exported-data operation, rehearsed scenarios, recording, and static evidence | MVP |
-| F32 | Documentation and traceability | Setup instructions, architecture, model/data cards, limitations, and reproducibility | MVP |
-| F33 | Licensed Simulink comparison | Optional timing/dynamics reference for the MATLAB generator | Conditional |
-| F34 | Expanded sensing and models | Three-axis vibration, real acquisition, CNN comparison, combined faults | Future |
-| F35 | Physical wear/RUL estimation | Validated physical severity and service-life prediction | Future |
-
-Sections 5-16 explain how these features will operate and how they will be assessed.
-
-## 5. System architecture and data flow
-
-### 5.1 Architecture
+## 4. System architecture and data flow
 
 ```mermaid
 flowchart TD
-    A[JSON scenarios and reproducible seeds] --> B[MATLAB shared operating and event model]
-    B --> C[Acoustic renderer]
-    B --> D[Vibration renderer]
-    B --> E[Telemetry renderer]
-    C --> F[MAT waveform files, CSV telemetry, JSON metadata]
-    D --> F
-    E --> F
-    F --> G[Python import and data validation]
-    G --> H[Recorded replay and timestamp alignment]
-    H --> I[Causal filtering and trailing windows]
-    I --> J[Versioned signal features and operating context]
-    J --> K[Normal detector, SVM, and support checks]
-    K --> L[Alert state machine and prediction log]
-    L --> M[Dashboard and supporting evidence]
-    J --> N[Training and tuning on development engines]
-    N --> O[Frozen model and processing bundle]
-    O --> K
-    B --> P[Separate private simulation truth]
-    P --> Q[Evaluation and optional truth overlay]
-    L --> Q
-    Q --> M
+    A[configs/core_v1.json and master seed] --> B[sample_scenarios.m: per-run scenarios]
+    B --> C[operating_profile + combustion_schedule: RPM, crank angle, events]
+    C --> D[apply_fault: misfire / knock / valve, recovery, degradation]
+    D --> E[render_sensor: audio]
+    D --> F[render_sensor: vibration]
+    C --> G[render_telemetry]
+    E & F & G --> H[export_run: waveforms.mat, telemetry.csv, metadata.json]
+    D --> T[private evaluation_truth/*.json]
+    H --> I[Python validate-runs: contract checks, manifest]
+    I --> J[features.py: trailing 2 s windows, 31 features]
+    J --> K[train: baseline, SVM, calibration, tuned thresholds]
+    K --> L[frozen model bundle]
+    H --> R[ReplayEngine: 40 ms packets]
+    R --> J
+    L --> R
+    R --> S[alerts, prediction log, dashboard]
+    T --> V[labels and evaluation only]
+    S --> V
 ```
 
-### 5.2 Module responsibilities
-
-| Module | Responsibility | Main output |
+| Module | Location | Responsibility |
 |---|---|---|
-| MATLAB operating model | RPM/load trajectory and crank/event timing | Shared latent operating state |
-| MATLAB renderers | Separate sensor responses and telemetry sampling | Run bundle |
-| Data importer/validator | Schema, dtype, timing, values, and quality | Accepted runs and validation reports |
-| Replay adapter | Release available samples according to elapsed time | Timestamped packets |
-| Analysis pipeline | Causal filters, windows, features | Fixed-order feature vectors |
-| Training/evaluation | Development fitting and locked testing | Versioned model and metrics |
-| Inference/alerts | Quality checks, classification, rejection, persistence | Prediction and alert records |
-| Dashboard | Operating state and evidence presentation | Interactive local application |
+| Scenario sampling and simulation | `matlab/sim/` | Operating state, events, faults, sensor and telemetry rendering |
+| Export and MATLAB checks | `matlab/export_run.m`, `validate_run_matlab.m`, `validate_generator.m` | Run bundles, per-run and generator validation |
+| Data contract and import | `src/engine_diagnostics/data/run_io.py` | Loading, contract validation, warnings, manifest |
+| Features | `src/engine_diagnostics/pipeline/features.py` | The single feature implementation for training and replay |
+| Labels (evaluation only) | `pipeline/labels.py`, `evaluation.py` | Window labels and alert-episode scoring from truth |
+| Models | `models/diagnostic.py` | v1 baseline, SVM, calibration, tuning |
+| Runtime | `runtime/replay.py`, `runtime/alerts.py` | Packet replay, decisions, persistent alerts |
+| Dashboard | `dashboard/app.py` | Local evidence display |
 
-Private truth must never enter model features or runtime decisions. The dashboard may display truth only through a separate evaluation overlay.
+Truth files are written only to `evaluation_truth/` and are read only by labeling, evaluation, and the optional overlay. Tests check that the feature module imports no label or truth code and that a run loads without any truth present.
 
-### 5.3 MATLAB-Python boundary
+## 5. MATLAB synthetic-data generator
 
-MATLAB is used offline for generation and reference analysis. Python imports saved outputs and owns the authoritative training/replay feature path. This avoids having to maintain equivalent production inference pipelines in both languages or keep MATLAB running during the presentation.
+### 5.1 Engine and operating envelope
 
-Numeric arrays will be exported in MAT Version 7, telemetry in CSV, and configuration/metadata in JSON. This is a design choice to simplify import: SciPy supports MAT formats through 7.2, while the 7.3 interface requires a different HDF5 path. [MATLAB save documentation](https://www.mathworks.com/help/matlab/ref/save.html), [SciPy loadmat documentation](https://docs.scipy.org/doc/scipy/reference/generated/scipy.io.loadmat.html).
+Four-cylinder, four-stroke engine, firing order 1-3-4-2, 800–3,500 rpm, normalized load 0.2–0.8, warm operation. A four-stroke engine fires `cylinders/2` times per revolution, so the firing frequency is `RPM/60 × 2` (60 Hz at 1,800 rpm).
 
-## 6. MATLAB simulation and synthetic-data generation
+### 5.2 Shared latent state
 
-### 6.1 Assumed engine and operating envelope
+Crank angle is the integral of speed, `θ(t) = θ₀ + ∫ 6·RPM(u) du` in degrees. Combustion occurs 8° after each cylinder's firing TDC; each cylinder also has intake- and exhaust-valve closing impacts at fixed crank offsets. Events are keyed by crank angle and converted to time through the integrated RPM, so any RPM change, including the brief dip caused by a misfire, moves later events consistently in every stream.
 
-| Parameter | Proposed assumption |
-|---|---|
-| Engine family | Four-cylinder, four-stroke spark-ignition engine |
-| Descriptive displacement | Approximately 1.6 L; not a calibrated physical model |
-| Firing order | 1-3-4-2 |
-| Valve schedule | Simplified two-valves-per-cylinder model |
-| Speed | 800-3,500 RPM |
-| Normalized load | 0.2-0.8 |
-| Thermal scope | Warm operation; approximately 80-105 degrees C coolant |
-| Exclusions | Detailed start, stall, fuel-cut, extreme overspeed, and thermodynamic transients |
+Each event excites damped sinusoidal modes evaluated analytically at the exact sample times with a raised-cosine onset. Audio and vibration use different mode weights, path delays (2 ms vs 0.2 ms), resonance bands, gains, and noise, so they share causes without being scaled copies. Shaft-order tones (orders 2, 4, 6), colored noise, and white noise complete each channel.
 
-A four-stroke cylinder completes its cycle in two crankshaft revolutions. Consequently, for the assumed evenly firing four-cylinder engine:
+### 5.3 Fault mechanisms (heuristic parameters)
 
-\[
-f_{shaft}=RPM/60,\quad f_{cycle}=RPM/120,\quad f_{firing}=4RPM/120.
-\]
+| Condition | Intervention on the affected cylinder | Expected evidence |
+|---|---|---|
+| Misfire | With probability 0.15 + 0.6·severity, a combustion event drops to 3–15% intensity, with a brief RPM dip | Missing/weak pulses; irregular firing-peak envelope |
+| Knock-like | With probability 0.3 + 0.5·severity, a damped 5–9 kHz burst (0.6–1.5 ms) 10–20° after combustion; burst frequency is engine-specific | High-band envelope kurtosis and variation |
+| Valve-clearance-like | Valve impacts shift by up to 3°·severity, gain extra timing jitter, ring higher and shorter; amplitude may rise or fall | Changed impact timing/shape; subtle |
 
-At 1,800 RPM these are 30 Hz, 15 Hz, and 60 Hz. This is a timing calculation, not a diagnostic rule. [NASA four-stroke explanation](https://www.grc.nasa.gov/www/k-12/airplane/stroke.html).
+Physically motivated: crank-angle timing, firing order, shared events across sensors, structure-borne knock ringing. Heuristic: all amplitudes, frequencies, decay times, transfer settings, and fault mappings. None is fitted to engine measurements.
 
-### 6.2 Shared latent state
+### 5.4 Lifecycle, disturbances, and data problems
 
-The generator will maintain operating speed, load, integrated crank angle, combustion events, valve events, thermal/control context, and fault state. Crank angle will evolve from the integral of speed:
+Every scenario is drawn from distributions shared by all classes (`sample_scenarios.m`):
 
-\[
-\theta(t)=\theta_0+2\pi\int_0^t RPM(u)/60\,du.
-\]
+- Operating profile: steady, ramp, or 1 s load step; RPM 800–3,500; load 0.2–0.8.
+- Faults: onset 6–22 s, severity 0.25–0.9, random cylinder; 35% get a 2–5 s recovery interval; half of valve runs are accelerated degradation (severity ramps 0.10 → 0.90).
+- Disturbances in every class: unrelated broadband impacts (0.2–2 per s), combustion timing jitter, per-engine sensor gain and resonance variation.
+- Data problems in every class: audio clipping (4%), waveform gaps of 0.1–0.4 s (6%), telemetry dropouts of 0.5–2 s (6%).
+- Challenge runs (test engines only): RPM 3,000–3,500 or 800–900, 2× noise, +10% resonance shift, mild severity 0.15–0.3.
 
-Events will be triggered by crank position, preserving their recurrence during ramps. Each sensor will then apply its own response to the shared events:
+A random forest trained only on the observable scenario parameters (RPM/load level and change, profile kind, impact rate, data problems) reached 0.233 balanced accuracy across engine folds, at chance (0.25): operating context carries no class shortcut.
 
-\[
-x_m(t)=\sum_j E_j h_{m,j}(t-t_j)+r_m(t)+n_m(t).
-\]
+## 6. Dataset, labels, and reproducibility
 
-Here, event energy and timing are shared; response kernels, rotational background, and noise depend on sensor and virtual engine. These are conceptual model equations. Their parameter mappings require simulator checks and later physical validation.
+### 6.1 Streams
 
-### 6.3 Normal operating model
-
-Normal signals will contain combustion-energy variation, rotating components, ordinary valve impacts, structural resonances, colored background noise, and load-dependent excitation. Normal operation must be sufficiently variable to prevent the classifier from learning that any noise or impact means a fault.
-
-Separate transfer responses will represent microphone location and structural accelerometer placement. The channels should share causes while differing in amplitude, filtering, and delay.
-
-### 6.4 Fault scenarios
-
-| Condition | Planned intervention | Observable evidence | Important limitation |
-|---|---|---|---|
-| Misfire | Weaken/suppress selected combustion events from one cylinder | Irregular envelope, weakened pulses, changed cycle-related modulation | Low-rate RPM is not a crankshaft diagnostic sensor |
-| Knock-like fault | Add short damped bursts after selected combustion events | Impulsive high-band ringing in both sensor responses | High-frequency impacts have other possible causes |
-| Valve-clearance-like fault | Modify recurring valve impact timing, shape, and variability | Changed envelope recurrence and response distribution | No calibrated clearance measurement |
-
-Initial heuristic ranges include 40-95% energy reduction for affected misfire events, 5-9 kHz ringing with 1-5 ms decay for knock-like bursts, and approximately 2-12 crank degrees of valve-impact timing change. These are adjustable generator settings, not universal engine limits.
-
-The mechanisms have an engineering basis: knock sensors respond to high-frequency structure-borne vibration, and a MathWorks misfire example uses crankshaft acceleration as an indicator. These facts motivate the simulator but do not validate its sensor waveforms. [Bosch knock sensor](https://www.bosch-mobility.com/en/solutions/sensors/knock-sensor/), [MathWorks misfire example](https://www.mathworks.com/help/autoblks/ug/use-obd-to-detect-misfire.html).
-
-Experimental valve-clearance research identifies valve-closing impact timing as useful on its tested engine. The proposed MVP uses a simplified related mechanism and does not claim to reproduce that experimental diagnostic method. [Jiang et al., 2017](https://www.mdpi.com/1424-8220/17/12/2916).
-
-### 6.5 Fault lifecycle and disturbances
-
-Fault scenarios will include a normal lead-in, randomized onset, intermittent activity, severity ramps, and selected recovery. All classes will span overlapping RPM/load and sensor-gain distributions.
-
-Disturbances will include colored noise, unrelated impacts, gain/placement changes, resonance variation, baseline drift, clipping, missing samples, telemetry jitter, and small clock offsets/drift. More difficult disturbances will be reserved for challenge evaluation.
-
-The renderer will band-limit impulse content before downsampling. Normal and faulty cases will share resonance bands so that a single unique frequency cannot act as a fault label.
-
-### 6.6 MATLAB and optional Simulink use
-
-MATLAB functions will provide the default event-and-response generator. Installed products and runnable license availability will be recorded before relying on specialized functions. [MATLAB product inventory documentation](https://www.mathworks.com/help/matlab/ref/ver.html).
-
-If an appropriate licensed Simulink example is available, a time-boxed comparison may improve timing/dynamics assumptions. The referenced MathWorks OBD misfire example lists Powertrain Blockset and AUTOSAR Blockset; MATLAB access alone does not establish access to that example's dependencies. [MathWorks example requirements](https://www.mathworks.com/help/autoblks/ug/use-obd-to-detect-misfire.html).
-
-## 7. Dataset structure, labeling, and reproducibility
-
-### 7.1 Stream specification
-
-| Stream | Rate | Units | Role |
+| Stream | Rate | Unit | Use |
 |---|---:|---|---|
-| Acoustic waveform | 24 kHz | Normalized sensor units | Combustion/mechanical sound response |
-| Vibration waveform | 25.6 kHz | Nominal simulated m/s^2 | Structural mechanical response |
-| RPM | 50 Hz | rpm | Operating context and approximate order analysis |
-| Load/throttle | 10 Hz | % | Operating condition |
-| Coolant | 1 Hz | degrees C | Slow thermal context |
-| Fuel trims | 2 Hz | % correction | Slow ECU-like context |
+| Audio | 24,000 Hz | normalized sensor units (not SPL) | Features |
+| Vibration | 25,600 Hz | nominal m/s² (not calibrated) | Features |
+| RPM | 50 Hz | rpm | Context and firing-period features |
+| Load, throttle | 10 Hz | percent | Context |
+| Coolant | 1 Hz | °C | Display |
+| Short/long-term fuel trim | 2 Hz | percent | Display |
 
-These rates describe generated streams, not guaranteed OBD polling rates. Acoustic units are not sound pressure level, and simulated acceleration requires later calibration. Slow RPM telemetry will be filtered before sampling rather than exposing hidden high-rate crank dynamics.
+### 6.2 Dataset `core_v1`
 
-### 7.2 Planned dataset size
+| Partition | Engines | Runs | Clean windows* | Role |
+|---|---:|---:|---:|---|
+| Train | 18 | 144 | 7,124 (4,956 used after class balancing) | SVM and normal baseline |
+| Tuning | 4 | 32 | 1,626 | Hyperparameters, thresholds, alert rules, feature choices |
+| Calibration | 4 | 32 | 1,441 | Probability calibration |
+| Test (core) | 4 | 32 | 1,568 | One-time final scoring |
+| Challenge | same 4 test engines | 16 | 814 | Reserved conditions |
 
-| Collection | Proposed size | Purpose |
-|---|---|---|
-| Integration | 12 runs x 20 seconds | Prove export, inference, and dashboard integration |
-| Core | 60 engines x 8 runs x 45 seconds | Main independent development/test collection |
-| Challenge | 32 additional 45-second runs | Unseen conditions and disturbances |
-| Presentation | Separate selected runs | Rehearsal and demonstration |
+\*Clean windows exclude transition windows and windows with a non-ok quality state.
 
-The core has 480 runs and six hours of signals, with two runs per class per engine. The challenge extension brings the scored collection to 512 runs and 6.4 hours.
+256 runs × 30 s (two per class per engine), 14,592 windows. Generation took 12.4 min with three parallel MATLAB processes; 0 runs were quarantined. Public data is 1.3 GB, truth 260 MB. The dataset is identified by `data/raw/core_v1/manifest.json` (SHA-256 `16a90def96a5…`). The original plan of 60 engines × 45 s was reduced by decision to fit the schedule; the split proportions were kept.
 
-Float32 core waveform payload is approximately `480 x 45 x (24000 + 25600) x 4 = 4.285 GB`, before compression and metadata. Reserve 8-10 GB for the working collection, plots, features, and temporary artifacts. Generate and process runs incrementally.
+### 6.3 Labels
 
-### 7.3 Run bundle and labels
+Each run's truth has a label timeline: normal, a 1 s `transition` around every fault start/end, the fault class, and normal again during recovery. A window is labeled only if it lies entirely inside one segment; otherwise it is a transition window and excluded from training and window scoring. Seeds, IDs, severity, fault schedule, and crank truth are never model inputs.
 
-Each run will contain numeric waveform arrays, timestamped telemetry, public sensor/run metadata, and separately stored evaluation truth. Example planned layout:
+### 6.4 Reproducibility
 
-```text
-run_00421/
-  waveforms.mat
-  telemetry.csv
-  metadata.json
+Each run uses independent `mrg32k3a` substreams per purpose (profile, events, fault, audio, vibration, telemetry, disturbances) and per engine. Regeneration is bit-identical (`isequal` on arrays, CSV, and truth). Training is bit-reproducible. MATLAB records a waveform summary (counts, sums, first/last samples) that Python verifies after import.
 
-evaluation_truth/
-  run_00421_events.json
-```
+## 7. Signal processing and signatures
 
-The waveform file will contain named arrays and sampling information. Telemetry rows will contain timestamp, signal name, value, unit, and validity. Metadata will identify schema, run, engine, sensor timing, and generator version. Private truth will describe the fault type, affected intervals/cylinder, actual events, and severity schedule.
+Windows are trailing `[t−2, t)`; decisions every 0.5 s. Spectral filtering is done per window in the frequency domain, so there is no filter state to carry between packets, and offline features equal replay features exactly (verified: maximum difference 0 on all 481 integration windows).
 
-Window labels will distinguish normal, observable fault, and transition/ambiguous cases. Initial clean-scoring rules require a fault to occupy at least 80% of a window and sufficient actual events to provide evidence. Sparse intermittent windows will not be silently relabeled normal.
+| Family | Features (per modality) |
+|---|---|
+| Amplitude and distribution | log RMS, crest factor, kurtosis |
+| Spectrum (Welch, 8,192-sample Hann, 50% overlap) | log band power; fractions in 6 bands (low edge–500, 500–1.5k, 1.5–3k, 3–5k, 5–7k, 7k–10 kHz) |
+| Envelope | 5–10 kHz Hilbert envelope variation and kurtosis; 500–3,000 Hz envelope variation |
+| Speed-normalized | Firing-peak variation: envelope peaks spaced by the firing period from observed RPM |
+| Context | RPM, load, throttle (latest valid reading before t) |
 
-### 7.4 Reproducibility and shortcut protection
+Quality states: `missing_waveform` (>1% missing or short window), `clipped` (>0.5% at full scale), `stale_telemetry` (RPM older than 0.1 s, load/throttle older than 0.3 s). Windows with a non-ok state receive no prediction and hold the alert state.
 
-Every run will retain its resolved configuration, independent random-stream references, versions, and checksums. A fixed environment will be used for reproducibility checks.
+MATLAB reference implementations of three features (log RMS, 5–7 kHz band fraction, high-band envelope kurtosis) agree with Python to 9.0×10⁻¹⁵ relative difference.
 
-Model inputs will exclude filenames, run IDs, engine IDs, seeds, fault schedules, true severity, affected-cylinder metadata, and latent crank state. Gain and operating distributions will overlap across classes. Amplitude-matched probes and telemetry-only controls will test for shortcuts.
+Two additional features (cycle periodicity of the impulse envelope and a 2–9 kHz spectral centroid) were tried to help valve clearance; they lowered tuning macro-F1 from 0.833 to 0.811 and were rejected before final scoring.
 
-No external dataset is selected as a dependency. Any future dataset must pass access, license, sensor, operating-condition, and fault-label checks before use.
+## 8. Detection, classification, calibration, and alerts
 
-## 8. Signal processing and signature extraction
+**Normal baseline.** Robust median/MAD statistics of the 28 waveform features from normal training windows, separately for 3 RPM bands × 2 load bands (each bin has 562–883 normal windows; a global fallback exists). The anomaly score is the RMS robust z-score against the window's own operating bin.
 
-### 8.1 Alignment and preprocessing
+**Classifier.** RBF SVM on standardized features, balanced class weights, trained on 4,956 class-balanced training windows. Hyperparameters were chosen on tuning engines (C ∈ {1, 10, 30}, γ ∈ {scale, 0.03}); tuning macro-F1 was 0.829–0.833 across the grid, and C = 30, γ = 0.03 was selected.
 
-All channels will be selected using the same trailing interval `[t-2, t)`. Waveforms retain their native sample rates; lower-rate telemetry contributes contextual features with freshness limits. Different-rate raw streams will not be forced onto one high-rate grid unnecessarily.
+**Calibration.** Sigmoid calibration of the frozen SVM on the four calibration engines; the dashboard shows the calibrated top-class probability.
 
-The pipeline will apply clock corrections, causal continuous filters, quality checks, windowing, and DC removal for spectral estimation. Filter state will be preserved between packets. The initial analysis bands are 20 Hz-10 kHz for acoustic and 5 Hz-10 kHz for vibration, with an additional high-band envelope branch.
+**Decision rule.** A window is accepted as its top class if the calibrated probability is ≥ `p_min`; a "normal" result additionally requires the anomaly score to be below the threshold. Otherwise the decision is `uncertain`. Settings were swept on tuning runs to maximize sustained-event recall subject to ≤ 0.2 false-alert episodes per normal minute: `p_min` 0.7, anomaly threshold at the 95th percentile of training normal scores, no anomaly gate on faults.
 
-Per-window unit-RMS normalization will be avoided because it could erase useful amplitude changes. The feature vector will contain both magnitude and ratio/shape features. Learned transforms will be fitted on training data only.
+**Alerts.** An alert is raised after 2 consecutive accepted decisions of the same fault and cleared after 3 accepted normal decisions; uncertain or bad-quality windows hold the state.
 
-### 8.2 Analysis settings
+## 9. Replay operation and dashboard
 
-| Setting | Acoustic | Vibration |
-|---|---|---|
-| Two-second window | 48,000 samples | 51,200 samples |
-| Half-second step | 12,000 samples | 12,800 samples |
-| Full-window FFT | Hann, 0.5 Hz bin spacing | Hann, 0.5 Hz bin spacing |
-| Welch PSD | 8,192 samples, 50% overlap | 8,192 samples, 50% overlap |
-| Welch bin spacing | About 2.93 Hz | 3.125 Hz |
-| STFT | 2,048-sample Hann, 512-sample hop | 2,048-sample Hann, 512-sample hop |
-| STFT bin spacing | About 11.72 Hz | 12.5 Hz |
-| STFT time step | About 21.33 ms | 20 ms |
+Recorded runs are released at 1× in 40 ms packets. Each decision at time t is made once all samples before t have arrived, using samples sliced by absolute index (decision times fall mid-packet). Tests confirm that changing samples after t never changes the decision at t. Prediction logs record time, quality, class, probability, anomaly score, accepted decision, alert, processing time, and model/feature versions.
 
-FFT spacing is not identical to true resolving ability; window shape and observation duration matter. The STFT will show spectral evolution, while raw zoom and envelope views will show millisecond bursts that the approximately 80-85 ms STFT window smears. [SciPy STFT documentation](https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.ShortTimeFFT.html).
+The dashboard (`uv run --all-extras streamlit run dashboard/app.py`, bound to localhost) provides:
 
-### 8.3 Signature families
+- a permanent "SYNTHETIC DATA — RECORDED REPLAY" banner, model and feature versions;
+- seven demo presets on held-out engines; play/pause, restart, speed, and seek (seek resets buffers and alerts and re-processes from the start);
+- accepted decision, classifier class, calibrated confidence, anomaly score vs threshold, quality, processing and render time, alert status;
+- last 2 s of audio and vibration, the 5–10 kHz impulse envelope, and the window PSD;
+- a 10 s vibration spectrogram (STFT 2,048/512);
+- RPM, load, throttle, coolant, and fuel trims with freshness status;
+- a decision timeline with active alerts and an optional evaluation-truth overlay;
+- the three largest robust deviations from the normal reference of the same operating bin;
+- a simulated valve-wear indicator (5 s rolling mean of the calibrated valve probability), labeled as accelerated simulation, not remaining life.
 
-| Family | Proposed features | Intended interpretation |
-|---|---|---|
-| Time-domain amplitude | RMS, peak-to-peak, crest factor | Excitation magnitude and impulsiveness |
-| Distribution | Kurtosis and selected quantiles | Burst-like or irregular behavior |
-| Envelope | Variation, burst density, peak statistics, autocorrelation | Recurrent or missing event structure |
-| Spectrum | Band energy, energy ratios, centroid, entropy | Distribution of energy across frequency |
-| Speed-normalized | Broad order energies around 0.5, 1, 2, and 4 | Rotation/cycle-related structure |
-| Cross-modal | Energy-envelope correlation and burst agreement | Shared events across sensors |
-| Telemetry context | RPM mean/spread/slope, load, throttle/change | Operating-condition interpretation |
+Server-side render time is 112 ms median per 0.5 s tick (177 ms max); processing is 12–13 ms per decision.
 
-Start with approximately 40-60 features. Remove unstable/redundant features using development data. Coolant and fuel trims will initially support display rather than classification because their synthetic fault relationships are weakly constrained.
+## 10. Verification
 
-### 8.4 RPM normalization and interpretation
+| Layer | Evidence (details in [docs/TESTING.md](docs/TESTING.md)) |
+|---|---|
+| Generator | Firing frequency within 0.5% at 1,000/2,000/3,000 rpm; audio–vibration lag 1.75 ms vs 1.80 ms configured; noise-free energy above 0.9×Nyquist −53 dB (audio), −44 dB (vibration); bit-identical regeneration; severity sweeps increase for all faults |
+| Per run | MATLAB validation 256/256 (lengths, dtype, firing count vs RPM within 2%, faulted events only after onset, intended signature); 10 low-severity knock runs flagged faint |
+| Handoff | Python contract validation 256/256; 35 runs carry declared data-quality warnings |
+| DSP | Analytical fixtures (sine RMS/crest/kurtosis, band placement), impulsive and missing-firing fixtures, MATLAB/Python agreement 9×10⁻¹⁵ |
+| Integration | Replay equals offline features exactly; no future samples; alert persistence; reset |
+| Leakage | Engine-level splits fixed before windowing; feature names exclude bookkeeping; inference modules import no label code; telemetry-only control at chance |
+| Dashboard | Automated AppTest of all presets; localhost health check |
+| Code | 68 pytest tests, Ruff clean; MATLAB Code Analyzer clean on all files |
 
-Approximate order features will use observed RPM to express recurrence relative to shaft speed. Structural resonances will also be retained in fixed-frequency bands. During rapid transients or stale RPM, order features may become unreliable, requiring a qualified or rejected result.
+## 11. Results
 
-The prototype will not infer exact valve timing or identify a cylinder from low-rate RPM telemetry. A high-resolution tachometer and more precise angular processing are future improvements.
+All results come from `reports/generated/final_evaluation_v1.json` (model SHA-256 `805e7559bc6a…`), produced once by `engine-diagnostics evaluate`. It was regenerated once with `--force` only to fix how a fully clipped degradation run was reported; all other values were programmatically confirmed identical. Per-class and moderate/severe breakdowns come from `reports/generated/final_evaluation_v1_breakdown.txt` (same frozen model, analysis only).
 
-### 8.5 Mechanism-to-evidence chain
+### 11.1 Core test windows (4 engines, 1,568 clean windows)
 
-| Modeled condition | Signal change | Features | Dashboard evidence |
+| | knock | misfire | normal | valve |
+|---|---:|---:|---:|---:|
+| Recall | 0.74 | 0.78 | 0.95 | 0.71 |
+| Precision | 0.96 | 1.00 | 0.86 | 0.74 |
+
+Macro-F1 0.835. Accepted (non-uncertain) decisions: macro-F1 0.859 at 78.8% coverage. Confusion matrix (rows truth, columns predicted, order knock/misfire/normal/valve): `[137,0,36,12] [5,161,35,6] [0,0,871,46] [1,0,73,185]`. Most errors are faults called normal; valve and normal are the most confused pair.
+
+### 11.2 Core replay (actual packet replay of 32 runs)
+
+- False alerts: 0 episodes in 7.76 normal minutes; none of the 8 normal-only runs alerted.
+- Wrong-class alert episodes: 6.
+- Sustained events detected: 17 of 28 (misfire 7/10, knock 7/9, valve 3/9). Latency p50 2.39 s, p95 14.8 s overall; slow-onset degradation runs (starting at severity 0.10) dominate the tail.
+- Sustained moderate/severe events (severity ≥ 0.5, no ramp): 5 of 8 detected, latency p50 1.46 s, p95 2.48 s.
+- Processing p95 13.0 ms per decision.
+- Degradation indicator vs true simulated severity: Spearman 0.91, 0.90, 0.91, 0.78 (median 0.906). The fifth degradation run was fully clipped, so every window was correctly withheld as `clipped` and no trend exists.
+
+### 11.3 Challenge runs (16 runs, reserved conditions)
+
+Macro-F1 0.384; knock 0 of 6 sustained events detected (window recall 0), valve 1/4, misfire 3/4. False alerts 0.73 per normal minute (1 of 4 normal-only runs alerted). The model does not generalize to doubled noise, extreme RPM, and mild severity at the same time.
+
+### 11.4 Modality ablations (same partitions and hyperparameters, core test windows)
+
+| Inputs | Macro-F1 |
+|---|---:|
+| Telemetry only (RPM, load, throttle) | 0.199 |
+| Audio + context | 0.823 |
+| Vibration + context | 0.757 |
+| Fused, without context | 0.832 |
+| Fused (deployed inputs) | 0.837 |
+
+Audio carries most of the discriminative information in this simulator; fusing vibration adds a little. Context alone is at chance, confirming that scenario sampling removed the shortcut found in the first integration batch (where telemetry alone reached 0.94 recall for two classes).
+
+### 11.5 Failure examples
+
+The most confident test errors are late windows of knock run `run_00222` (severity 0.66 at 1,229 rpm) predicted normal with 0.86–0.88 calibrated probability: knock bursts at low RPM are sparse in a 2 s window. Valve-clearance faults are often called normal because their signatures are subtle; the generator's own severity sweep showed only a 1.02–1.10× change in a simple envelope metric.
+
+### 11.6 Acceptance record
+
+| Area | Goal | Measured | Status |
 |---|---|---|---|
-| Misfire | Missing/weakened combustion excitation | Envelope irregularity and cycle/order ratios | Weak-pulse regions and operating-matched reference |
-| Knock-like | Short high-band bursts | Burst density, high-band ratios, kurtosis | Envelope peaks, raw zoom, PSD/spectrogram changes |
-| Valve-clearance-like | Modified recurring impacts | Envelope recurrence, crest factor, band ratios | Repeating impact structure and condition trend |
-| Normal RPM/load change | Recurrence/amplitude change consistent with operating state | Contextual features and normal residuals | Moving harmonics without persistent fault alert |
+| Generator reproducibility | Bit-identical regeneration | Identical arrays, telemetry, truth | Met |
+| Split integrity | No engine across partitions | Engine-level splits; checks pass | Met |
+| Core classification | Macro-F1 ≥ 0.80; each fault recall ≥ 0.75 | 0.835; knock 0.74, misfire 0.78, valve 0.71 | Partly met |
+| Challenge classification | Macro-F1 ≥ 0.65 | 0.384 | Missed |
+| Normal replay | ≤ 0.2 false alerts per normal minute | 0 (core), 0.73 (challenge) | Met on core |
+| Processing | p95 < 250 ms | 13 ms | Met |
+| Sustained moderate/severe alerting | p95 ≤ 4 s | 2.48 s for detected; 5/8 detected | Latency met, detection incomplete |
+| Quality handling | Gaps/staleness/clipping produce visible states | `missing_waveform`, `stale_telemetry`, `clipped` shown and hold alerts | Met |
+| Degradation indicator | Median Spearman ≥ 0.7 | 0.906 | Met |
+| Demo stability | Three offline rehearsals | See docs/TESTING.md | Pending at time of writing |
 
-## 9. Fault detection, classification, and sensor fusion
+## 12. Limitations and risks
 
-### 9.1 Separate detection and classification
+- **Synthetic only.** The generator is not a validated digital twin; audio and vibration units are nominal. High scores here do not transfer to a real engine without real measurements.
+- **Heuristic fault physics.** Fault mappings are designed to be plausible, not measured. The valve-clearance signature in particular is subtle, and the model detects it least well.
+- **Mild faults and new conditions.** Low-severity knock (as low as 1.14× event-locked energy) and the challenge conditions are largely missed.
+- **Small test set.** Four test engines and 7.8 normal minutes; the zero-false-alert result has a small denominator. Windows are correlated and are not independent trials.
+- **Low-rate RPM.** 50 Hz RPM supports context and firing-period estimates, not crankshaft-acceleration misfire diagnosis or cylinder identification.
+- **Not implemented:** clock offset/drift handling in replay, a separate unsupported-operation state, engine-resampled confidence intervals.
+- **Wear.** The degradation indicator follows an accelerated simulated ramp; it is not a wear measurement or remaining-life estimate.
 
-The normal detector will compare selected features against robust normal statistics in three RPM bands and two load bands. It will return an anomaly score or insufficient-reference state.
+## 13. Future work
 
-The SVM will classify valid supported windows into the four modeled classes. An abnormal window can therefore remain unresolved if its evidence does not confidently match a modeled fault.
-
-### 9.2 Primary model and training
-
-The initial model will be an RBF SVM with training-fitted scaling and approximately 6,000-8,000 representative training windows. Thinning overlapping windows controls kernel cost and prevents a few long correlated recordings from dominating the fit.
-
-A small hyperparameter search will be performed using tuning engines. Acoustic, vibration, cross-modal, and observed operating features will be concatenated into one versioned feature vector. A CNN is deferred until a reliable baseline and evaluation procedure exist.
-
-### 9.3 Uncertainty and operating support
-
-The decision interface will support:
-
-1. Normal within modeled coverage.
-2. Suspected modeled fault.
-3. Uncertain pattern.
-4. Unsupported operating region.
-5. Data quality insufficient.
-
-Probability displays are conditional on independent calibration and reliability assessment. Otherwise, the dashboard will show a decision score without presenting it as percentage confidence. Calibration data must be separate from classifier fitting. [Scikit-learn calibration guidance](https://scikit-learn.org/stable/modules/calibration.html).
-
-Support checks and rejection thresholds cannot guarantee detection of unknown faults. A new fault may still be confidently misclassified, which must be examined in challenge tests.
-
-### 9.4 Model outputs and evidence
-
-Prediction records will retain window boundaries, predicted class, score/probability type, quality/support status, alert state, feature/model versions, and processing timing. Supporting evidence will show deviations from normal reference distributions.
-
-These measurements support interpretation; they are not a causal explanation of every SVM decision. Global feature contribution can be investigated with held-out permutation analysis if time permits.
-
-## 10. Degradation monitoring and prediction boundaries
-
-The project will demonstrate a condition indicator as a valve-like fault progresses under controlled or slowly changing operating conditions. The indicator will be computed from observed signal features and normalized against a development-data reference. Smoothing will be causal.
-
-The hidden severity schedule may be revealed after inference for evaluation, but it will never be an input. The intended demonstration is a positive relationship between a measured signature and an imposed synthetic deterioration process.
-
-| Task | MVP treatment | Evidence missing for stronger claims |
+| Item | Benefit | Prerequisite |
 |---|---|---|
-| Fault detection | Planned normal-deviation task | Real-engine baseline coverage |
-| Fault classification | Planned four-class pattern recognition | Real labeled faults and domain validation |
-| Severity estimation | Limited condition-indicator trend | Calibrated mapping to physical damage/clearance |
-| Wear forecasting | Deferred | Longitudinal operating and degradation evidence |
-| Remaining useful life | Deferred | Validated failure criterion and lifetime/degradation evidence |
+| Real recordings | Measure the synthetic-to-real gap | Licensed data with operating and fault labels |
+| Stronger valve and mild-fault signatures | Better recall on subtle faults | Cycle-synchronous averaging with a high-rate speed signal |
+| Robustness training | Challenge-condition generalization | Wider training distributions for noise and RPM |
+| Clock drift and three-axis vibration | Realistic acquisition | Replay support for offsets; new rendering |
+| CNN comparison | Learned representations | Frozen SVM baseline (available) |
+| Physical severity / RUL | Maintenance forecasting | Calibrated damage and lifetime evidence |
 
-The dashboard will label this feature “Condition indicator during accelerated simulated deterioration.” Replay seconds must not be interpreted as hours of useful service. RUL methods use historical/degradation evidence and yield uncertain estimates rather than deriving life from an arbitrary severity ramp. [MathWorks RUL guidance](https://www.mathworks.com/help/predmaint/predict-remaining-useful-life.html).
+## 14. Reproducing the results
 
-## 11. Dashboard features and user experience
+```powershell
+# Python environment
+uv sync --locked --all-extras --group quality
 
-### 11.1 Main panels
+# MATLAB (repository root): generate and validate the core dataset
+#   addpath('matlab'); generate_dataset();          % ~40 min in one process
+#   validate_generator();
 
-| Panel | Planned contents | User value |
-|---|---|---|
-| Provenance/status | Synthetic/replay banner, run/model version, playback status | Prevents confusion about acquisition mode |
-| Operating state | RPM, load, throttle, coolant, fuel trims, freshness | Provides context for signal changes |
-| Raw signals | Audio/vibration traces and zoom | Makes transient changes inspectable |
-| Signatures | PSD, expected firing marker, spectrogram, envelope | Connects analysis to observed patterns |
-| Prediction | Condition, quality/support state, score, alert | Communicates current interpretation |
-| Evidence | Two or three matched-normal deviations | Explains why investigation is suggested |
-| Timeline | Predictions, alert episodes, quality events | Reveals onset, persistence, and recovery |
-| Degradation | Causal condition trend | Demonstrates limited progression monitoring |
-| Evaluation view | Metrics, confusion matrix, optional truth overlay | Separates measured assessment from presentation |
-
-### 11.2 User journey and controls
-
-The user will choose a scenario, begin replay, inspect normal operation, observe an RPM/load change, and then see a modeled fault emerge. The dashboard will show the altered signatures before or alongside a persistent classification alert. The user can inspect waveform zooms and reveal simulation truth separately.
-
-Controls will include scenario selection, play/pause, restart, and seek. Seeking will reset replay buffers, filter state, and alert history for the new position, with visible warm-up. Display traces may be decimated for responsiveness while analysis retains full-rate inputs.
-
-Evidence language will be specific, such as “high-band energy ratio exceeds the normal reference for this operating region.” It will avoid assertions that a peak alone proves knock or that increased RMS proves wear.
-
-## 12. Replay operation, alerts, and latency
-
-### 12.1 Meaning of real-time in this prototype
-
-The application will release recorded synthetic data at 1x elapsed time, using approximately 40 ms packets. It will analyze a trailing two-second window every 0.5 seconds. The first prediction is possible after the initial buffer fills.
-
-No future samples, whole-run normalization, or future telemetry observations may influence a current result. Spectrogram slices must likewise be restricted to the available window rather than drawing future data from the stored run.
-
-### 12.2 Alert state machine
-
-The initial rule will confirm a fault after two consecutive accepted predictions of the same fault class and clear it after three accepted normal predictions. Quality failures interrupt confirmation and do not count as normal. The last valid result may remain visible only with its age and stale status.
-
-Rules will be selected on tuning data and frozen before final evaluation. Persistence trades faster detection for fewer fluctuating alerts.
-
-### 12.3 Quality and latency measurements
-
-Initial quality limits will include more than 1% missing waveform samples, more than 0.5% clipping, RPM older than 100 ms, or load/throttle older than 300 ms. Isolated one- or two-sample repairs may be allowed and logged. These thresholds require validation and are not sensor standards.
-
-Three measurements will be recorded separately:
-
-- Processing latency: required samples available to inference completed.
-- Display latency: inference completed to result visible.
-- Detection latency: defined fault onset to confirmed alert.
-
-The processing target is p95 below 250 ms on a declared machine. The four-second p95 detection goal applies only to predefined sustained moderate/severe faults; sparse intermittent events require separate reporting.
-
-## 13. Verification and evaluation methodology
-
-### 13.1 Independent partitions
-
-| Partition | Engines | Core runs | Use |
-|---|---:|---:|---|
-| Training | 36 | 288 | Fit preprocessing, normal references, classifier |
-| Tuning | 8 | 64 | Select model settings and decision thresholds |
-| Calibration | 8 | 64 | Optional probability calibration |
-| Final test | 8 | 64 | Locked performance assessment |
-| Challenge | Final-test engine pool, new runs | 32 | Unseen operating and generation settings |
-
-The same virtual engine and its response parameters will not cross partitions. Splits will be assigned before overlapping windows are created. All learned preprocessing will fit training data only. This follows established leakage-prevention guidance. [Scikit-learn common pitfalls](https://scikit-learn.org/stable/common_pitfalls.html).
-
-One 45-second run produces 87 two-second windows with a half-second step; the core has at most 41,760 windows before exclusions. These windows are correlated and must not be reported as that many independent experiments.
-
-### 13.2 Verification layers
-
-| Layer | Planned checks |
-|---|---|
-| Generator | Timing, bandwidth, onset behavior, seed repeatability, intended interventions |
-| Data handoff | MATLAB/Python shape, precision, timestamps, orientation, field units |
-| DSP | Known tone/RMS fixtures, PSD scaling, envelope behavior, order response |
-| Integration | Offline/replay feature agreement, state resets, no future-data access |
-| ML | Group integrity, preprocessing isolation, ablations, shortcut probes |
-| Runtime | Quality states, alert maturation/clearing, processing/display latency |
-| Delivery | Offline setup, complete rehearsal, fallback usability |
-
-### 13.3 Metrics and challenge conditions
-
-Report macro-F1, balanced accuracy, per-class precision/recall/support, and confusion matrices. For detection, report false alert episodes per normal minute, event recall, missed events, and median/p95 latency. Report rejected-data coverage and unresolved known-class samples so that selective predictions cannot hide failures.
-
-Challenge tests will include held-out seeds and engines, reserved RPM regions, changed resonance/damping, changed gains, lower SNR, healthy operating ramps, unrelated impacts, mild/intermittent faults, timing corruption, missing data, and selected unfamiliar/combined patterns.
-
-Compare telemetry-only, acoustic-plus-context, vibration-plus-context, and fused inputs using the same partitions. Additional modalities are beneficial only if measured results demonstrate an improvement.
-
-Uncertainty intervals should resample engines or runs rather than individual overlapping windows. Calibration plots and probability-quality metrics are required if confidence percentages are displayed.
-
-### 13.4 Evaluation boundaries
-
-A generator can create internally consistent but unrealistic distinctions. Testing unseen seeds and parameters helps expose simulator-specific shortcuts but does not substitute for independent real measurements. Final-test results must remain separate from tuning; a redesign informed by those results requires fresh evaluation data.
-
-## 14. Technology, resources, and implementation structure
-
-### 14.1 Technology allocation
-
-| Technology | Planned responsibility | Dependency condition |
-|---|---|---|
-| MATLAB | Scenario generation, export, reference plots | Access assumed |
-| Signal Processing Toolbox | Optional convenient MATLAB reference analysis | Product/license availability to verify |
-| Simulink and engine-related products | Optional timing/dynamics comparison | Not assumed from MATLAB access |
-| NumPy/SciPy | Import, filtering, FFT/STFT, feature extraction | Pinned compatible Python environment |
-| pandas/PyArrow | Telemetry/features/manifests | Local storage |
-| scikit-learn | Preprocessing, SVM, calibration, metrics | CPU execution |
-| Streamlit/Plotly | Local dashboard and interactive evidence | Browser on demo machine |
-| pytest | Meaningful data, DSP, and integration checks | Development environment |
-| JSON/CSV/MAT/Parquet | Portable configuration and data exchange | Versioned schemas |
-
-No GPU, cloud service, API credentials, database, or physical engine is required for the proposed MVP. A practical planning allowance is an ordinary development laptop with approximately 8-16 GB RAM and 8-10 GB free working storage, subject to measurement. This is not a certified minimum specification. No pricing is assumed beyond the MATLAB access supplied by the user.
-
-### 14.2 Proposed source structure
-
-The following is an intended organization, not a list of existing implementation files:
-
-```text
-matlab/              scenario generation, renderers, export, reference analysis
-configs/             engine, sensor, scenario, split, and threshold definitions
-schemas/             run, telemetry, feature, and prediction contracts
-data/                manifests and generated runs; avoid committing bulk data by default
-evaluation_truth/    private source events and labels
-src/data/            import and validation
-src/pipeline/        alignment, filtering, windows, features
-src/models/          training, calibration, evaluation
-src/runtime/         replay, inference, alerts, logs
-dashboard/           Streamlit application
-tests/               data, DSP, leakage, and integration checks
-reports/             generator validation and evaluation outputs
-docs/                setup, data/model cards, assumptions, limitations, demo script
+# Python pipeline
+uv run --all-extras engine-diagnostics validate-runs data/raw/core_v1
+uv run --all-extras engine-diagnostics build-features --raw-dir data/raw/core_v1 `
+    --truth-dir evaluation_truth/core_v1 --batch-config configs/core_v1.json `
+    --output data/processed/core_v1_features.parquet
+uv run --all-extras engine-diagnostics train
+uv run --all-extras engine-diagnostics evaluate      # scores the test engines once
+uv run --all-extras streamlit run dashboard/app.py
+uv run --all-extras --group quality pytest
 ```
 
-A model bundle will include its fitted preprocessing, classifier, feature order, baseline references, optional calibration, thresholds, and version identifiers. Incompatible feature schemas must cause an explicit failure rather than a silent prediction.
+Generated data, models, and reports are excluded from Git and are reproduced by these commands; the manifest and model hashes above identify the exact versions reported.
 
-## 15. Execution strategy and project management
+## 15. Conclusion
 
-### 15.1 Milestones and outputs
+The project delivers an end-to-end, reproducible workflow from a MATLAB multisensor engine simulator to a live, evidence-oriented replay dashboard, with honest engine-level evaluation. On held-out virtual engines it separates healthy operation from moderate and strong modeled faults with no false alerts during normal replay, explains each alert against an operating-matched normal reference, and tracks an accelerated simulated degradation trend. It does not yet detect mild faults reliably, its valve-clearance recognition is the weakest, and it does not generalize to the reserved challenge conditions. Every result above is synthetic; the next step is validation on real engine recordings.
 
-| Milestone | Completion condition | Main owner |
-|---|---|---|
-| Scope/contracts | Roles, rates, units, formats, and class definitions agreed | Technical lead |
-| Early vertical path | Small MATLAB batch reaches actual replay inference/dashboard | MATLAB and integration leads |
-| Generator validation | Reproducible mechanisms pass timing/bandwidth/shortcut checks | MATLAB and DSP leads |
-| Dataset freeze | Engine-separated manifests, validated runs, locked test set | Data/ML lead |
-| Analytical bundle | Shared features, baseline, SVM, thresholds frozen | DSP/ML leads |
-| Integrated MVP | Evidence panels, alerts, quality states, and logging work together | Dashboard lead |
-| Evaluation | Metrics and limitations trace to exact versions | Evaluation lead |
-| Submission | Rehearsed offline demo, documentation, fallback, required package | Technical lead |
+## 16. References and glossary
 
-Use [PROJECT_CHECKLIST.md](PROJECT_CHECKLIST.md) for the detailed task sequence and exit checks. Roles are responsibilities rather than an assumed team size.
+### 16.1 References
 
-### 15.2 Critical path and parallel work
-
-The critical path is contracts, MATLAB export round trip, early replay, generator validation, frozen dataset/features/model, final integration/evaluation, and rehearsal.
-
-The dashboard shell can proceed after contracts; analytical DSP checks can precede bulk generation; documentation follows decisions continuously. Avoid independently implementing incompatible feature pipelines in MATLAB and Python.
-
-Reach a small working path within the first 20% of elapsed time. Reserve the final 20% for verification, documentation, and demonstration stability. After that feature freeze, accept correctness, reproducibility, and necessary performance fixes only.
-
-If time is limited, remove optional Simulink work and future features, reduce dataset size while preserving independent groups, and simplify dashboard redraws. A further explicit scope reduction may remove one fault class. Data validation, causal processing, honest evaluation, and rehearsal remain essential.
-
-## 16. Expected deliverables and demonstration
-
-### 16.1 Deliverables
-
-| Deliverable | Expected contents |
-|---|---|
-| MATLAB generator | Configurable operating/fault scenarios, sensor renderers, exports |
-| Dataset package | Sample runs, schema, dictionary, seeds/configurations, regeneration instructions |
-| Validation report | Timing, bandwidth, consistency, reproducibility, and sensitivity evidence |
-| Analysis pipeline | Shared features and MATLAB/Python reference comparisons |
-| Model bundle | Baseline, SVM, preprocessing, thresholds, schema, optional calibration |
-| Dashboard | Replay, telemetry, waveforms, signatures, predictions, evidence, timeline |
-| Evaluation report | Metrics, ablations, challenge results, latency, rejection, failures |
-| Documentation | Setup, architecture, model/data cards, limitations, source references |
-| Submission materials | Presentation, screenshots, demo script, fallback recording |
-
-### 16.2 Main demonstration
-
-Use a separate approximately 45-second scenario. Begin with normal operation, introduce a moderate RPM/load change, establish a new plateau, then activate a moderate knock-like fault. Show signature changes, the persistent alert, its timing, and the measurements supporting it. Reveal the truth overlay only after the inference path has been demonstrated.
-
-Use a short second scenario to show an accelerated valve-like condition trend. Explain that it is not a service-life estimate.
-
-The fallback will include a verified local model/data bundle, a complete screen recording, and static figures. Cached predictions or a recording must be labeled as such. The final demo should run three times offline on the presentation machine.
-
-## 17. Risks, limitations, and future development
-
-### 17.1 Priority risks
-
-| Risk | Consequence | Planned mitigation |
-|---|---|---|
-| Generator shortcuts | High scores without meaningful pattern learning | Overlapping parameter distributions, amplitude matching, ablations |
-| Synthetic-to-real gap | Unsupported engine claims | Explicit simulator boundaries and later real-data validation |
-| Operating-condition confounding | Healthy ramps trigger faults | Contextual references, broad order features, normal-transient tests |
-| Overlapping-window leakage | Inflated evaluation | Engine-level split before windowing |
-| Timing/future-data errors | Incorrect signatures and latency | Causal processing, correction tests, replay equivalence |
-| Confusable impacts | Wrong fault class | Multiple measurements and uncertain state |
-| Toolbox dependency | Blocked MATLAB approach | Verify products early; retain event-based MATLAB/Python path |
-| Scope/runtime pressure | Incomplete demonstration | Early vertical path, bounded model size, freeze and fallback |
-
-### 17.2 Limitations
-
-The generator is not a validated digital twin of a specific engine. Its acoustic and acceleration values are not calibrated measurements. The classifier covers a small set of modeled conditions, and rejection cannot ensure unknown-fault safety. Low-rate RPM supports operating context rather than precise crankshaft diagnosis. The dashboard displays evidence, not certified mechanical root cause.
-
-### 17.3 Future development
-
-| Feature | Benefit | Prerequisite |
-|---|---|---|
-| Three-axis vibration | Directional/placement robustness | New rendering and evaluation |
-| High-resolution order tracking | Better angular/transient interpretation | Suitable measured tachometer/speed information |
-| Verified real recordings | Assess generator assumptions and domain shift | Access, license, usable operating/fault metadata |
-| Genuine acquisition | Hardware demonstration | Sensors, interfaces, synchronization, permissions |
-| CNN comparison | Learned-representation experiment | Reliable baseline and frozen independent evaluation |
-| Combined-fault recognition | Broader operating cases | Multi-label data and new evaluation design |
-| Physical severity/RUL | Maintenance forecasting | Calibrated damage and longitudinal lifetime evidence |
-
-## 18. Acceptance and results record
-
-### 18.1 Proposed acceptance targets
-
-| Area | Proposed goal | Current evidence |
-|---|---|---|
-| Generator reproducibility | Repeat seed/configuration reproduces validated arrays | Not yet measured |
-| Split integrity | No engine/run leakage across independent partitions | Not yet implemented |
-| Core classification | Macro-F1 at least 0.80; each fault recall at least 0.75 | Not yet measured |
-| Challenge classification | Macro-F1 at least 0.65 with rejection/coverage disclosed | Not yet measured |
-| Normal replay | At most 0.2 false alert episodes per normal minute | Not yet measured |
-| Processing | p95 below 250 ms per inference update | Not yet measured |
-| Sustained-fault alerting | p95 within four seconds for predefined moderate/severe cases | Not yet measured |
-| Quality handling | Injected severe gaps/staleness produce visible quality states | Not yet measured |
-| Degradation indicator | Proposed median held-out progression Spearman correlation at least 0.7 | Not yet measured |
-| Demo stability | Three consecutive complete offline rehearsals | Not yet performed |
-
-### 18.2 Required final evidence
-
-Before submission, replace unmeasured entries with actual values or explicit unmet status. Retain dataset version, model version, code revision, machine specification, evaluation duration, engine/run counts, exclusions, rejected coverage, confusion matrix, latency distribution, and representative failure cases.
-
-Do not invent screenshots, benchmark tables, accuracy values, hardware demonstrations, or measured wear results. If a goal is missed, report the measured outcome and explain its implications.
-
-## 19. Conclusion
-
-The proposed project combines a reproducible MATLAB data generator with a Python diagnostic pipeline and an evidence-focused dashboard. Its planned features cover multisensor synthesis, operating variation, controlled fault lifecycles, interpretable signal signatures, normal detection, SVM recognition, quality/uncertainty handling, replay alerts, and independent evaluation.
-
-A successful MVP will demonstrate a complete and inspectable workflow on specified synthetic conditions. Its strongest defensible claim will concern reproducibility and measured recognition within the documented simulation tests. Real-engine diagnosis, calibrated wear, and remaining useful life require additional evidence beyond this prototype.
-
-## 20. References and glossary
-
-### 20.1 References
-
-The supplied official problem statement and [PROJECT_CHECKLIST.md](PROJECT_CHECKLIST.md) define project scope. The following primary sources support engineering background and interface choices; they do not independently validate the proposed generator.
+These sources support engineering background and interface choices; they do not validate the generator.
 
 1. [NASA Glenn: Bore and Stroke](https://www.grc.nasa.gov/www/k-12/airplane/stroke.html) — four-stroke cycle timing.
 2. [Bosch Mobility: Knock Sensor](https://www.bosch-mobility.com/en/solutions/sensors/knock-sensor/) — structure-borne vibration sensing for knock.
-3. [MathWorks: Detect Misfires Using On-Board Diagnostics](https://www.mathworks.com/help/autoblks/ug/use-obd-to-detect-misfire.html) — crankshaft-based example and listed product requirements.
-4. [Jiang et al.: Fault Diagnosis of Internal Combustion Engine Valve Clearance Using the Impact Commencement Detection Method](https://www.mdpi.com/1424-8220/17/12/2916) — experimental valve-impact timing study, Sensors 17(12), 2916 (2017).
+3. [MathWorks: Detect Misfires Using On-Board Diagnostics](https://www.mathworks.com/help/autoblks/ug/use-obd-to-detect-misfire.html) — crankshaft-based misfire example.
+4. [Jiang et al., Fault Diagnosis of Internal Combustion Engine Valve Clearance Using the Impact Commencement Detection Method, Sensors 17(12), 2916 (2017)](https://www.mdpi.com/1424-8220/17/12/2916).
 5. [MathWorks: save](https://www.mathworks.com/help/matlab/ref/save.html) — MAT-file formats.
-6. [SciPy: loadmat](https://docs.scipy.org/doc/scipy/reference/generated/scipy.io.loadmat.html) — supported MATLAB import formats.
-7. [MathWorks: ver](https://www.mathworks.com/help/matlab/ref/ver.html) — installed product/version inventory.
-8. [SciPy: ShortTimeFFT](https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.ShortTimeFFT.html) — STFT settings and frequency/time axes.
-9. [Scikit-learn: Common Pitfalls](https://scikit-learn.org/stable/common_pitfalls.html) — preprocessing isolation and leakage prevention.
-10. [Scikit-learn: Probability Calibration](https://scikit-learn.org/stable/modules/calibration.html) — calibration and independent fitting evidence.
-11. [MathWorks: Predict Remaining Useful Life](https://www.mathworks.com/help/predmaint/predict-remaining-useful-life.html) — evidence and model context for RUL.
+6. [SciPy: loadmat](https://docs.scipy.org/doc/scipy/reference/generated/scipy.io.loadmat.html) — MATLAB import.
+7. [Scikit-learn: Common Pitfalls](https://scikit-learn.org/stable/common_pitfalls.html) — leakage prevention.
+8. [Scikit-learn: Probability Calibration](https://scikit-learn.org/stable/modules/calibration.html).
+9. [MathWorks: Predict Remaining Useful Life](https://www.mathworks.com/help/predmaint/predict-remaining-useful-life.html) — evidence needed for RUL.
 
-### 20.2 Glossary
+### 16.2 Glossary
 
-| Term | Meaning in this project |
+| Term | Meaning here |
 |---|---|
-| Baseline | Reference distribution for normal signals under supported operating conditions |
-| ECU-like telemetry | Simulated numerical fields resembling engine operating measurements |
-| FFT | Fourier transform computation used to inspect frequency components |
-| STFT | Repeated windowed transforms showing frequency content over time |
-| PSD | Power distribution per unit frequency |
-| Envelope | A representation of amplitude variation used to study impacts and recurrence |
-| Order | Frequency expressed as a multiple of shaft rotational frequency |
-| SVM | Support vector machine used for the planned fault classifier |
-| Sensor fusion | Combining features from different sensor modalities and operating context |
-| Leakage | Evaluation information improperly influencing training or model selection |
-| Calibration | Checking/fitting how prediction scores correspond to observed probabilities |
-| p95 | The 95th percentile of a measured latency distribution |
-| RUL | Remaining useful life before a defined repair/replacement/failure criterion |
-| Synthetic replay | Recorded generated signals released according to a playback clock |
+| Accepted decision | A window class that passed the confidence and anomaly rules; otherwise "uncertain" |
+| Alert episode | A continuous period with the same active alert |
+| Challenge run | Test-engine run under reserved conditions not seen in training |
+| Calibration | Mapping SVM scores to probabilities using separate engines |
+| Envelope | Magnitude of the analytic signal of a band-limited window, showing impacts |
+| Macro-F1 | Mean of per-class F1 scores |
+| Operating bin | One of 3 RPM × 2 load ranges with its own normal reference |
+| p95 | 95th percentile |
+| Sustained event | A fault interval of at least 3 s |
+| Synthetic replay | Recorded generated signals released at the playback clock |
+| Transition window | A window spanning a fault start or end; excluded from scoring |
