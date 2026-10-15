@@ -4,8 +4,9 @@ MATLAB/Python project for the Honeywell hackathon problem on engine signature
 extraction and pattern recognition.
 
 **Current stage: first integration batch.** A config-driven MATLAB generator
-produces synchronized audio, vibration, and telemetry runs (3 × 20 s: normal
-then misfire, knock-like, or valve-clearance-like), and Python loads and
+produces synchronized audio, vibration, and telemetry runs (13 × 20 s on 4
+virtual engines: normal-only, or normal then misfire, knock-like, or
+valve-clearance-like), and Python loads and
 validates them against the data contract. Signal-processing features, models,
 and the dashboard are subsequent milestones. No diagnostic performance has been
 measured.

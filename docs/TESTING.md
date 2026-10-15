@@ -23,6 +23,8 @@ batch, not a working engine-diagnostics pipeline.
 | MATLAB run validation (2026-10-15) | Passed | `validate_run_matlab` on all 3: dtype/length, no clipping (peaks 13-17% of full scale), combustion count within 0.1% of RPM-derived expectation, faulted events only after onset, knock 5-9 kHz band power x2.13 after onset |
 | Generator reproducibility (2026-10-15) | Passed | Regenerating run 1 gave identical arrays, telemetry CSV, and truth JSON (`isequal`) |
 | Aliasing (2026-10-15) | Passed with note | Noise-free render: energy above 0.9 x Nyquist is -42 to -57 dB of total; full alias-free proof not attempted |
+| Integration batch extended (2026-10-15) | Passed | 13 runs on 4 engines (train engine_001-003, test engine_004): 4 normal-only, 3 each of misfire/knock-like/valve-clearance-like; 80.6 s total; 48 MB public + 6.8 MB truth. Runs 1-3 regenerated bit-identical. `validate_run_matlab` 13/13; Python `validate-runs` 13/13 |
+| Knock signature check (2026-10-15) | Passed | Event-locked 5-9 kHz energy after knocked vs unknocked combustion: x7.07, x3.67, x4.22. The earlier whole-band before/after check failed two valid runs (x1.33, x1.25) because normal valve modes and RPM ramps share that band, so it was replaced |
 | Review figures (2026-10-15) | Inspected | `plot_run_overview` spectrograms/zooms show the intended knock band, weak misfire strokes, and shifted valve impacts |
 | MATLAB/Python handoff (2026-10-15) | Passed | `validate-runs`: all 3 runs valid in Python (column orientation, float32 class, sample counts/rates, t0, summary sums/first/last vs MATLAB, telemetry units/rates/order); manifest written |
 | Run I/O tests (2026-10-15) | Passed | 31 tests with extras (17 contract-violation/loader tests, 5 on real exported runs); 9 passed, 2 skipped in a base-only isolated env; Ruff clean |
@@ -36,7 +38,6 @@ filesystem access. This was an environment restriction, not a passing sandbox ru
 | Component | Required check | Current reason/status |
 |---|---|---|
 | Simulink / Powertrain Blockset | Install only if the optional Simulink comparison is pursued | Licensed but not installed; not required for the MVP |
-| Integration-batch scale | Generate normal-only runs and the rest of the planned 12 before training any temporary model | Only 3 runs exist, each normal then one fault |
 | Robustness settings | Generate and validate clock offsets/drift, missing telemetry, and clipping end to end | The format supports them; the generator does not produce them yet |
 | MATLAB discovery in `doctor` | Add `/Applications/MATLAB_*.app/bin` to PATH or teach `doctor` to search it | `matlab` is not on PATH on macOS, so `doctor` reports it missing |
 | Full Python stack on Windows | Repeat the extras install and imports on the original Windows machine | Verified on macOS only |

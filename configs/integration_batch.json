@@ -80,6 +80,7 @@
       "ltft_drift_pct_per_s": 0.002
     }
   },
+  "engine_splits": {"train": ["engine_001", "engine_002", "engine_003"], "test": ["engine_004"]},
   "runs": [
     {
       "run_id": "run_00001",
@@ -112,6 +113,116 @@
       "severity": 0.7,
       "rpm": [950, 1050],
       "load": [0.25, 0.25],
+      "ramp_s": [2, 18]
+    },
+    {
+      "run_id": "run_00004",
+      "engine_id": "engine_001",
+      "condition": "normal",
+      "onset_s": 0,
+      "affected_cylinder": 0,
+      "severity": 0,
+      "rpm": [1200, 1800],
+      "load": [0.3, 0.5],
+      "ramp_s": [2, 18]
+    },
+    {
+      "run_id": "run_00005",
+      "engine_id": "engine_002",
+      "condition": "normal",
+      "onset_s": 0,
+      "affected_cylinder": 0,
+      "severity": 0,
+      "rpm": [2200, 2200],
+      "load": [0.6, 0.6],
+      "ramp_s": [2, 18]
+    },
+    {
+      "run_id": "run_00006",
+      "engine_id": "engine_003",
+      "condition": "normal",
+      "onset_s": 0,
+      "affected_cylinder": 0,
+      "severity": 0,
+      "rpm": [900, 1400],
+      "load": [0.2, 0.35],
+      "ramp_s": [2, 18]
+    },
+    {
+      "run_id": "run_00007",
+      "engine_id": "engine_001",
+      "condition": "knock_like",
+      "onset_s": 6.0,
+      "affected_cylinder": 4,
+      "severity": 0.4,
+      "rpm": [1800, 2200],
+      "load": [0.55, 0.7],
+      "ramp_s": [2, 18]
+    },
+    {
+      "run_id": "run_00008",
+      "engine_id": "engine_002",
+      "condition": "valve_clearance_like",
+      "onset_s": 10.0,
+      "affected_cylinder": 2,
+      "severity": 0.5,
+      "rpm": [1200, 1300],
+      "load": [0.3, 0.3],
+      "ramp_s": [2, 18]
+    },
+    {
+      "run_id": "run_00009",
+      "engine_id": "engine_003",
+      "condition": "misfire",
+      "onset_s": 7.0,
+      "affected_cylinder": 1,
+      "severity": 0.7,
+      "rpm": [2000, 1600],
+      "load": [0.5, 0.4],
+      "ramp_s": [2, 18]
+    },
+    {
+      "run_id": "run_00010",
+      "engine_id": "engine_004",
+      "condition": "normal",
+      "onset_s": 0,
+      "affected_cylinder": 0,
+      "severity": 0,
+      "rpm": [1100, 2000],
+      "load": [0.3, 0.55],
+      "ramp_s": [2, 18]
+    },
+    {
+      "run_id": "run_00011",
+      "engine_id": "engine_004",
+      "condition": "misfire",
+      "onset_s": 9.0,
+      "affected_cylinder": 3,
+      "severity": 0.5,
+      "rpm": [1300, 1700],
+      "load": [0.35, 0.45],
+      "ramp_s": [2, 18]
+    },
+    {
+      "run_id": "run_00012",
+      "engine_id": "engine_004",
+      "condition": "knock_like",
+      "onset_s": 8.0,
+      "affected_cylinder": 2,
+      "severity": 0.5,
+      "rpm": [2400, 2000],
+      "load": [0.65, 0.6],
+      "ramp_s": [2, 18]
+    },
+    {
+      "run_id": "run_00013",
+      "engine_id": "engine_004",
+      "condition": "valve_clearance_like",
+      "onset_s": 7.0,
+      "affected_cylinder": 4,
+      "severity": 0.6,
+      "rpm": [1000, 1200],
+      "load": [0.25, 0.3],
       "ramp_s": [2, 18]
     }
   ]

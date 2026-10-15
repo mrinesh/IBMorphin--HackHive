@@ -42,6 +42,16 @@
 - Events are keyed by crank angle, so a misfire's RPM dip shifts later events in
   every stream consistently.
 
+## 2026-10-15: integration batch extended to 13 runs
+
+- 13 runs × 20 s on 4 virtual engines. engine_001-003 are training engines
+  (3 normal-only runs, 2 runs per fault); engine_004 is held out (one
+  normal-only run and one run per fault). The split is in
+  `configs/integration_batch.json` (`engine_splits`) and is engine-level.
+- Normal runs record `onset_s` and `affected_cylinder` as null in the truth.
+- The temporary model trained on this batch is a pipeline check, not an
+  evaluation; four engines cannot support performance claims.
+
 ## Open decisions
 
 - Assign team owners and record the actual hackathon deadline.

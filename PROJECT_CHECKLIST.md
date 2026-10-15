@@ -54,7 +54,7 @@ Execution tracker. Checked items have been completed; unchecked items remain fut
 
 **Owners:** MATLAB, ML, and dashboard leads. **Dependency:** Phase 2. **Timing:** achieve within the first 20% of elapsed project time.
 
-- [x] Create a small integration batch: approximately 12 runs of 20 seconds, covering normal operation and simple examples of each modeled fault. First version: 3 runs, each normal then one fault at 8 s; extend to 12 later.
+- [x] Create a small integration batch: approximately 12 runs of 20 seconds, covering normal operation and simple examples of each modeled fault. 13 runs on 4 engines: 4 normal-only and 9 normal-then-fault; engine_004 held out.
 - [x] Use a shared event schedule to keep audio, vibration, and telemetry synchronized.
 - [x] Export from MATLAB and verify the round trip in Python. `engine-diagnostics validate-runs`.
 - [ ] Implement a minimal common Python feature path using RMS, envelope variation, and broad band energies.

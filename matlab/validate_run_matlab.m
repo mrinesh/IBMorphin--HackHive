@@ -4,7 +4,8 @@ function report = validate_run_matlab(runDir, truthPath)
 %       'evaluation_truth/run_00001_events.json')
 %   Checks lengths, dtype, finite values, clipping, firing-event rate against
 %   observed RPM, fault events after onset, and the condition's intended
-%   signature. Python validate-runs repeats the format checks independently.
+%   signature (knock: 5-9 kHz energy after knocked vs unknocked combustion).
+%   Python validate-runs repeats the format checks independently.
 
     config = load_project_config();
     w = load(fullfile(runDir, 'waveforms.mat'));
@@ -49,7 +50,11 @@ function report = validate_run_matlab(runDir, truthPath)
         issues(end + 1) = sprintf("combustion events %d vs expected %.1f from RPM", observed, expected);
     end
 
-    if any(faulted & times < truth.onset_s)
+    onset = truth.onset_s;
+    if isempty(onset)
+        onset = Inf;  % normal run: no fault onset
+    end
+    if any(faulted & times < onset)
         issues(end + 1) = "faulted events occur before onset";
     end
     metrics.faulted_events = nnz(faulted);
@@ -57,12 +62,22 @@ function report = validate_run_matlab(runDir, truthPath)
         case 'misfire'
             ok = any(faulted & kinds == "combustion");
         case 'knock_like'
+            % Compare 5-9 kHz energy just after knocked vs unknocked combustion
+            % on the affected cylinder; robust to RPM/load drift over the run.
+            cylinders = [truth.events.cylinder]';
+            bursts = times(kinds == "knock_burst");
+            fired = times(kinds == "combustion" & cylinders == truth.affected_cylinder ...
+                & times >= onset);
+            knocked = arrayfun(@(t) any(bursts > t & bursts <= t + 0.005), fired);
             fs = w.vibration_fs_hz;
-            before = w.vibration(1:round((truth.onset_s - 0.5) * fs));
-            after = w.vibration(round((truth.onset_s + 0.5) * fs):end);
-            ratio = band_power(after, fs, [5000 9000]) / band_power(before, fs, [5000 9000]);
+            [b, a] = butter(4, [5000 9000] / (fs / 2), 'bandpass');
+            energy = filtfilt(b, a, double(w.vibration)) .^ 2;
+            windowEnergy = arrayfun(@(t) sum(energy(max(1, round(t * fs)) ...
+                + (0:round(0.005 * fs)))), fired(fired < duration - 0.006));
+            knocked = knocked(fired < duration - 0.006);
+            ratio = mean(windowEnergy(knocked)) / mean(windowEnergy(~knocked));
             metrics.knock_band_ratio = ratio;
-            ok = any(kinds == "knock_burst") && ratio > 1.5;
+            ok = any(knocked) && any(~knocked) && ratio > 2;
         case 'valve_clearance_like'
             ok = any(faulted & kinds == "valve_impact");
         otherwise
@@ -80,10 +95,4 @@ function report = validate_run_matlab(runDir, truthPath)
         fprintf('%s: FAILED\n', metadata.run_id);
         fprintf('  %s\n', issues);
     end
-end
-
-function p = band_power(x, fs, band)
-    [pxx, f] = pwelch(double(x), hann(8192), 4096, 8192, fs);
-    inBand = f >= band(1) & f <= band(2);
-    p = trapz(f(inBand), pxx(inBand));
 end

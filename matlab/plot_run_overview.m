@@ -9,14 +9,23 @@ function fig = plot_run_overview(runDir, truthPath, outputPath)
     telemetry = readtable(fullfile(runDir, 'telemetry.csv'), 'TextType', 'string');
     truth = jsondecode(fileread(truthPath));
     onset = truth.onset_s;
+    isNormal = isempty(onset);
+    if isNormal
+        onset = numel(w.audio) / w.audio_fs_hz / 2;  % mid-run reference for the zooms
+    end
     times = [truth.events.time_s]';
     faulted = [truth.events.faulted]';
 
     fig = figure('Visible', 'off', 'Position', [0 0 1400 1000]);
     layout = tiledlayout(fig, 3, 2, 'TileSpacing', 'compact');
-    title(layout, sprintf('%s  |  %s  |  onset %.1f s, cylinder %d, severity %.2f', ...
-        truth.run_id, truth.condition, onset, truth.affected_cylinder, truth.severity), ...
-        'Interpreter', 'none');
+    if isNormal
+        heading = sprintf('%s  |  normal  |  zooms compare %.1f s and %.1f s', ...
+            truth.run_id, onset - 1, onset + 2);
+    else
+        heading = sprintf('%s  |  %s  |  onset %.1f s, cylinder %d, severity %.2f', ...
+            truth.run_id, truth.condition, onset, truth.affected_cylinder, truth.severity);
+    end
+    title(layout, heading, 'Interpreter', 'none');
 
     % Zoom after onset starts just before the first faulted event 2 s past onset.
     zoom = 0.15;
@@ -34,7 +43,9 @@ function fig = plot_run_overview(runDir, truthPath, outputPath)
         [s, f, t] = spectrogram(x, hann(2048), 2048 - 512, 2048, fs);
         imagesc(ax, t, f / 1000, 10 * log10(abs(s) .^ 2 + eps));
         axis(ax, 'xy');
-        xline(ax, onset, 'w--', 'LineWidth', 1.5);
+        if ~isNormal
+            xline(ax, onset, 'w--', 'LineWidth', 1.5);
+        end
         ylabel(ax, 'kHz');
         title(ax, names(k) + " spectrogram");
         clim(ax, max(clim(ax)) - [70 0]);
@@ -60,7 +71,9 @@ function fig = plot_run_overview(runDir, truthPath, outputPath)
     ax = nexttile(layout, 5, [1 2]);
     rpm = telemetry(telemetry.signal == "rpm", :);
     plot(ax, rpm.t_s, rpm.value);
-    xline(ax, onset, 'k--');
+    if ~isNormal
+        xline(ax, onset, 'k--');
+    end
     xlabel(ax, 's');
     ylabel(ax, 'rpm');
     title(ax, 'RPM telemetry');
