@@ -5,12 +5,13 @@ extraction and pattern recognition.
 
 **Current stage: first end-to-end milestone (checklist §3).** A config-driven
 MATLAB generator produces synchronized audio, vibration, and telemetry runs
-(13 × 20 s on 4 virtual engines: normal-only, or normal then misfire,
+(16 × 20 s on 4 virtual engines: normal-only, or normal then misfire,
 knock-like, or valve-clearance-like). Python validates them against the data
 contract, extracts window features, trains a temporary baseline/SVM model on
 three engines, and replays runs in 40 ms packets with persistent alerts, in the
-terminal or a local Streamlit dashboard. Scores on the one held-out engine are
-pipeline checks, not diagnostic performance; physical realism is unvalidated.
+terminal or a local Streamlit dashboard. A leave-one-engine-out check is
+included, but current synthetic cross-engine scores are poor; real cross-domain
+validity is unproven.
 
 ## Quick start
 

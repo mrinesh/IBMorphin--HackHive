@@ -133,6 +133,12 @@ def _train_temporary(args) -> int:
           f"anomalous {report['normal_windows_flagged_anomalous']:.3f}")
     for name, part in report["ablations"].items():
         print(f"ablation {name:24s} macro-F1 {part['macro_f1']:.3f}")
+    cross_domain = report["cross_domain"]
+    print(f"cross-domain check: {cross_domain['status']}")
+    for name, part in cross_domain["results"].items():
+        print(f"leave-one-engine-out {name:14s} mean macro-F1 "
+              f"{part['macro_f1_mean_by_engine']:.3f} "
+              f"(std {part['macro_f1_std_by_engine']:.3f})")
     print(f"model -> {args.model}\nreport -> {args.report}")
     return 0
 

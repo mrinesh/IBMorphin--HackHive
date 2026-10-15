@@ -1,7 +1,7 @@
 # Verification status and checks still required
 
-Updated: 15 October 2026. This record covers initialization and the first integration
-batch, not a working engine-diagnostics pipeline.
+Updated: 16 October 2026. This record includes the first cross-engine generalization
+check, which currently shows poor transfer between the synthetic engines.
 
 ## Completed verification
 
@@ -27,6 +27,8 @@ batch, not a working engine-diagnostics pipeline.
 | Knock signature check (2026-10-15) | Passed | Event-locked 5-9 kHz energy after knocked vs unknocked combustion: x7.07, x3.67, x4.22. The earlier whole-band before/after check failed two valid runs (x1.33, x1.25) because normal valve modes and RPM ramps share that band, so it was replaced |
 | Feature path (2026-10-15) | Passed | `build-features`: 481 windows from 13 runs in 5.7 s (~12 ms/window), all quality `ok`, no NaN. Unit tests: sine RMS/crest/kurtosis and band placement, impulsive and missing-firing fixtures, quality states, causal slicing, past-only telemetry context, label boundaries, features module imports no label/truth code |
 | Temporary model pipeline check (2026-10-15) | Ran; not an evaluation | Trained on engine_001-003 (348 clean windows), checked on held-out engine_004 (133). SVM macro-F1 0.984; accepted decisions macro-F1 0.986 at 0.857 coverage; 5.5% of normal windows exceed the anomaly threshold. Ablations: telemetry-only 0.609, audio+context 0.984, vibration+context 0.745 (knock recall 0.05), fused without context 0.991. One held-out engine and clean synthetic faults make these scores optimistic |
+| Cross-domain batch additions (2026-10-16) | Passed | Added missing fault/engine combinations so every training engine has normal plus each fault class. MATLAB generated runs 14-16 without clipping; Python `validate-runs` passed 16/16 |
+| Cross-engine generalization report (2026-10-16) | Ran; fails as a generalization claim | After all training engines received each class, leave-one-engine-out pooled macro-F1 was 0.433; mean per-engine macro-F1 0.389 fused / 0.380 waveform-only. Pooled recall: misfire 0.68, knock 0.13, valve-clearance 0.00. Equal-engine weighting and report added, but the current features/model do not generalize reliably across even these synthetic engines |
 | Alert persistence and model rules (2026-10-15) | Passed | Unit tests: confirm after 2 consistent faults, clear after 3 normals, uncertain/bad quality hold state; training uses only clean training windows; faults accepted only when SVM and anomaly detector agree |
 | Replay (2026-10-15) | Passed | Replay features equal offline features exactly (max difference 0) on all 481 windows of 13 runs. Held-out engine_004: normal run no alert; misfire alert 1.5 s, knock 1.0 s, valve 2.0 s after onset (valve 13/37 updates uncertain). Processing p50 12.0 ms, p95 13.2 ms, max 40.4 ms (fast); 1x replay of run_00011 took 21.2 s wall for 20 s, p50 24.3 / p95 34.0 ms. Tests: offline equality, decisions unchanged by samples after t, alert sequence, reset |
 | Truth null encoding (2026-10-15) | Fixed | Normal-run truth wrote `onset_s: []`; now `null` (MATLAB `jsonencode` writes NaN as null). Regenerated 13 runs; waveforms unchanged; 13/13 valid |
@@ -46,10 +48,10 @@ filesystem access. This was an environment restriction, not a passing sandbox ru
 | Simulink / Powertrain Blockset | Install only if the optional Simulink comparison is pursued | Licensed but not installed; not required for the MVP |
 | MATLAB/Python feature agreement | Compute the same features in MATLAB and compare with tolerances (checklist §6) | Not implemented; Python is the only feature implementation so far |
 | Context shortcut | Decorrelate scenario RPM/load from condition, then repeat the telemetry-only ablation | Confirmed: telemetry-only recall 0.94 misfire / 0.95 valve on the held-out engine because scenarios use class-distinctive RPM/load ranges. Waveform-only features score 0.991, so the model does not need context, but scenarios must be decorrelated before any evaluation |
+| Real cross-domain transfer | Obtain accessible real engine data with synchronized audio/vibration and compatible fault labels, then evaluate without target-label tuning | Current engine groups are all from one synthetic generator; target-domain dataset is not available. Synthetic leave-one-engine-out scores also show poor transfer, especially knock and valve-clearance recall |
 | Anomaly threshold and margin | Tune on a separate tuning partition | Threshold is the 99th percentile of training normal scores; margin 0.3 is untuned |
 | Replay with nonzero stream offsets | Support `t0_s != 0` and clock drift in replay | Replay rejects nonzero `t0_s`; all current runs use 0 |
 | Dashboard visual review | Open in a browser and rehearse normal -> fault -> alert -> evidence | Only automated AppTest and health checks have run |
-| External dataset check | Upload the source CSV in the dashboard and review schema/missing-value/label summaries | UI section implemented; CSV is not present in the linked Git repository, and the current waveform model is incompatible with the tabular schema |
 | Robustness settings | Generate and validate clock offsets/drift, missing telemetry, and clipping end to end | The format supports them; the generator does not produce them yet |
 | MATLAB discovery in `doctor` | Add `/Applications/MATLAB_*.app/bin` to PATH or teach `doctor` to search it | `matlab` is not on PATH on macOS, so `doctor` reports it missing |
 | Full Python stack on Windows | Repeat the extras install and imports on the original Windows machine | Verified on macOS only |
