@@ -27,13 +27,13 @@
 - Only base MATLAB is installed. Signal Processing, Statistics and Machine
   Learning, Simulink, and Powertrain Blockset are licensed but not installed.
 - The full Python analysis/dashboard stack is installed and imports on macOS.
+- Signal Processing Toolbox and Statistics and Machine Learning Toolbox were
+  then installed and verified; Simulink and Powertrain Blockset remain uninstalled.
 
 ## Open decisions
 
 - Assign team owners and record the actual hackathon deadline.
 - Confirm organizer expectations for team-generated data and replay.
-- Install the licensed Signal Processing Toolbox, or keep the generator
-  base-MATLAB-only (Python/SciPy already covers reference DSP).
 - Revisit dataset scale only after timing the small integration batch.
 
 ## Initialization verification

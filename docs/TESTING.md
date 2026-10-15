@@ -16,6 +16,7 @@ engine-diagnostics pipeline.
 | macOS pytest and Ruff (2026-10-15) | Passed | 9 tests passed; `ruff check .` reported no issues |
 | MATLAB initializer (2026-10-15) | Passed | `initialize_project()` ran in R2026b (26.2) via `/Applications/MATLAB_R2026b.app/bin/matlab -batch`; config loaded |
 | MATLAB product inventory (2026-10-15) | Recorded | `ver` lists only MATLAB and MATLAB Copilot. `license('test')` is true for Signal, Simulink, Statistics, and Powertrain Blockset, but these are licensed, not installed: `butter`, `pwelch`, `hann`, `envelope`, `fitcsvm` are undefined |
+| MATLAB toolboxes installed (2026-10-15) | Passed | `ver` now lists Signal Processing Toolbox and Statistics and Machine Learning Toolbox; `butter`, `pwelch`, `hann`, `envelope`, `fitcsvm` (RBF), and `kurtosis` executed |
 
 The first pytest attempt failed because the agent's Windows sandbox denied access
 to pytest temporary/cache directories. All nine tests passed when run with normal
@@ -25,7 +26,7 @@ filesystem access. This was an environment restriction, not a passing sandbox ru
 
 | Component | Required check | Current reason/status |
 |---|---|---|
-| MATLAB toolboxes | Install licensed Signal Processing (and optionally Statistics/Simulink) via Add-On Explorer, then re-run `ver` and exercise `butter`/`pwelch` | Licensed but not installed; generator must use base MATLAB until installed |
+| Simulink / Powertrain Blockset | Install only if the optional Simulink comparison is pursued | Licensed but not installed; not required for the MVP |
 | MATLAB discovery in `doctor` | Add `/Applications/MATLAB_*.app/bin` to PATH or teach `doctor` to search it | `matlab` is not on PATH on macOS, so `doctor` reports it missing |
 | Full Python stack on Windows | Repeat the extras install and imports on the original Windows machine | Verified on macOS only |
 | Other Python versions | Exercise initialization on each version claimed as supported | Only Python 3.13.7 has been tested; package declares 3.11-3.13 |
