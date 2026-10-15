@@ -105,6 +105,38 @@ def _build_features(args, config: dict) -> int:
     return 0
 
 
+def _train_temporary(args) -> int:
+    try:
+        import joblib
+        import pandas as pd
+
+        from engine_diagnostics.models.temporary import evaluate, fit_temporary_model
+    except ImportError as error:
+        print(f"train-temporary needs the analysis extra ({error.name} missing)", file=sys.stderr)
+        return 1
+    if not args.features.is_file():
+        print(f"{args.features} not found; run build-features first", file=sys.stderr)
+        return 1
+    table = pd.read_parquet(args.features)
+    model = fit_temporary_model(table)
+    report = evaluate(model, table)
+    args.model.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(model, args.model)
+    args.report.parent.mkdir(parents=True, exist_ok=True)
+    args.report.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    print(report["status"])
+    for name in ("svm", "accepted"):
+        part = report[name]
+        print(f"{name:9s} macro-F1 {part['macro_f1']:.3f}  windows {part['windows']}  "
+              f"recall {json.dumps({k: round(v, 2) for k, v in part['recall'].items()})}")
+    print(f"accepted coverage {report['accepted']['coverage']:.3f}; normal windows flagged "
+          f"anomalous {report['normal_windows_flagged_anomalous']:.3f}")
+    for name, part in report["ablations"].items():
+        print(f"ablation {name:24s} macro-F1 {part['macro_f1']:.3f}")
+    print(f"model -> {args.model}\nreport -> {args.report}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Engine diagnostics project initialization tools")
     parser.add_argument("--version", action="version", version=__version__)
@@ -126,9 +158,18 @@ def main(argv: list[str] | None = None) -> int:
                        default=Path("data/processed/integration_v1_features.parquet"))
     build.add_argument("--config", type=Path, default=Path("configs/mvp.json"))
     build.add_argument("--schema", type=Path, default=Path("schemas/project-config.schema.json"))
+    train = commands.add_parser("train-temporary",
+                                help="Fit the temporary baseline/SVM and check held-out engines")
+    train.add_argument("--features", type=Path,
+                       default=Path("data/processed/integration_v1_features.parquet"))
+    train.add_argument("--model", type=Path, default=Path("artifacts/models/temporary.joblib"))
+    train.add_argument("--report", type=Path,
+                       default=Path("reports/generated/temporary_model_report.json"))
     args = parser.parse_args(argv)
     if args.command == "doctor":
         return _doctor(args.root.resolve())
+    if args.command == "train-temporary":
+        return _train_temporary(args)
     try:
         config = load_config(args.config, args.schema)
     except (OSError, ValueError) as error:

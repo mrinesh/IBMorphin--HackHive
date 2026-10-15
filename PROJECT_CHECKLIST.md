@@ -58,7 +58,7 @@ Execution tracker. Checked items have been completed; unchecked items remain fut
 - [x] Use a shared event schedule to keep audio, vibration, and telemetry synchronized.
 - [x] Export from MATLAB and verify the round trip in Python. `engine-diagnostics validate-runs`.
 - [x] Implement a minimal common Python feature path using RMS, envelope variation, and broad band energies. `pipeline/features.py`, version 0.1.0, 31 features.
-- [ ] Train a temporary baseline/classifier using separate runs; do not present early scores as final evaluation.
+- [x] Train a temporary baseline/classifier using separate runs; do not present early scores as final evaluation. `train-temporary`; engine_004 held out.
 - [ ] Replay one run at 1× speed using trailing two-second windows and 0.5-second updates.
 - [ ] Display telemetry, two waveforms, one spectrum, and actual computed predictions.
 - [ ] Confirm inference has no access to labels or hidden simulation variables.

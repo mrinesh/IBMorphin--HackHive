@@ -146,6 +146,15 @@ The labeled table (`build-features`) adds bookkeeping columns `run_id`,
 A window is labeled only when it lies inside one truth segment; otherwise it is
 `transition` and excluded from training.
 
+## Temporary model
+
+`engine-diagnostics train-temporary` writes `artifacts/models/temporary.joblib`
+(model version `temporary-0.1.0`, feature version, ordered feature names,
+training runs) and `reports/generated/temporary_model_report.json`. Each window
+decision has `predicted` (SVM class), `margin`, `anomaly_score`, `anomalous`,
+and `accepted` (the class, or `uncertain` when the SVM and the normal baseline
+disagree or the margin is small).
+
 ## Deferred
 
 Prediction-record fields (window time, status, score, alert, model version)
