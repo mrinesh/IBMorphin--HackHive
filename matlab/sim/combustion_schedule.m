@@ -46,6 +46,7 @@ function events = combustion_schedule(profile, engine, params, stream)
     events.kind = kind;
     events.intensity = intensity;
     events.faulted = false(n, 1);
+    events.fault = strings(n, 1);  % condition that changed or added the event ("" if none)
     events.freq_scale = ones(n, 1);
     events.tau_scale = ones(n, 1);
     events.mode_freq_hz = nan(n, 1);
