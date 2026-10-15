@@ -9,7 +9,7 @@ engine-diagnostics pipeline.
 |---|---|---|
 | Configuration tests | 9 passed on Python 3.13.7 | Valid defaults; rejected Nyquist, timing, segment, split, class-balance, and hidden-context violations |
 | Shared configuration | Passed | JSON schema and cross-field relationships |
-| Environment doctor | Passed setup checks | Reports missing optional packages and MATLAB discovery separately |
+| Environment doctor | Passed setup checks; finds MATLAB R2026b on PATH | Reports missing optional packages and MATLAB discovery separately |
 | Dependency lock | Offline consistency check passed | 50 packages resolved; only setup/test dependencies installed |
 | Source compilation | Passed | Python syntax under `src/` and `tests/` |
 | MATLAB initializer | Passed in MATLAB R2026b (26.2.0.3386108) via `matlab -batch` | Loaded `configs/mvp.json`; Nyquist assertions passed |
@@ -23,7 +23,6 @@ filesystem access. This was an environment restriction, not a passing sandbox ru
 
 | Component | Required check | Current reason/status |
 |---|---|---|
-| MATLAB on PATH | Add `C:\Program Files\MATLAB\R2026b\bin` to PATH so `engine-diagnostics doctor` discovers it | Installed but not on PATH; invoked by full path |
 | Simulink-based products | Install and license-check before any dependency on Simulink, Powertrain, or AUTOSAR Blockset | Not installed on this machine |
 | Full Python stack | Run `uv sync --locked --all-extras --group quality`, then import scientific/dashboard packages | Full install stopped during slow downloads; extras are locked but not installed |
 | Ruff | Run `uv run --all-extras --group quality ruff check .` | Quality tool not installed or executed |
