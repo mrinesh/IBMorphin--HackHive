@@ -40,3 +40,6 @@ artifacts/logs/*
 !artifacts/logs/.gitkeep
 reports/generated/*
 !reports/generated/.gitkeep
+
+# graphify knowledge graph output
+graphify-out/
