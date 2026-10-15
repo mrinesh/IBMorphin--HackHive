@@ -1,0 +1,7 @@
+# Local replay demo: listen on this machine only and send no usage statistics.
+[server]
+address = "localhost"
+headless = true
+
+[browser]
+gatherUsageStats = false

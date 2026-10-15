@@ -3,13 +3,15 @@
 MATLAB/Python project for the Honeywell hackathon problem on engine signature
 extraction and pattern recognition.
 
-**Current stage: first integration batch.** A config-driven MATLAB generator
+**Current stage: first end-to-end milestone (checklist §3).** A config-driven MATLAB generator
 produces synchronized audio, vibration, and telemetry runs (13 × 20 s on 4
 virtual engines: normal-only, or normal then misfire, knock-like, or
 valve-clearance-like), and Python loads and
 validates them against the data contract. Signal-processing features, models,
-and the dashboard are subsequent milestones. No diagnostic performance has been
-measured.
+A first end-to-end path now exists: window features, a temporary
+baseline/SVM model trained on three virtual engines, packetized replay with
+persistent alerts, and a local Streamlit replay dashboard. Scores from the one
+held-out engine are pipeline checks, not diagnostic performance.
 
 ## Quick start
 
@@ -61,6 +63,10 @@ runs = generate_integration_batch();   % data/raw and evaluation_truth
 
 ```powershell
 uv run --all-extras engine-diagnostics validate-runs
+uv run --all-extras engine-diagnostics build-features
+uv run --all-extras engine-diagnostics train-temporary
+uv run --all-extras engine-diagnostics replay run_00012 --speed 1 --with-truth
+uv run --all-extras streamlit run dashboard/app.py
 uv run --all-extras pytest
 ```
 
@@ -104,10 +110,10 @@ validator checks schema, sampling limits, window relationships, and split counts
 
 ## Next milestone
 
-Implement the minimal Python feature path (RMS, envelope variation, band
-energies), a temporary baseline/classifier on separate runs, and a 1× replay of
-one run. Extend the integration batch (normal-only runs, more seeds) before
-training. The handoff is specified in [DATA_CONTRACT.md](docs/DATA_CONTRACT.md).
+Improve generator fidelity and decorrelate scenario RPM/load from the fault
+class (a telemetry-only model currently finds a shortcut), add robustness
+settings, then generate and freeze the engine-split dataset (checklist §4-§5).
+The handoff is specified in [DATA_CONTRACT.md](docs/DATA_CONTRACT.md).
 
 ## Project documents
 

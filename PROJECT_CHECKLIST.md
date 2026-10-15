@@ -60,7 +60,7 @@ Execution tracker. Checked items have been completed; unchecked items remain fut
 - [x] Implement a minimal common Python feature path using RMS, envelope variation, and broad band energies. `pipeline/features.py`, version 0.1.0, 31 features.
 - [x] Train a temporary baseline/classifier using separate runs; do not present early scores as final evaluation. `train-temporary`; engine_004 held out.
 - [x] Replay one run at 1× speed using trailing two-second windows and 0.5-second updates. `engine-diagnostics replay <run> --speed 1`.
-- [ ] Display telemetry, two waveforms, one spectrum, and actual computed predictions.
+- [x] Display telemetry, two waveforms, one spectrum, and actual computed predictions. `dashboard/app.py`.
 - [x] Confirm inference has no access to labels or hidden simulation variables. Tests check imports, feature names, and future-sample independence.
 - [x] Measure the first processing-latency estimate. ~12 ms p50 / 13 ms p95 per update (fast replay), 24/34 ms at 1× on the macOS dev machine.
 
@@ -177,17 +177,17 @@ Execution tracker. Checked items have been completed; unchecked items remain fut
 
 **Owner:** dashboard/integration lead. **Dependency:** Phase 3 shell; final integration depends on Phase 7. **Timing:** approximately 10% of effort; build in parallel where possible.
 
-- [ ] Show a permanent “SYNTHETIC DATA — RECORDED REPLAY” banner and run/model versions.
+- [x] Show a permanent “SYNTHETIC DATA — RECORDED REPLAY” banner and run/model versions.
 - [ ] Display RPM, load, throttle, coolant, fuel trims, and freshness/quality status.
 - [ ] Display raw audio and vibration with a short-time zoom.
 - [ ] Display spectra/PSD, a spectrogram, and an impulse envelope.
 - [ ] Show predicted condition, appropriately labeled confidence/score, and alert status.
-- [ ] Explain two or three feature deviations against a matched normal reference; avoid claiming a peak proves a fault.
-- [ ] Add prediction/fault timeline and a separate optional truth overlay.
+- [x] Explain two or three feature deviations against a matched normal reference; avoid claiming a peak proves a fault. Reference is training normal windows, not yet RPM/load-matched.
+- [x] Add prediction/fault timeline and a separate optional truth overlay.
 - [ ] Show the accelerated simulated degradation indicator without a remaining-life claim.
-- [ ] Add scenario selection, play/pause, restart, and seek with buffer/filter reset and warm-up.
-- [ ] Confirm current predictions never consume future replay samples.
-- [ ] Decimate display traces while preserving full-rate analytical processing.
+- [x] Add scenario selection, play/pause, restart, and seek with buffer/filter reset and warm-up.
+- [x] Confirm current predictions never consume future replay samples. `tests/test_replay.py`.
+- [x] Decimate display traces while preserving full-rate analytical processing.
 - [ ] Measure inference and display latency on the declared demo machine.
 - [ ] Rehearse normal → RPM/load change → fault onset → signature change → alert → evidence.
 
