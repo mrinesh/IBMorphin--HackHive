@@ -1,0 +1,36 @@
+{
+  "catalog_version": "1.0",
+  "note": "Example engine specifications for engine profiles. Values are illustrative, not manufacturer data; check them against the engine's documentation. Fields follow the engine section of schemas/project-config.schema.json (load bounds are fractions 0-1).",
+  "engines": [
+    {
+      "make": "DRIVEX Sim",
+      "model": "Synthetic 1.6 I4",
+      "engine": {"cylinders": 4, "strokes": 4, "displacement_l": 1.6, "firing_order": [1, 3, 4, 2],
+                 "rpm_min": 800, "rpm_max": 3500, "load_min": 0.2, "load_max": 0.8}
+    },
+    {
+      "make": "Toyota",
+      "model": "2ZR-FE 1.8 I4",
+      "engine": {"cylinders": 4, "strokes": 4, "displacement_l": 1.8, "firing_order": [1, 3, 4, 2],
+                 "rpm_min": 700, "rpm_max": 6400, "load_min": 0.1, "load_max": 0.9}
+    },
+    {
+      "make": "Honda",
+      "model": "K20 2.0 I4",
+      "engine": {"cylinders": 4, "strokes": 4, "displacement_l": 2.0, "firing_order": [1, 3, 4, 2],
+                 "rpm_min": 750, "rpm_max": 6800, "load_min": 0.1, "load_max": 0.9}
+    },
+    {
+      "make": "Volkswagen",
+      "model": "EA211 1.4 TSI I4",
+      "engine": {"cylinders": 4, "strokes": 4, "displacement_l": 1.4, "firing_order": [1, 3, 4, 2],
+                 "rpm_min": 700, "rpm_max": 6000, "load_min": 0.1, "load_max": 0.9}
+    },
+    {
+      "make": "Ford",
+      "model": "EcoBoost 1.0 I3",
+      "engine": {"cylinders": 3, "strokes": 4, "displacement_l": 1.0, "firing_order": [1, 2, 3],
+                 "rpm_min": 750, "rpm_max": 6300, "load_min": 0.1, "load_max": 0.9}
+    }
+  ]
+}
