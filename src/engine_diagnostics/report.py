@@ -112,6 +112,26 @@ def history_rows(runs: list[RunEntry]) -> list[dict[str, Any]]:
     return rows
 
 
+def localization_text(localization) -> str:
+    """'Misfire: cylinder 3 (confidence 0.98)' per fault; text summaries pass through."""
+    if not localization:
+        return "-"
+    if not isinstance(localization, dict):
+        return str(localization)
+    parts = []
+    for fault, where in localization.items():
+        if not isinstance(where, dict):
+            continue
+        confidence = where.get("confidence")
+        tail = f" (confidence {confidence:.2f})" if isinstance(confidence, int | float) else ""
+        if where.get("cylinder") is not None:
+            parts.append(f"{label(fault)}: cylinder {where['cylinder']}{tail}")
+        elif where.get("slot"):
+            parts.append(f"{label(fault)}: firing slot {where['slot']}, cylinder not "
+                         f"resolved{tail}")
+    return "; ".join(parts) or "-"
+
+
 def _current(run: RunEntry) -> dict[str, Any]:
     s = run.summary
     leads = s.get("warning_leads_s") or []
@@ -129,7 +149,7 @@ def _current(run: RunEntry) -> dict[str, Any]:
         "peak_anomaly": (f"{s['peak_anomaly_score']:.2f} (threshold "
                          f"{s.get('anomaly_threshold', float('nan')):.2f})"
                          if s.get("peak_anomaly_score") is not None else "-"),
-        "localization": s.get("localization") or "-",
+        "localization": localization_text(s.get("localization")),
         "model_version": s.get("model_version") or "-",
     }
 

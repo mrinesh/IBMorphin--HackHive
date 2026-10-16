@@ -366,6 +366,15 @@ def test_report_builds_without_calling_gemini(store, engine, monkeypatch):
     assert "lab_injection" not in json.dumps(rep.__dict__, default=str)
 
 
+def test_report_localization_is_text():
+    loc = {"misfire": {"cylinder": 3, "confidence": 0.98},
+           "knock_like": {"cylinder": None, "slot": "C", "confidence": 1.0}}
+    assert R.localization_text(loc) == ("Misfire: cylinder 3 (confidence 0.98); Knock-like: "
+                                        "firing slot C, cylinder not resolved (confidence 1.00)")
+    assert R.localization_text(None) == "-"
+    assert R.localization_text("cylinder 2") == "cylinder 2"
+
+
 def pdf_pages(data: bytes) -> int:
     return len(re.findall(rb"/Type /Page\b", data))
 
