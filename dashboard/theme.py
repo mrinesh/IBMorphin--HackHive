@@ -13,20 +13,25 @@ import plotly.graph_objects as go
 import plotly.io as pio
 
 TOKENS = {
-    "bg": "#070B14",
-    "surface": "rgba(15, 23, 42, 0.72)",
-    "surface_solid": "#0F172A",
-    "line": "rgba(34, 211, 238, 0.28)",
-    "grid": "rgba(148, 163, 184, 0.10)",
-    "text": "#E6EDF7",
-    "muted": "#94A3B8",
-    "cyan": "#22D3EE",
+    "bg": "#0E1116",
+    "bg2": "#12161C",
+    "surface": "#161B22",
+    "surface_solid": "#161B22",
+    "elevated": "#1D232C",
+    "line": "#2B333E",
+    "grid": "rgba(174, 180, 190, 0.12)",
+    "text": "#E6E8EB",
+    "muted": "#AEB4BE",
+    "dim": "#8B929C",
+    "cyan": "#00E5E5",
+    "cyan_soft": "#5EEAEA",
+    "cyan_hover": "#35F4F4",
     "magenta": "#F472B6",
     "violet": "#A78BFA",
-    "amber": "#FBBF24",
-    "rose": "#FB7185",
-    "green": "#4ADE80",
-    "slate": "#8B9BB4",
+    "amber": "#F59E0B",
+    "rose": "#F05252",
+    "green": "#22C55E",
+    "slate": "#9AA1AB",
 }
 
 # Lucide icon paths (24x24, 2px stroke), inlined so the dashboard works offline.
@@ -98,21 +103,24 @@ def register_plotly_template() -> None:
     if pio.templates.default == "engine_hud":
         return
     axis = {"gridcolor": TOKENS["grid"], "zerolinecolor": TOKENS["grid"],
-            "linecolor": "rgba(148, 163, 184, 0.25)", "tickfont": {"color": TOKENS["muted"]},
+            "linecolor": TOKENS["line"],
+            "tickfont": {"family": "JetBrains Mono, monospace", "color": TOKENS["muted"],
+                         "size": 11},
             "title": {"font": {"color": TOKENS["muted"]}}}
     overrides = go.layout.Template(layout={
         "paper_bgcolor": "rgba(0,0,0,0)",
-        "plot_bgcolor": "rgba(7, 11, 20, 0.55)",
-        "font": {"family": "DM Sans, system-ui, sans-serif", "color": TOKENS["text"],
-                 "size": 12},
-        "title": {"font": {"family": "Sora, DM Sans, sans-serif", "size": 14,
+        "plot_bgcolor": TOKENS["surface"],
+        "font": {"family": "Inter, system-ui, sans-serif", "color": TOKENS["text"],
+                 "size": 13},
+        "title": {"font": {"family": "Space Grotesk, Inter, sans-serif", "size": 15,
                            "color": TOKENS["text"]}, "x": 0.01},
         "colorway": [TOKENS["cyan"], TOKENS["magenta"], TOKENS["violet"], TOKENS["amber"],
                      TOKENS["green"], TOKENS["rose"]],
         "xaxis": axis, "yaxis": axis,
         "legend": {"bgcolor": "rgba(0,0,0,0)", "font": {"color": TOKENS["muted"]}},
-        "hoverlabel": {"bgcolor": TOKENS["surface_solid"], "bordercolor": TOKENS["cyan"],
-                       "font": {"family": "DM Sans, sans-serif", "color": TOKENS["text"]}},
+        "hoverlabel": {"bgcolor": TOKENS["elevated"], "bordercolor": TOKENS["line"],
+                       "font": {"family": "JetBrains Mono, monospace", "color": TOKENS["text"],
+                                "size": 12}},
         "annotationdefaults": {"font": {"color": TOKENS["muted"]}},
     })
     pio.templates["engine_hud"] = pio.templates.merge_templates(pio.templates["plotly_dark"],
@@ -120,13 +128,13 @@ def register_plotly_template() -> None:
     pio.templates.default = "engine_hud"
 
 
-_CSS_VARS = ("bg", "surface", "line", "text", "muted", "cyan", "magenta", "rose", "green",
-             "amber", "violet")
+_CSS_VARS = ("bg", "bg2", "surface", "elevated", "line", "text", "muted", "dim", "cyan",
+             "cyan_soft", "cyan_hover", "magenta", "rose", "green", "amber", "violet")
 
 
 def css() -> str:
     """<style> block: token variables from TOKENS, then dashboard/hud.css."""
-    variables = "".join(f"--hud-{name}: {TOKENS[name]};" for name in _CSS_VARS)
+    variables = "".join(f"--hud-{name.replace('_', '-')}: {TOKENS[name]};" for name in _CSS_VARS)
     sheet = (Path(__file__).with_name("hud.css")).read_text(encoding="utf-8")
     return f"<style>:root {{{variables}}}\n{sheet}</style>"
 
@@ -137,10 +145,19 @@ def banner_html() -> str:
             'show real-engine accuracy.</small></div>')
 
 
+def wordmark_html(size: str = "") -> str:
+    """DRIVEX wordmark: DRIVE in off-white, the final X in cyan."""
+    return (f'<span class="drivex {size}" role="img" aria-label="DRIVEX">'
+            '<span aria-hidden="true">DRIVE<span class="x">X</span></span></span>')
+
+
 def brand_html() -> str:
-    return ('<div class="hud-brand"><h1 class="name">Engine<span class="accent">Sense</span></h1>'
-            '<div class="tag">Listens to engine sound, vibration and sensor data to spot '
-            'faults early</div></div>')
+    """Header: DRIVEX brand, then EngineSense as the diagnostics product (page h1)."""
+    return ('<header class="hud-brand">' + wordmark_html()
+            + '<span class="divider" aria-hidden="true"></span>'
+            '<div class="product"><h1 class="name">EngineSense</h1>'
+            '<div class="tag">Engine diagnostics from sound, vibration and sensor data</div>'
+            '</div></header>')
 
 
 def _bar(fraction: float, color: str, marker: float | None = None) -> str:

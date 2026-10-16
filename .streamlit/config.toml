@@ -12,57 +12,75 @@ toolbarMode = "minimal"
 [browser]
 gatherUsageStats = false
 
-# Dark soft-UI theme. Tokens mirror dashboard/theme.py.
+# DRIVEX theme, tuned for comfortable reading: charcoal (not pure black) surfaces,
+# off-white text, cyan for active states. Tokens mirror dashboard/theme.py.
 [theme]
 base = "dark"
-primaryColor = "#22D3EE"
-backgroundColor = "#070B14"
-secondaryBackgroundColor = "#111A2C"
-textColor = "#E6EDF7"
-linkColor = "#22D3EE"
-borderColor = "#1E293B"
+primaryColor = "#00E5E5"
+backgroundColor = "#0E1116"
+secondaryBackgroundColor = "#1D232C"
+textColor = "#E6E8EB"
+linkColor = "#5EEAEA"
+borderColor = "#2B333E"
 showWidgetBorder = true
-baseRadius = "12px"
+baseRadius = "10px"
 baseFontSize = 15
-font = "DM Sans"
-headingFont = "Sora"
+font = "Inter"
+headingFont = "Space Grotesk"
+codeFont = "JetBrains Mono"
 headingFontWeights = [700, 600, 600, 600, 600, 600]
-codeBackgroundColor = "#0B1324"
-dataframeHeaderBackgroundColor = "#0F172A"
-redColor = "#F87171"
-greenColor = "#4ADE80"
-chartCategoricalColors = ["#22D3EE", "#F472B6", "#A78BFA", "#FBBF24", "#4ADE80", "#FB7185"]
+codeBackgroundColor = "#1D232C"
+dataframeHeaderBackgroundColor = "#1D232C"
+redColor = "#EF4444"
+greenColor = "#22C55E"
+orangeColor = "#F59E0B"
+chartCategoricalColors = ["#00E5E5", "#F472B6", "#A78BFA", "#F59E0B", "#22C55E", "#EF4444"]
 
 [theme.sidebar]
-backgroundColor = "#0A1120"
-secondaryBackgroundColor = "#111A2C"
+backgroundColor = "#12161C"
+secondaryBackgroundColor = "#1D232C"
 
 [[theme.fontFaces]]
-family = "DM Sans"
-url = "app/static/fonts/dm-sans-latin-400-normal.woff2"
+family = "Inter"
+url = "app/static/fonts/inter-latin-400-normal.woff2"
 weight = 400
 
 [[theme.fontFaces]]
-family = "DM Sans"
-url = "app/static/fonts/dm-sans-latin-500-normal.woff2"
+family = "Inter"
+url = "app/static/fonts/inter-latin-500-normal.woff2"
 weight = 500
 
 [[theme.fontFaces]]
-family = "DM Sans"
-url = "app/static/fonts/dm-sans-latin-600-normal.woff2"
+family = "Inter"
+url = "app/static/fonts/inter-latin-600-normal.woff2"
 weight = 600
 
 [[theme.fontFaces]]
-family = "DM Sans"
-url = "app/static/fonts/dm-sans-latin-700-normal.woff2"
-weight = 700
+family = "Space Grotesk"
+url = "app/static/fonts/space-grotesk-latin-500-normal.woff2"
+weight = 500
 
 [[theme.fontFaces]]
-family = "Sora"
-url = "app/static/fonts/sora-latin-600-normal.woff2"
+family = "Space Grotesk"
+url = "app/static/fonts/space-grotesk-latin-600-normal.woff2"
 weight = 600
 
 [[theme.fontFaces]]
-family = "Sora"
-url = "app/static/fonts/sora-latin-700-normal.woff2"
+family = "Space Grotesk"
+url = "app/static/fonts/space-grotesk-latin-700-normal.woff2"
 weight = 700
+
+[[theme.fontFaces]]
+family = "JetBrains Mono"
+url = "app/static/fonts/jetbrains-mono-latin-400-normal.woff2"
+weight = 400
+
+[[theme.fontFaces]]
+family = "JetBrains Mono"
+url = "app/static/fonts/jetbrains-mono-latin-500-normal.woff2"
+weight = 500
+
+[[theme.fontFaces]]
+family = "JetBrains Mono"
+url = "app/static/fonts/jetbrains-mono-latin-600-normal.woff2"
+weight = 600

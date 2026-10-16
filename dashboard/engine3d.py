@@ -38,6 +38,10 @@ def scene_state(record: dict[str, Any] | None, model, *, t_now: float, playing: 
                              "truth_cylinder": None}
     if record is not None:
         quality, accepted, alert = record["quality"], record["accepted"], record.get("alert")
+        if "+" in (alert or ""):  # v2 fault set: animate the first fault
+            alert = alert.split("+")[0]
+        if "+" in (accepted or ""):
+            accepted = accepted.split("+")[0]
         effect = alert if alert in FAULTS else accepted if accepted in FAULTS else None
         if effect and effect == accepted and quality == "ok":
             if "probability" in record:
@@ -53,7 +57,8 @@ def scene_state(record: dict[str, Any] | None, model, *, t_now: float, playing: 
         elif accepted in FAULTS:
             confidence = (f" · confidence {record['probability']:.2f}"
                           if "probability" in record else "")
-            status = f"Model: {CLASS_META[accepted]['label']}{confidence}"
+            label = explain.names(record["accepted"])
+            status = f"Model: {label}{confidence}"
         else:
             status = f"Model: {class_meta(accepted)['label']}"
         if alert and alert != accepted:
@@ -101,44 +106,43 @@ _HTML = """
 _CSS = """
 .engine3d-root {
   position: relative; width: 100%; height: clamp(300px, 46vw, 640px);
-  border-radius: 16px; overflow: hidden; outline: none;
-  border: 1px solid rgba(148, 163, 184, 0.13);
-  box-shadow: 0 14px 34px -20px rgba(0, 0, 0, 0.75);
-  background: radial-gradient(120% 90% at 50% 20%, #0d1b2e 0%, #070b14 70%);
+  border-radius: 12px; overflow: hidden; outline: none;
+  border: 1px solid #2b333e;
+  background: radial-gradient(120% 90% at 50% 25%, #1a212b 0%, #10141a 75%);
 }
-.engine3d-root:focus-visible { box-shadow: inset 0 0 0 2px #22d3ee; }
+.engine3d-root:focus-visible { box-shadow: inset 0 0 0 2px #00e5e5; }
 .engine3d-root canvas { display: block; width: 100%; height: 100%; touch-action: none; }
 .engine3d-hud {
   position: absolute; left: 16px; top: 14px; right: 16px; pointer-events: none;
-  font: 500 13px/1.5 "DM Sans", system-ui, sans-serif; color: #94a3b8;
+  font: 500 13px/1.5 "Inter", system-ui, sans-serif; color: #aeb4be;
 }
 .engine3d-controls {
   position: absolute; right: 10px; bottom: 10px; display: flex; gap: 6px; flex-wrap: wrap;
   justify-content: flex-end;
 }
 .engine3d-controls button {
-  min-height: 38px; min-width: 44px; padding: 0 16px; border-radius: 999px; cursor: pointer;
-  font: 600 13px/1 "DM Sans", system-ui, sans-serif;
-  color: #e6edf7; background: rgba(7, 11, 20, 0.78); border: 1px solid rgba(34, 211, 238, 0.4);
+  min-height: 38px; min-width: 44px; padding: 0 16px; border-radius: 8px; cursor: pointer;
+  font: 600 13px/1 "Inter", system-ui, sans-serif;
+  color: #e6e8eb; background: rgba(29, 35, 44, 0.92); border: 1px solid #2b333e;
   transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
   touch-action: manipulation;
 }
-.engine3d-controls button:hover { border-color: #22d3ee; color: #22d3ee; }
+.engine3d-controls button:hover { border-color: #00e5e5; color: #00e5e5; }
 .engine3d-controls button[aria-pressed="true"] {
-  background: rgba(34, 211, 238, 0.16); border-color: #22d3ee; color: #22d3ee;
+  background: rgba(0, 229, 229, 0.12); border-color: #00e5e5; color: #00e5e5;
 }
-.engine3d-controls button:focus-visible { outline: 2px solid #22d3ee; outline-offset: 2px; }
+.engine3d-controls button:focus-visible { outline: 2px solid #00e5e5; outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) {
   .engine3d-controls button { transition: none; }
 }
 .engine3d-fallback[hidden], .engine3d-controls[hidden] { display: none; }
 .engine3d-fallback-status {
-  font: 500 13px/1.5 "DM Sans", system-ui, sans-serif; color: #94a3b8;
+  font: 500 13px/1.5 "Inter", system-ui, sans-serif; color: #aeb4be;
 }
 .engine3d-fallback {
   position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
-  justify-content: center; gap: 8px; padding: 16px; background: #070b14;
-  color: #e6edf7; font: 14px/1.5 "DM Sans", system-ui, sans-serif; text-align: center;
+  justify-content: center; gap: 8px; padding: 16px; background: #10141a;
+  color: #e6e8eb; font: 14px/1.5 "Inter", system-ui, sans-serif; text-align: center;
 }
 """
 
