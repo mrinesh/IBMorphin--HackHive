@@ -38,7 +38,10 @@ if str(ROOT) not in sys.path:  # `dashboard` package (theme, explain) for `strea
 from dashboard import engine3d, explain, sensors, theme  # noqa: E402
 from engine_diagnostics.config import load_config  # noqa: E402
 from engine_diagnostics.data.run_io import find_runs, load_run, validate_run  # noqa: E402
+from engine_diagnostics.diagnosis import DISCLAIMER as DIAGNOSIS_DISCLAIMER  # noqa: E402
+from engine_diagnostics.diagnosis import run_diagnosis  # noqa: E402
 from engine_diagnostics.history import (  # noqa: E402
+    Diagnosis,
     HistoryStore,
     Profile,
     raw_from_bundle,
@@ -1360,8 +1363,103 @@ def engine_history_panel(engine: Profile) -> None:
             st.caption("No notes yet.")
 
 
+URGENCY_TITLES = {"stop_now": ":material/dangerous: Stop now",
+                  "soon": ":material/build: Soon", "monitor": ":material/visibility: Monitor"}
+EVIDENCE_KINDS = {"crank": "crank speed", "thermal": "cylinder temperatures",
+                  "fuel": "fuel trims", "spectrum": "sound spectrum"}
+
+
+def evidence_label(item: str) -> str:
+    """Readable name of a context ID (R5, N3, S5-crank, T-misfire, SPEC)."""
+    if item == "SPEC":
+        return "engine specs"
+    if item.startswith("T-"):
+        return f"{label(item[2:]) if item[2:] in FAULT_COLORS else item[2:]} trend across runs"
+    if item.startswith("S") and "-" in item:
+        run, kind = item[1:].split("-", 1)
+        return f"run #{run} {EVIDENCE_KINDS.get(kind, kind)}"
+    if item.startswith("R"):
+        return f"run #{item[1:]}"
+    if item.startswith("N"):
+        return f"note #{item[1:]}"
+    return item
+
+
+def show_diagnosis(saved: Diagnosis) -> None:
+    """Summary, ranked causes with evidence, actions by urgency, data gaps, disclaimer."""
+    out = saved.output
+    if saved.fallback:
+        st.info(f"Basic version. {saved.fallback_reason or ''}", icon=":material/info:")
+    st.caption(f"{saved.created_utc[:16].replace('T', ' ')} UTC · {saved.model}"
+               + (f" · saved runs up to #{saved.latest_run_id}" if saved.latest_run_id else ""))
+    st.markdown(out["summary"])
+    st.markdown("**Possible causes** (most likely first)")
+    if not out["causes"]:
+        st.caption("No cause is supported by the saved data.")
+    for k, cause in enumerate(out["causes"], 1):
+        with st.container(border=True):
+            kind = "detected by the model" if cause["kind"] == "detected" else "suggested"
+            st.markdown(f"**{k}. {cause['title']}** · {kind} · "
+                        f"confidence **{cause['confidence']}**")
+            st.markdown(cause["reasoning"])
+            if cause.get("confidence_notes"):
+                st.caption(cause["confidence_notes"])
+            st.caption("Evidence: " + ", ".join(
+                f"{evidence_label(i)} ({i})" for i in cause["evidence_ids"]))
+            if cause.get("unverified_ids"):
+                st.caption(":material/warning: Also cited but not found in this engine's "
+                           "data, so ignored: " + ", ".join(cause["unverified_ids"]))
+    if out.get("dropped_causes"):
+        st.warning(f"{len(out['dropped_causes'])} cause(s) were removed because they cited "
+                   "evidence that is not in this engine's data.", icon=":material/filter_alt:")
+    st.markdown("**Recommended actions**")
+    for urgency, title in URGENCY_TITLES.items():
+        steps = [a for a in out["actions"] if a["urgency"] == urgency]
+        if steps:
+            st.markdown(f"{title}\n" + "\n".join(
+                f"- {a['step']}" + (f" _(for: {', '.join(a['addresses'])})_"
+                                    if a["addresses"] else "") for a in steps))
+    if out["data_gaps"]:
+        st.markdown("**Data gaps**\n" + "\n".join(f"- {g}" for g in out["data_gaps"]))
+    st.caption(DIAGNOSIS_DISCLAIMER)
+
+
+def diagnosis_panel(engine: Profile) -> None:
+    """Diagnose on demand from the engine's history; saved diagnoses can be reopened."""
+    state = st.session_state
+    key = f"diagnosis_pick_{engine.id}"
+    st.caption("Ranks possible causes and next steps from this engine's saved runs, notes and "
+               "signal summaries. Save the current replay first to include it.")
+    if st.button("Diagnose", type="primary", key=f"diagnose_{engine.id}",
+                 icon=":material/troubleshoot:"):
+        with st.spinner("Looking for possible causes in this engine's history..."):
+            try:
+                state[f"diagnosis_new_{engine.id}"] = run_diagnosis(store, engine, config).id
+            except Exception as error:  # noqa: BLE001 - never show a stack trace in the demo
+                st.error(f"Could not diagnose this engine ({type(error).__name__}). Its saved "
+                         "history may be incomplete; the rest of the dashboard still works.")
+    diagnoses = {d.id: d for d in store.list_diagnoses(engine.id)}
+    if not diagnoses:
+        st.caption("No diagnosis yet for this engine.")
+        return
+    new = state.pop(f"diagnosis_new_{engine.id}", None)
+    if new in diagnoses or state.get(key) not in diagnoses:
+        state[key] = new if new in diagnoses else next(iter(diagnoses))
+    pick = st.selectbox(
+        "Saved diagnoses", list(diagnoses), key=key,
+        format_func=lambda d: f"#{d} · {diagnoses[d].created_utc[:16].replace('T', ' ')} UTC · "
+                              + ("basic" if diagnoses[d].fallback else diagnoses[d].model))
+    show_diagnosis(diagnoses[pick])
+
+
+def engine_tools_panel(engine: Profile) -> None:
+    st.subheader(f"Possible causes · {engine.label}")
+    diagnosis_panel(engine)
+
+
 if profile:
     engine_history_panel(profile)
+    engine_tools_panel(profile)
 
 
 def cross_engine_panel():

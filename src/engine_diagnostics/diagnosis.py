@@ -9,7 +9,8 @@ limit (429) or invalid output, `diagnose` returns the rule-based diagnosis from
 engine_diagnostics.diagnosis_fallback in the same schema, marked as the basic version.
 
 The model name and limits live in configs/diagnosis.json; the API key is read from
-the GEMINI_API_KEY environment variable only.
+the GEMINI_API_KEY environment variable, or from a GEMINI_API_KEY= line in the
+repository's git-ignored .env file (see .env.example).
 """
 
 import json
@@ -25,6 +26,7 @@ from engine_diagnostics.history import Diagnosis, HistoryStore, Profile
 ROOT = Path(__file__).resolve().parents[2]
 SETTINGS_PATH = ROOT / "configs/diagnosis.json"
 API_KEY_ENV = "GEMINI_API_KEY"
+ENV_FILE = ROOT / ".env"
 FALLBACK_MODEL = "rule-based (basic)"
 KINDS = ("detected", "suggested")
 CONFIDENCES = ("high", "medium", "low")
@@ -143,9 +145,22 @@ class DiagnosisError(Exception):
 
 
 # -- Gemini -------------------------------------------------------------------------------
+def api_key(env_file: Path | None = None) -> str:
+    """GEMINI_API_KEY from the environment, else from the repository's .env (git-ignored)."""
+    key = os.environ.get(API_KEY_ENV, "").strip()
+    env_file = ENV_FILE if env_file is None else env_file
+    if key or not env_file.is_file():
+        return key
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        name, sep, value = line.strip().partition("=")
+        if sep and name.strip().removeprefix("export ").strip() == API_KEY_ENV:
+            return value.strip().strip("'\"")
+    return ""
+
+
 def make_client(settings: DiagnosisSettings):
     """google-genai client with the key from GEMINI_API_KEY, the timeout, and no retries."""
-    key = os.environ.get(API_KEY_ENV, "").strip()
+    key = api_key()
     if not key:
         raise DiagnosisError("no_key")
     try:
