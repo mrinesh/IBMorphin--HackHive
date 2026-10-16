@@ -2,7 +2,8 @@ function report = validate_run_matlab(runDir, truthPath)
 %VALIDATE_RUN_MATLAB Sanity checks on one exported run and its private truth.
 %   report = validate_run_matlab('data/raw/run_00001', ...
 %       'evaluation_truth/run_00001_events.json')
-%   Checks lengths, dtype, finite values, clipping, firing-event rate against
+%   Checks lengths, dtype, finite values, clipping, cam_sync phase lock to
+%   cylinder 1 combustion (contract 1.1), firing-event rate against
 %   observed RPM, and, for each fault in the run, that its events start only
 %   after its own onset and that its intended signature is present (knock:
 %   5-9 kHz energy after knocked vs unknocked combustion must exceed 1.1x;
@@ -63,6 +64,11 @@ function report = validate_run_matlab(runDir, truthPath)
     end
 
     cylinders = [truth.events.cylinder]';
+    if isfield(w, 'cam_sync_s')  % data contract 1.1 phase reference
+        issues = [issues; check_cam_sync(w.cam_sync_s, metadata, config, rpm, duration, ...
+            times(kinds == "combustion" & cylinders == 1))];
+        metrics.cam_sync_pulses = numel(w.cam_sync_s);
+    end
     faults = truth_faults(truth);
     if isfield(truth.events, 'fault')
         eventFault = string({truth.events.fault})';
@@ -133,6 +139,42 @@ function report = validate_run_matlab(runDir, truthPath)
     else
         fprintf('%s: FAILED\n', metadata.run_id);
         fprintf('  %s\n', issues);
+    end
+end
+
+function issues = check_cam_sync(pulses, metadata, config, rpm, duration, cylinder1)
+    % One pulse per 720 degrees, at a fixed crank phase before cylinder 1's
+    % combustion: the phase from each pulse to the next cylinder-1 combustion
+    % must be constant and match cam_sync_angle_deg (plus the small combustion
+    % offset after TDC).
+    issues = strings(0, 1);
+    pulses = pulses(:);
+    info = metadata.streams.cam_sync;
+    if numel(pulses) ~= info.n_pulses || info.angle_deg ~= config.engine.cam_sync_angle_deg
+        issues(end + 1) = "cam_sync: pulse count or angle disagrees with metadata/config";
+        return
+    end
+    if any(diff(pulses) <= 0) || any(pulses < 0 | pulses >= duration)
+        issues(end + 1) = "cam_sync: pulses not increasing inside [0, duration)";
+        return
+    end
+    cycles = trapz([rpm.t_s; duration], [rpm.value; rpm.value(end)]) / 120;
+    if abs(numel(pulses) - cycles) > 0.02 * cycles + 1
+        issues(end + 1) = sprintf("cam_sync: %d pulses vs %.1f cycles from RPM", ...
+            numel(pulses), cycles);
+    end
+    rpmAt = interp1(rpm.t_s, rpm.value, pulses, 'linear', 'extrap');
+    phase = nan(size(pulses));
+    for k = 1:numel(pulses)
+        next = cylinder1(find(cylinder1 > pulses(k), 1));
+        if ~isempty(next) && next - pulses(k) < 120 / rpmAt(k)
+            phase(k) = 6 * rpmAt(k) * (next - pulses(k));
+        end
+    end
+    phase = phase(~isnan(phase));
+    expected = mod(-config.engine.cam_sync_angle_deg, 720);
+    if isempty(phase) || std(phase) > 3 || abs(mean(phase) - expected) > 30
+        issues(end + 1) = "cam_sync: pulses are not phase-locked to cylinder 1 combustion";
     end
 end
 

@@ -59,6 +59,8 @@ The system reliably separates healthy operation from strong faults and explains 
 
 **Simultaneous faults (v2, §11.7).** A second MATLAB dataset, `core_v2`, puts 0, 1, 2, or all 3 faults in the same run, each with its own onset, cylinder, and severity. A v2 model with one calibrated detector and one alert per fault, plus new crank-synchronous vibration features, scored on four new held-out engines: window macro-F1 0.884 (the single-label v1 model scores 0.621 on the same windows and can never name two faults), every sustained fault alerted in 10 of 12 two-fault runs and 4 of 4 three-fault runs, and misfire/knock/valve sustained recall 0.96/1.00/0.94. Knock false alerts (0.30 per fault-free minute) exceeded the 0.2 goal, valve window recall is 0.62, and the mild challenge combinations are largely missed.
 
+**Which cylinder (§11.8).** A cam phase reference (one pulse per 720°, data contract 1.1) lets every detected stroke be attributed to its cylinder by crank angle; a rotation-equivariant localizer then names the cylinder of each alert from per-cylinder vibration signatures. On the held-out core_v2 test engines it named the right cylinder in 71 of 71 true alert episodes, at the alert decision itself; in the mild multi-fault challenge runs the first answer was right in 16 of 22 episodes.
+
 ## 2. Problem and objectives
 
 Engine signals change with speed, load, temperature, transmission path, and sensor placement, so a louder signal or a new spectral peak is not by itself a diagnosis. The problem statement asks for multiple sensor streams to be analyzed for recognizable signatures, normal baselines, fault recognition, and wear-related analysis, presented through a dashboard.
@@ -340,6 +342,24 @@ Every sustained fault was alerted in 12 of 12 one-fault runs, 10 of 12 two-fault
 
 **Challenge (16 mild multi-fault runs: severity 0.15–0.3, reserved RPM bands, 2× noise).** Window macro-F1 0.444; misfire window recall 0.96 but knock 0.03 and valve 0.64 with many false positives; every sustained fault alerted in 1 of 12 two-fault runs and 0 of 4 three-fault runs. As with v1, mild faults under unseen conditions are not handled.
 
+### 11.8 Cylinder localization (data contract 1.1)
+
+**Why the old data could not name the cylinder.** One microphone and one accelerometer hear every cylinder through the same path, the crank phase at t = 0 is random per run, and RPM telemetry carries speed, not angle. A one-cylinder fault was visible as "one of the four firing slots" (the stroke-synchronous features already measured that), but which slot was cylinder 1 was unknowable.
+
+**Reference.** The generator now emits a cam position pulse once per 720° at a configurable angle after cylinder 1's firing TDC (`engine.cam_sync_angle_deg`, 0), on the vibration clock, as an engine controller's cam sensor does. It uses no random numbers, so all 558 regenerated runs are otherwise bit-identical and the v1/v2 detectors and their reports remain valid. MATLAB checks that the pulses are phase-locked to cylinder-1 combustion (558/558).
+
+**Attribution and signature.** Each stroke onset found by the stroke-synchronous features is placed in crank angle between the window's cam pulses (gaps several local cycles long count as missing pulses) and assigned the nearest firing-order TDC; on five runs every one of 8,337 strokes matched the truth cylinder. For each cylinder the signature is the log ratio of its mean stroke energy to the median cylinder in three bands (combustion 300–1000 Hz, mid 2–5 kHz, high 5–9 kHz) and six crank sectors. A misfire shows as a combustion-band deficit on its cylinder, knock as high-band excess just after its combustion, and a valve fault on cylinder c in the intervals of the cylinders that fire when its valves close (two and three positions later).
+
+**Localizer (`localizer-1.0.0`).** One conditional-logit scorer per fault: each candidate cylinder's vector is the signature rotated so the candidate comes first (plus absolute values), scored with one standardized L2 logistic regression, softmaxed over the four candidates with a temperature fitted on the calibration engines. Equal weights for every rotation make it rotation-equivariant, so it also applies to relative slots. C was chosen on the tuning engines, then the minimum confidence for 95% accepted accuracy (0.4 for every fault). At runtime the per-window probabilities of each detected fault are averaged (EMA 0.35) and a cylinder is named after two windows; localization never raises, holds, or clears an alert. Without the reference (contract 1.0 data) slots are aligned across overlapping windows and reported as A–D, never as cylinder numbers.
+
+| Held-out test engines (scored once) | Misfire | Knock-like | Valve-clearance-like |
+|---|---:|---:|---:|
+| Windows with the fault, top-1 cylinder | 360/360 | 323/323 | 527/547 (0.963) |
+| Core replay: true alert episodes localized correctly | 24/24 | 23/23 | 24/24 |
+| Challenge replay: first answer correct (final) | 8/10 (10/10) | 2/3 (2/3) | 6/9 (8/9) |
+
+Every core episode was localized at the decision that raised the alert. Answers are judged only while the fault is active; a first scoring that also judged detector false alerts raised before onset gave challenge 0.58/0.60/0.50 (the report keeps both). Processing stays at 39 ms p95 per decision. The weak cases are interacting faults: a faint knock with a valve fault on another cylinder (whose impacts land in a third cylinder's firing interval) and mild valve faults under 2× noise.
+
 ## 12. Limitations and risks
 
 - **Synthetic only.** The generator is not a validated digital twin; audio and vibration units are nominal. High scores here do not transfer to a real engine without real measurements.
@@ -347,7 +367,8 @@ Every sustained fault was alerted in 12 of 12 one-fault runs, 10 of 12 two-fault
 - **Mild faults and new conditions.** Low-severity knock (as low as 1.14× event-locked energy) and the challenge conditions are largely missed.
 - **Simultaneous faults (v2).** Valve detection is the weak link (window recall 0.62), knock false alerts exceed the goal on the test engines (0.30 per fault-free minute, 4 episodes), and a fault on the same cylinder as another can trigger the wrong detector. Only one fault interaction (misfire suppresses knock) is modeled.
 - **Small test set.** Four test engines and 7.8 normal minutes; the zero-false-alert result has a small denominator. Windows are correlated and are not independent trials.
-- **Low-rate RPM.** 50 Hz RPM supports context and firing-period estimates, not crankshaft-acceleration misfire diagnosis or cylinder identification.
+- **Cylinder localization depends on the reference.** It assumes a healthy cam sensor at a known mounting angle and consistent sensor delays; cam faults are only unit-tested, and a wrong `cam_sync_angle_deg` shifts every answer by whole cylinders.
+- **Low-rate RPM.** 50 Hz RPM supports context and firing-period estimates, not crankshaft-acceleration misfire diagnosis. Cylinder identification relies on the cam phase reference (§11.8); recordings without it (contract 1.0) can only place a fault in a relative firing slot.
 - **Not implemented:** clock offset/drift handling in replay, a separate unsupported-operation state, engine-resampled confidence intervals.
 - **Wear.** The degradation indicator follows an accelerated simulated ramp; it is not a wear measurement or remaining-life estimate.
 
@@ -384,8 +405,9 @@ uv run --all-extras --group quality pytest
 
 # Multi-fault dataset and v2 model
 #   MATLAB: addpath('matlab'); generate_dataset(Config="configs/core_v2.json");   % ~38 min
-scripts/run_pipeline_v2.sh            # validate, build features, train-multi
-uv run --all-extras engine-diagnostics evaluate-multi   # scores the test engines once
+scripts/run_pipeline_v2.sh            # validate, build features, train-multi, train-localizer
+uv run --all-extras engine-diagnostics evaluate-multi          # scores the test engines once
+uv run --all-extras engine-diagnostics evaluate-localization   # cylinder localization, once
 ```
 
 Generated data, models, and reports are excluded from Git and are reproduced by these commands; the manifest and model hashes above identify the exact versions reported.

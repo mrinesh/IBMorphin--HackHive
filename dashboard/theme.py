@@ -72,6 +72,12 @@ MODALITY_COLORS = {"audio": TOKENS["magenta"], "vibration": TOKENS["cyan"],
                    "envelope": TOKENS["violet"]}
 
 
+# One accent per telemetry card (RPM, load, throttle, coolant, two fuel trims) so
+# each signal is easy to find; the label always names it, so color is not the only cue.
+TELEMETRY_ACCENTS = [TOKENS["cyan"], TOKENS["violet"], TOKENS["magenta"], TOKENS["amber"],
+                     TOKENS["green"], "#60A5FA"]
+
+
 def _svg_uri(svg: str) -> str:
     return "data:image/svg+xml," + quote(svg, safe="")
 
@@ -245,7 +251,7 @@ def _about_html(about: dict | None) -> str:
             f"{checks}</div>")
 
 
-def sparkline_svg(values: list[float]) -> str:
+def sparkline_svg(values: list[float], color: str = TOKENS["cyan"]) -> str:
     """Recent-history sparkline as a background image (inline <svg> is sanitized)."""
     if len(values) < 2:
         return '<span class="spark" aria-hidden="true"></span>'
@@ -256,7 +262,7 @@ def sparkline_svg(values: list[float]) -> str:
                       for k, v in enumerate(values))
     svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 24" '
            f'preserveAspectRatio="none"><polyline points="{points}" fill="none" '
-           f'stroke="{TOKENS["cyan"]}" stroke-width="1.5" '
+           f'stroke="{color}" stroke-width="1.6" '
            'vector-effect="non-scaling-stroke"/></svg>')
     return (f'<span class="spark" aria-hidden="true" '
             f"style=\"background-image:url('{_svg_uri(svg)}')\"></span>")
@@ -265,7 +271,8 @@ def sparkline_svg(values: list[float]) -> str:
 def telemetry_cards_html(cards: list[dict]) -> str:
     """Cards of last received telemetry values: label, value, unit, freshness, sparkline."""
     items = []
-    for card in cards:
+    for k, card in enumerate(cards):
+        accent = TELEMETRY_ACCENTS[k % len(TELEMETRY_ACCENTS)]
         status = card["status"]
         css = {"fresh": "ok", "STALE": "stale"}.get(status, "none")
         text = {"fresh": "Live", "STALE": "Stale", "no data": "No data"}[status]
@@ -273,9 +280,10 @@ def telemetry_cards_html(cards: list[dict]) -> str:
                if card.get("age_s") is not None else "")
         value = "—" if card["value"] is None else f"{card['value']:{card['fmt']}}"
         items.append(
-            f'<div class="hud-card tele"><div class="row"><span class="hud-label">'
+            f'<div class="hud-card tele" style="--accent:{accent}"><div class="row">'
+            f'<span class="hud-label">'
             f'{escape(card["label"])}</span><span class="fresh {css}"{age}>{text}</span></div>'
             f'<div class="val">{value}<span class="unit">{escape(card["unit"])}</span></div>'
-            f'{sparkline_svg(card["history"])}</div>')
+            f'{sparkline_svg(card["history"], accent)}</div>')
     return (f'<div class="tele-grid" role="group" aria-label="Latest telemetry">'
             f'{"".join(items)}</div>')

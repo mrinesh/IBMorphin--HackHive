@@ -11,7 +11,15 @@
   --hud-ease: 160ms ease;
 }
 
-.stApp { background: var(--hud-bg); line-height: 1.55; }
+.stApp {
+  line-height: 1.55;
+  background:  /* faint color glows so the page is not flat grey */
+    radial-gradient(900px 520px at 92% -8%, rgba(0, 229, 229, 0.08), transparent 65%),
+    radial-gradient(800px 520px at -8% 30%, rgba(167, 139, 250, 0.07), transparent 65%),
+    radial-gradient(700px 480px at 60% 110%, rgba(244, 114, 182, 0.06), transparent 65%),
+    var(--hud-bg);
+  background-attachment: fixed;
+}
 [data-testid="stHeader"] { background: transparent; }
 .block-container { padding-top: 3rem; max-width: 1560px; }
 
@@ -73,6 +81,19 @@ h3 { font-size: 1.1rem !important; font-weight: 600 !important; }
   overflow-wrap: anywhere;
 }
 [data-testid="stPlotlyChart"] { padding: 0.5rem; }
+/* Readout metrics: one accent per card along the top edge. */
+.st-key-readout [data-testid="stColumn"] [data-testid="stMetric"] {
+  border-top: 2px solid var(--accent, var(--hud-cyan));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent, var(--hud-cyan)) 8%,
+                                                 var(--hud-surface)), var(--hud-surface) 75%);
+}
+.st-key-readout [data-testid="stColumn"]:nth-child(1) { --accent: var(--hud-cyan); }
+.st-key-readout [data-testid="stColumn"]:nth-child(2) { --accent: var(--hud-violet); }
+.st-key-readout [data-testid="stColumn"]:nth-child(3) { --accent: var(--hud-magenta); }
+.st-key-readout [data-testid="stColumn"]:nth-child(4) { --accent: var(--hud-amber); }
+.st-key-readout [data-testid="stColumn"]:nth-child(5) { --accent: var(--hud-rose); }
+.st-key-readout [data-testid="stColumn"]:nth-child(6) { --accent: var(--hud-green); }
+.st-key-readout [data-testid="stColumn"]:nth-child(7) { --accent: #60a5fa; }
 
 /* Status banners: surface color, colored left rule and readable tinted text. */
 [data-testid="stAlert"] > div {
@@ -96,7 +117,9 @@ h3 { font-size: 1.1rem !important; font-weight: 600 !important; }
 /* Tabs: readable inactive labels, cyan underline on the active tab. */
 [data-testid="stTabs"] [role="tablist"] { gap: 0.25rem; border-bottom: 1px solid var(--hud-line); }
 [data-testid="stTabs"] [data-baseweb="tab-border"] { display: none; }
-[data-testid="stTabs"] [data-baseweb="tab-highlight"] { background: var(--hud-cyan); height: 2px; }
+[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
+  background: linear-gradient(90deg, var(--hud-cyan), var(--hud-violet)); height: 2px;
+}
 [data-testid="stTabs"] [role="tab"] {
   min-height: 44px; padding: 0 1rem; font-weight: 500; color: var(--hud-muted);
   background: transparent; transition: color var(--hud-ease);
@@ -212,7 +235,12 @@ h3 { font-size: 1.1rem !important; font-weight: 600 !important; }
 
 /* Telemetry cards */
 .tele-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.7rem; margin: 0.5rem 0 0.7rem; }
-.tele { padding: 0.8rem 0.95rem 0.6rem; min-width: 0; }
+.tele {
+  padding: 0.8rem 0.95rem 0.6rem; min-width: 0; position: relative; overflow: hidden;
+  border-top: 2px solid var(--accent, var(--hud-cyan));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent, var(--hud-cyan)) 9%,
+                                                 var(--hud-surface)), var(--hud-surface) 70%);
+}
 .tele .row { display: flex; align-items: center; justify-content: space-between; gap: 0.4rem; }
 .tele .val {
   font-family: var(--hud-mono); font-variant-numeric: tabular-nums; font-weight: 500;

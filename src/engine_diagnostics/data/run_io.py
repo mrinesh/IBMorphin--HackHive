@@ -1,7 +1,10 @@
 """Load and validate exported run bundles (docs/DATA_CONTRACT.md).
 
 Only public run files are read: waveforms.mat, telemetry.csv, metadata.json.
-Evaluation truth lives elsewhere and is never opened here.
+Evaluation truth lives elsewhere and is never opened here. Contract 1.1 adds
+the cam phase reference `cam_sync_s` (one pulse per 720 crank degrees at a
+fixed angle after cylinder 1's firing TDC, on the vibration clock); 1.0
+bundles have none and are still read.
 """
 
 import hashlib
@@ -37,6 +40,10 @@ RUN_ID = re.compile(r"^run_\d{5}$")
 # this fraction of a run; windows that contain them are flagged by the feature path.
 MAX_RUN_MISSING_FRACTION = 0.05
 ENGINE_ID = re.compile(r"^engine_\d{3}$")
+SCHEMA_VERSIONS = ("1.0", "1.1")
+CAM_SYNC_SCHEMA = "1.1"  # first data contract version with the cam phase reference
+CAM_SYNC_INFO = {"unit": "s", "clock": "vibration", "reference": "cylinder_1_firing_tdc"}
+CAM_LOCAL_SPACINGS = 2  # neighbours on each side that set a pulse gap's local cycle period
 
 
 @dataclass
@@ -50,6 +57,7 @@ class RunBundle:
     vibration_t0_s: float
     telemetry: pd.DataFrame
     metadata: dict[str, Any]
+    cam_sync_s: np.ndarray | None = None  # pulse times on the vibration clock (contract 1.1)
 
 
 def load_run(run_dir: Path) -> RunBundle:
@@ -75,6 +83,13 @@ def load_run(run_dir: Path) -> RunBundle:
         if name not in mat or mat[name].size != 1:
             raise ValueError(f"{run_dir.name}: waveforms.mat needs scalar '{name}'")
         scalars[name] = float(mat[name].item())
+    cam_sync_s = None
+    if "cam_sync_s" in mat:  # contract 1.1; MATLAB stores an empty vector as 0x0 or 0x1
+        cam = mat["cam_sync_s"]
+        if cam.size and (cam.ndim != 2 or cam.shape[1] != 1):
+            raise ValueError(f"{run_dir.name}: cam_sync_s must be an (N, 1) column vector, "
+                             f"got shape {cam.shape}")
+        cam_sync_s = cam.astype(np.float64).reshape(-1)
 
     telemetry = pd.read_csv(
         run_dir / "telemetry.csv",
@@ -89,6 +104,7 @@ def load_run(run_dir: Path) -> RunBundle:
         vibration=waveforms["vibration"],
         telemetry=telemetry,
         metadata=metadata,
+        cam_sync_s=cam_sync_s,
         **scalars,
     )
 
@@ -102,6 +118,7 @@ def validate_run(bundle: RunBundle, config: dict[str, Any]) -> list[str]:
             for name in WAVEFORM_STREAMS:
                 issues += _check_waveform(bundle, name, duration, config)
             issues += _check_telemetry(bundle.telemetry, bundle.metadata, duration, config)
+            issues += _check_cam_sync(bundle, duration, config)
         except KeyError as error:
             issues.append(f"metadata field missing: {error}")
     return [f"{bundle.run_id}: {issue}" for issue in issues]
@@ -119,6 +136,59 @@ def _check_metadata(bundle: RunBundle) -> list[str]:
         issues.append(f"engine_id '{metadata['engine_id']}' is not engine_NNN")
     if metadata["synthetic"] is not True:
         issues.append("metadata.synthetic must be true")
+    if metadata["schema_version"] not in SCHEMA_VERSIONS:
+        issues.append(f"schema_version '{metadata['schema_version']}' is not one of "
+                      f"{', '.join(SCHEMA_VERSIONS)}")
+    return issues
+
+
+def cam_cycle_steps(spacing: np.ndarray) -> np.ndarray:
+    """Cycles spanned by each cam pulse gap (1, or more where pulses are missing).
+
+    Each gap is compared with the median of its neighbouring gaps
+    (CAM_LOCAL_SPACINGS on each side), not the run-wide median, so a speed
+    ramp (cycle period changing smoothly, up to several-fold over a run) is
+    never mistaken for a missing pulse, while one lost pulse (a gap twice its
+    neighbours) is.
+    """
+    spacing = np.asarray(spacing, dtype=np.float64)
+    if spacing.size < 3:
+        return np.ones(spacing.size)
+    k = CAM_LOCAL_SPACINGS
+    local = np.array([np.median(np.delete(spacing[max(0, i - k):i + k + 1], min(i, k)))
+                      for i in range(spacing.size)])
+    return np.maximum(1, np.round(spacing / local))
+
+
+def _version(text: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in str(text).split("."))
+
+
+def _check_cam_sync(bundle: RunBundle, duration: float, config: dict) -> list[str]:
+    """The cam phase reference: required from contract 1.1, consistent with metadata."""
+    declared = bundle.metadata["streams"].get("cam_sync")
+    pulses = bundle.cam_sync_s
+    if _version(bundle.metadata["schema_version"]) < _version(CAM_SYNC_SCHEMA) and declared is None:
+        return [] if pulses is None else ["cam_sync_s present but metadata has no streams.cam_sync"]
+    if declared is None or pulses is None:
+        return ["cam_sync: contract 1.1 needs both waveforms.mat cam_sync_s and "
+                "metadata.streams.cam_sync"]
+    issues = [f"cam_sync: {key} '{declared.get(key)}', expected '{value}'"
+              for key, value in CAM_SYNC_INFO.items() if declared.get(key) != value]
+    if declared.get("angle_deg") != config["engine"]["cam_sync_angle_deg"]:
+        issues.append(f"cam_sync: angle_deg {declared.get('angle_deg')} differs from config "
+                      f"{config['engine']['cam_sync_angle_deg']}")
+    if declared.get("n_pulses") != pulses.size:
+        issues.append(f"cam_sync: {pulses.size} pulses, metadata n_pulses "
+                      f"{declared.get('n_pulses')}")
+    if not np.all(np.isfinite(pulses)):
+        return issues + ["cam_sync: non-finite pulse times"]
+    if ((pulses < 0) | (pulses >= duration)).any():
+        issues.append(f"cam_sync: pulse times outside [0, {duration})")
+    spacing = np.diff(pulses)
+    # A 720-degree cycle cannot be shorter than at twice the engine's maximum speed.
+    if spacing.size and spacing.min() < 0.5 * 120 / config["engine"]["rpm_max"]:
+        issues.append("cam_sync: pulses not strictly increasing at a feasible cycle period")
     return issues
 
 
@@ -181,6 +251,10 @@ def run_warnings(bundle: RunBundle, config: dict[str, Any]) -> list[str]:
         missing = float(np.isnan(x).mean())
         if missing:
             warnings.append(f"{bundle.run_id}: {name} missing fraction {missing:.4f}")
+    if bundle.cam_sync_s is not None and bundle.cam_sync_s.size > 3:
+        gaps = int(np.sum(cam_cycle_steps(np.diff(bundle.cam_sync_s)) - 1))
+        if gaps:
+            warnings.append(f"{bundle.run_id}: cam_sync has {gaps} gaps (missing pulses)")
     invalid = int((bundle.telemetry["valid"] == 0).sum())
     if invalid:
         warnings.append(f"{bundle.run_id}: {invalid} invalid telemetry rows")

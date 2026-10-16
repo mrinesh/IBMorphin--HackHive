@@ -61,6 +61,9 @@ DATASETS = {
                        "model": ROOT / "artifacts/models/temporary.joblib",
                        "splits": ROOT / "configs/integration_batch.json"},
 }
+# Cylinder localizer (train-localizer): names the affected cylinder of each active alert
+# from the vibration signature and the cam phase reference. Optional.
+LOCALIZER_PATH = ROOT / "artifacts/models/cylinder_localizer.joblib"
 PRESETS_PATH = ROOT / "configs/demo_presets.json"
 HOLDOUT_DATASET = "integration_v1"
 FEATURES_PATH = ROOT / "data/processed/integration_v1_features.parquet"
@@ -215,9 +218,11 @@ def start_run(dataset: str, run_id: str, held_out: str | None = None,
         bundle, lab_log, run_packets = lab_bundle(lab)
     else:
         (bundle, _, run_packets), lab_log = load_bundle(str(DATASETS[dataset]["raw"]), run_id), None
+    localizer = load_model(str(LOCALIZER_PATH))
     st.session_state.update(dataset=dataset, run_id=run_id, held_out=held_out, model=model,
                             lab=lab, lab_log=lab_log, bundle=bundle, packets=run_packets,
-                            engine=ReplayEngine(model, config, bundle.metadata),
+                            engine=ReplayEngine(model, config, bundle.metadata,
+                                                localizer=localizer),
                             next_packet=0, records=[], stream_t=0.0, playing=False)
 
 
@@ -461,6 +466,25 @@ def alert_evidence(records, fault: str) -> EvidencePanel | None:
                           rpm["value"].to_numpy(), firing_hz, feature_z(record))
 
 
+def add_bands(fig: go.Figure, bands: list[tuple[float, float, str, float, int, int]]) -> None:
+    """Shaded x-spans (x0, x1, color, opacity, row, col) added in one layout update.
+
+    fig.add_vrect re-validates every existing shape on each call, which made a refresh
+    with dozens of highlighted segments take ~0.5 s; one update keeps it a few ms.
+    """
+    if not bands:
+        return
+    shapes = list(fig.layout.shapes)
+    for x0, x1, color, opacity, row, col in bands:
+        subplot = fig.get_subplot(row, col)
+        xref = subplot.xaxis.plotly_name.replace("axis", "")
+        yref = subplot.yaxis.plotly_name.replace("axis", "")
+        shapes.append({"type": "rect", "x0": x0, "x1": x1, "xref": xref, "y0": 0, "y1": 1,
+                       "yref": f"{yref} domain", "fillcolor": color, "opacity": opacity,
+                       "line": {"width": 0}, "layer": "below"})
+    fig.update_layout(shapes=shapes)
+
+
 def evidence_figure(panel: EvidencePanel) -> go.Figure:
     window_s = config["analysis"]["window_s"]
     fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.08,
@@ -469,20 +493,70 @@ def evidence_figure(panel: EvidencePanel) -> go.Figure:
     for row, ind in enumerate(panel.indicators, start=1):
         fig.add_trace(go.Scattergl(x=ind.trace_t, y=ind.trace_y, name=ind.trace_label,
                                    line={"width": 1, "color": "#555"}), row=row, col=1)
-        for a, b in ind.segments:
-            fig.add_vrect(x0=a, x1=b, fillcolor=SIGNAL_COLORS[ind.signal], opacity=0.3,
-                          line_width=0, row=row, col=1)
+    add_bands(fig, [(a, b, SIGNAL_COLORS[ind.signal], 0.3, row, 1)
+                    for row, ind in enumerate(panel.indicators, start=1)
+                    for a, b in ind.segments])
     fig.update_xaxes(range=[panel.t_end_s - window_s, panel.t_end_s])
     fig.update_xaxes(title="s", row=3, col=1)
     fig.update_layout(height=420, showlegend=False, margin={"t": 40, "b": 20})
     return fig
 
 
-def render_evidence(panel: EvidencePanel) -> None:
+def location_phrase(record, fault: str) -> str:
+    """' in cylinder 3', ' in firing slot B', or a locating note, for an alert banner."""
+    if record is None or "localization" not in record:
+        return ""
+    where = record["localization"].get(fault)
+    if where and where.get("cylinder") is not None:
+        return f" in cylinder {where['cylinder']}"
+    if where and where.get("slot") is not None:
+        return f" in firing slot {where['slot']} (no cam reference)"
+    return " (locating cylinder…)"
+
+
+def localization_figure(where: dict, fault: str) -> go.Figure:
+    """Accumulated P(cylinder) for one alert, cylinders in block order."""
+    labels = sorted(where["probabilities"], key=str)
+    values = [where["probabilities"][k] for k in labels]
+    named = where.get("cylinder") is not None or where.get("slot") is not None
+    best = max(range(len(values)), key=values.__getitem__)
+    colors = [FAULT_COLORS.get(fault, "#888") if named and k == best else "#b8bec6"
+              for k in range(len(values))]
+    prefix = "Cylinder" if where.get("phase") == "cam_sync" else "Slot"
+    fig = go.Figure(go.Bar(x=[str(k) for k in labels], y=values, marker_color=colors,
+                           text=[f"{v:.2f}" for v in values], textposition="outside",
+                           hovertemplate=f"{prefix} %{{x}}: %{{y:.2f}}<extra></extra>"))
+    fig.update_xaxes(title=prefix, type="category", tickangle=0)
+    fig.update_yaxes(range=[0, 1.15], title="P(fault here)")
+    fig.update_layout(height=200, showlegend=False, margin={"t": 10, "b": 10, "l": 10, "r": 10})
+    return fig
+
+
+def render_localization(where: dict | None, fault: str) -> None:
+    if where is None:
+        return
+    if where.get("cylinder") is not None:
+        st.markdown(f"**Location:** cylinder **{where['cylinder']}** — confidence "
+                    f"{where['confidence']:.2f} over {where['windows']} decision windows")
+    elif where.get("slot") is not None:
+        st.markdown(f"**Location:** firing slot **{where['slot']}** — no cam phase reference "
+                    "in this recording, so the cylinder number cannot be named")
+    else:
+        st.markdown("**Location:** still accumulating evidence for a cylinder")
+    if where.get("probabilities"):
+        st.plotly_chart(localization_figure(where, fault), width="stretch",
+                        key=f"localization_{fault}")
+    st.caption("Strokes are attributed to cylinders by crank angle from the cam phase "
+               "pulse; the localizer compares each cylinder's stroke signature with the "
+               "others. It is trained on synthetic engines.")
+
+
+def render_evidence(panel: EvidencePanel, where: dict | None = None) -> None:
     color = FAULT_COLORS.get(panel.fault, "#888")
     with st.container(border=True):
         st.markdown(f"<h4 style='margin:0;color:{color}'>{panel.headline}</h4>",
                     unsafe_allow_html=True)
+        render_localization(where, panel.fault)
         st.caption(f"Window {panel.t_end_s - config['analysis']['window_s']:.1f}-"
                    f"{panel.t_end_s:.1f} s. Shaded segments below and on the waveform and RPM "
                    "charts match each signal's color.")
@@ -685,15 +759,20 @@ def live_view():
     has_probability = bool(latest and "probability" in latest)
     confirm = getattr(model, "confirm_updates", config["runtime"]["confirm_fault_updates"])
 
+    # Sections whose element count changes during playback (alert banners, lab
+    # response, evidence panels) each live in one fixed container, so elements after
+    # them keep their place in the page and the 3D view is not remounted (which would
+    # rebuild the scene and reset its camera) whenever an alert appears or clears.
     active = active_alerts(latest)
-    if active:
-        for fault in active:
-            n = model.confirm_updates[fault] if multi else confirm
-            st.error(f"ALERT: {label(fault)} detected — confirmed by {n} consistent updates",
-                     icon=":material/warning:")
-    else:
-        st.success("No active alert — the engine sounds normal so far",
-                   icon=":material/check_circle:")
+    with st.container(key="alerts"):
+        if active:
+            for fault in active:
+                n = model.confirm_updates[fault] if multi else confirm
+                st.error(f"ALERT: {label(fault)} detected{location_phrase(latest, fault)} — "
+                         f"confirmed by {n} consistent updates", icon=":material/warning:")
+        else:
+            st.success("No active alert — the engine sounds normal so far",
+                       icon=":material/check_circle:")
 
     cols = st.container(key="readout").columns(7)
     cols[0].metric("Replay time", f"{t_now:.1f} s")
@@ -731,15 +810,18 @@ def live_view():
                        help=f"Detected at ≥ {model.thresholds[fault]:.2f}; calibrated on "
                             "separate calibration engines (synthetic).")
 
-    if lab_log:
-        lab_response(records, t_now)
+    with st.container(key="lab_response"):
+        if lab_log:
+            lab_response(records, t_now)
 
     panels = [p for p in (alert_evidence(records, f) for f in active) if p]
-    if panels:
-        st.subheader("Evidence for active alerts")
-        for col, panel in zip(st.columns(len(panels)), panels, strict=True):
-            with col:
-                render_evidence(panel)
+    with st.container(key="evidence"):
+        if panels:
+            st.subheader("Evidence for active alerts")
+            for col, panel in zip(st.columns(len(panels)), panels, strict=True):
+                with col:
+                    render_evidence(panel,
+                                    (latest.get("localization") or {}).get(panel.fault))
 
     cards = telemetry_cards(t_now)
     view_col, diag_col = st.columns([3, 2], gap="medium")
@@ -786,12 +868,10 @@ def live_view():
                                              line={"width": 1,
                                                    "color": theme.MODALITY_COLORS["envelope"]}),
                                 row=3, col=1)
-    for panel in panels:  # link: same segments and colors as the evidence panels
-        for ind in panel.indicators:
-            for row in WAVE_ROWS.get(ind.signal, []):
-                for a, b in ind.segments:
-                    waves.add_vrect(x0=a, x1=b, fillcolor=SIGNAL_COLORS[ind.signal],
-                                    opacity=0.2, line_width=0, row=row, col=1)
+    # Link: same segments and colors as the evidence panels.
+    add_bands(waves, [(a, b, SIGNAL_COLORS[ind.signal], 0.2, row, 1)
+                      for panel in panels for ind in panel.indicators
+                      for row in WAVE_ROWS.get(ind.signal, []) for a, b in ind.segments])
     waves.update_layout(height=470, showlegend=False, margin={"t": 40, "b": 20})
     waves.update_xaxes(title_text="stream time (s)", row=3, col=1)
     psd.update_layout(height=380, title="Frequency content now (FFT power, dB)",
@@ -830,10 +910,8 @@ def live_view():
         tele.add_trace(go.Scatter(x=rows["t_s"], y=rows["value"], name=signal,
                                   line={"width": 1.5, "color": theme.TOKENS["cyan"]}),
                        row=k // 3 + 1, col=k % 3 + 1)
-    for panel in panels:
-        for a, b in next(i for i in panel.indicators if i.signal == "rpm").segments:
-            tele.add_vrect(x0=a, x1=b, fillcolor=SIGNAL_COLORS["rpm"], opacity=0.3,
-                           line_width=0, row=1, col=1)
+    add_bands(tele, [(a, b, SIGNAL_COLORS["rpm"], 0.3, 1, 1) for panel in panels
+                     for a, b in next(i for i in panel.indicators if i.signal == "rpm").segments])
     tele.update_xaxes(range=[0, duration])
     tele.update_layout(height=400, showlegend=False, margin={"t": 50, "b": 20})
     telemetry_tab.plotly_chart(tele, width="stretch")

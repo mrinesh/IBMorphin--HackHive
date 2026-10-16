@@ -14,6 +14,7 @@ DEPENDENCIES = ("jsonschema",)
 OPTIONAL_DEPENDENCIES = (
     "numpy", "scipy", "pandas", "pyarrow", "scikit-learn", "streamlit", "plotly"
 )
+LOCALIZER_PATH = Path("artifacts/models/cylinder_localizer.joblib")
 WORKSPACE_DIRECTORIES = (
     "matlab", "configs", "schemas", "data/raw", "data/processed", "evaluation_truth",
     "artifacts/models", "artifacts/logs", "reports/generated", "dashboard", "docs", "tests",
@@ -158,7 +159,11 @@ def _replay(args, config: dict) -> int:
         import numpy as np
 
         from engine_diagnostics.data.run_io import load_run, validate_run
-        from engine_diagnostics.runtime.replay import prediction_log, replay_run
+        from engine_diagnostics.runtime.replay import (
+            localization_summary,
+            prediction_log,
+            replay_run,
+        )
     except ImportError as error:
         print(f"replay needs the analysis extra ({error.name} missing)", file=sys.stderr)
         return 1
@@ -172,16 +177,26 @@ def _replay(args, config: dict) -> int:
         print("\n".join(issues), file=sys.stderr)
         return 1
     model = joblib.load(args.model)
+    localizer = None
+    if args.localizer is not None:
+        if not args.localizer.is_file():
+            print(f"{args.localizer} not found; run train-localizer first", file=sys.stderr)
+            return 1
+        localizer = joblib.load(args.localizer)
     print(f"SYNTHETIC DATA - RECORDED REPLAY | {args.run_id} | {model.model_version} | "
-          f"speed {'fast' if not args.speed else f'{args.speed:g}x'}")
+          f"speed {'fast' if not args.speed else f'{args.speed:g}x'}"
+          + (f" | {localizer.model_version}" if localizer else "")
+          + ("" if bundle.cam_sync_s is not None else " | no cam reference"))
 
     def show(d):
         alert = d["alert"] or "-"
+        where = localization_summary(d) or ""
         print(f"t={d['t_end_s']:5.1f}s  {d['quality']:8s}  svm={d['predicted'] or '-':21s} "
               f"accepted={d['accepted']:21s} anomaly={d['anomaly_score']:5.2f}  "
-              f"ALERT={alert:21s} {d['processing_ms']:5.1f} ms")
+              f"ALERT={alert:21s} {d['processing_ms']:5.1f} ms  {where}")
 
-    records = replay_run(bundle, model, config, speed=args.speed, on_decision=show)
+    records = replay_run(bundle, model, config, speed=args.speed, on_decision=show,
+                         localizer=localizer)
     log = prediction_log(records)
     args.log_dir.mkdir(parents=True, exist_ok=True)
     log_path = args.log_dir / f"{args.run_id}_predictions.csv"
@@ -383,6 +398,87 @@ def _evaluate_multi(args, config: dict) -> int:
     return 0
 
 
+def _train_localizer(args, config: dict) -> int:
+    try:
+        import joblib
+        import pandas as pd
+
+        from engine_diagnostics.models.localizer import fit_localizer
+    except ImportError as error:
+        print(f"train-localizer needs the analysis extra ({error.name} missing)",
+              file=sys.stderr)
+        return 1
+    if not args.features.is_file():
+        print(f"{args.features} not found; run build-features first", file=sys.stderr)
+        return 1
+    table = pd.read_parquet(args.features)
+    try:
+        localizer = fit_localizer(table, _load_truths(table, args.truth_dir), config)
+    except ValueError as error:
+        print(f"Localizer training failed: {error}", file=sys.stderr)
+        return 1
+    args.model.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(localizer, args.model)
+    report = {"model_version": localizer.model_version,
+              "feature_version": localizer.feature_version,
+              "firing_order": localizer.firing_order, **localizer.notes}
+    args.report.parent.mkdir(parents=True, exist_ok=True)
+    args.report.write_text(json.dumps(report, indent=2, default=str) + "\n", encoding="utf-8")
+    print(f"{localizer.model_version}: one rotation-equivariant scorer per fault, "
+          f"firing order {'-'.join(map(str, localizer.firing_order))}")
+    for fault, notes in localizer.notes["per_fault"].items():
+        tune, cal = notes["tuning"], notes["calibration"]
+        print(f"  {fault:21s} train {notes['windows']['train_used']} windows | C {notes['C']} "
+              f"T {notes['temperature']:.2f} | min confidence {notes['min_confidence']}")
+        print(f"  {'':21s} tuning top-1 {tune['top1_accuracy']:.3f}, accepted "
+              f"{tune['accepted_accuracy']} at coverage {tune['coverage']:.3f} | calibration "
+              f"top-1 {cal['top1_accuracy']:.3f}")
+        if not notes["target_accuracy_met_on_tuning"]:
+            print(f"  WARNING: no {fault} confidence met the target accuracy on tuning")
+    print(f"model -> {args.model}\nreport -> {args.report}")
+    return 0
+
+
+def _evaluate_localization(args, config: dict) -> int:
+    try:
+        import joblib
+        import pandas as pd
+
+        from engine_diagnostics.final_evaluation import evaluate_final_localization
+    except ImportError as error:
+        print(f"evaluate-localization needs the analysis extra ({error.name} missing)",
+              file=sys.stderr)
+        return 1
+    if args.report.is_file() and not args.force:
+        print(f"{args.report} exists: the test set has already been scored. Use --force "
+              "only to reproduce the same frozen model's result.", file=sys.stderr)
+        return 1
+    for path in (args.features, args.model, args.localizer):
+        if not path.is_file():
+            print(f"{path} not found", file=sys.stderr)
+            return 1
+    table = pd.read_parquet(args.features)
+    model, localizer = joblib.load(args.model), joblib.load(args.localizer)
+    report = evaluate_final_localization(model, localizer, table,
+                                         _load_truths(table, args.truth_dir), args.raw_dir,
+                                         config, args.model, args.localizer)
+    args.report.parent.mkdir(parents=True, exist_ok=True)
+    args.report.write_text(json.dumps(report, indent=2, default=str) + "\n", encoding="utf-8")
+    print(report["status"])
+    for fault, part in report["windows_given_fault"].items():
+        print(f"  windows {fault:21s} {part['windows']:5d} | top-1 {part['top1_accuracy']} | "
+              f"accepted {part['accepted_accuracy']} at coverage {part['coverage']}")
+    for subset in ("core", "challenge"):
+        if subset not in report:
+            continue
+        for fault, part in report[subset]["per_fault"].items():
+            print(f"  [{subset}] replay {fault:21s} episodes {part['true_alert_episodes']} | "
+                  f"localized {part['localized_fraction']} | first correct "
+                  f"{part['first_correct']} | delay p50 {part['delay_p50_s']} s")
+    print(f"report -> {args.report}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Engine diagnostics project initialization tools")
     parser.add_argument("--version", action="version", version=__version__)
@@ -421,6 +517,8 @@ def main(argv: list[str] | None = None) -> int:
     replay.add_argument("--truth-dir", type=Path, default=Path("evaluation_truth"))
     replay.add_argument("--with-truth", action="store_true",
                         help="after replay, compare alerts with evaluation truth")
+    replay.add_argument("--localizer", type=Path, default=None,
+                        help="cylinder localizer (train-localizer) to name affected cylinders")
     replay.add_argument("--config", type=Path, default=Path("configs/mvp.json"))
     replay.add_argument("--schema", type=Path, default=Path("schemas/project-config.schema.json"))
     fit = commands.add_parser("train", help="Fit the v1 model using train/tuning/calibration")
@@ -461,7 +559,28 @@ def main(argv: list[str] | None = None) -> int:
     final_multi.add_argument("--report", type=Path,
                              default=Path("reports/generated/final_evaluation_v2.json"))
     final_multi.add_argument("--force", action="store_true")
-    for sub in (fit, final, fit_multi, final_multi):
+    fit_local = commands.add_parser(
+        "train-localizer", help="Fit the cylinder localizer using train/tuning/calibration")
+    fit_local.add_argument("--features", type=Path,
+                           default=Path("data/processed/core_v2_features.parquet"))
+    fit_local.add_argument("--truth-dir", type=Path, default=Path("evaluation_truth/core_v2"))
+    fit_local.add_argument("--model", type=Path, default=LOCALIZER_PATH)
+    fit_local.add_argument("--report", type=Path,
+                           default=Path("reports/generated/training_localizer.json"))
+    final_local = commands.add_parser(
+        "evaluate-localization", help="Score the frozen localizer once on core_v2 test engines")
+    final_local.add_argument("--features", type=Path,
+                             default=Path("data/processed/core_v2_features.parquet"))
+    final_local.add_argument("--truth-dir", type=Path, default=Path("evaluation_truth/core_v2"))
+    final_local.add_argument("--raw-dir", type=Path, default=Path("data/raw/core_v2"))
+    final_local.add_argument("--model", type=Path,
+                             default=Path("artifacts/models/multifault_v2.joblib"),
+                             help="fault detector whose alerts are localized")
+    final_local.add_argument("--localizer", type=Path, default=LOCALIZER_PATH)
+    final_local.add_argument("--report", type=Path,
+                             default=Path("reports/generated/final_localization.json"))
+    final_local.add_argument("--force", action="store_true")
+    for sub in (fit, final, fit_multi, final_multi, fit_local, final_local):
         sub.add_argument("--config", type=Path, default=Path("configs/mvp.json"))
         sub.add_argument("--schema", type=Path,
                          default=Path("schemas/project-config.schema.json"))
@@ -489,6 +608,10 @@ def main(argv: list[str] | None = None) -> int:
         return _train_multi(args, config)
     if args.command == "evaluate-multi":
         return _evaluate_multi(args, config)
+    if args.command == "train-localizer":
+        return _train_localizer(args, config)
+    if args.command == "evaluate-localization":
+        return _evaluate_localization(args, config)
     print(json.dumps({
         "status": "valid",
         "schema_version": config["schema_version"],

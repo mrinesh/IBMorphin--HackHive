@@ -96,3 +96,92 @@ def severity_at(truth: dict[str, Any], t: float) -> float:
     end = max(b for _, b in _intervals(truth))
     progress = min(max((t - onset) / (end - onset), 0.0), 1.0)
     return float(truth["severity"] + (truth["severity_end"] - truth["severity"]) * progress)
+
+
+def localization_episodes(records: list[dict[str, Any]], fault: str, true_cylinder: int | None,
+                          intervals: list[tuple[float, float]] | None = None
+                          ) -> list[dict[str, Any]]:
+    """Score cylinder localization over each alert episode of one fault.
+
+    An episode is a run of consecutive decisions with `fault` among the active
+    alerts. Answers are judged only on decisions made while the fault is truly
+    active (t_end inside one of its `intervals`), as detection is scored
+    against each fault's own intervals: `first` is the first cylinder reported
+    then (what a technician would act on), `final` the last, and `changes` how
+    often it changed. An episode that never overlaps the intervals is a false
+    alert (`true_alert` False), as is every episode when true_cylinder is None.
+    `first_any` is the first cylinder reported at any time in the episode,
+    including before onset (the stricter, cause-agnostic view).
+    intervals None treats the whole run as active.
+    """
+    def active(t: float) -> bool:
+        return intervals is None or any(a < t <= b for a, b in intervals)
+
+    found, current = [], None
+    for r in records:
+        alerts = r.get("alerts") if "alerts" in r else ([r["alert"]] if r.get("alert") else [])
+        if fault not in (alerts or []):
+            current = None
+            continue
+        if current is None:
+            current = {"start_s": r["t_end_s"], "end_s": r["t_end_s"], "first": None,
+                       "first_s": None, "final": None, "changes": 0, "first_any": None,
+                       "overlaps": False, "overlap_start_s": None,
+                       "true_cylinder": true_cylinder}
+            found.append(current)
+        current["end_s"] = r["t_end_s"]
+        where = (r.get("localization") or {}).get(fault)
+        cylinder = where.get("cylinder") if where else None
+        if cylinder is not None and current["first_any"] is None:
+            current["first_any"] = cylinder
+        if not active(r["t_end_s"]):
+            continue
+        if not current["overlaps"]:
+            current["overlaps"], current["overlap_start_s"] = True, r["t_end_s"]
+        if cylinder is not None:
+            if current["first"] is None:
+                current["first"], current["first_s"] = cylinder, r["t_end_s"]
+            elif cylinder != current["final"]:
+                current["changes"] += 1
+            current["final"] = cylinder
+    for e in found:
+        e["true_alert"] = true_cylinder is not None and e["overlaps"]
+        e["delay_s"] = (None if e["first_s"] is None
+                        else e["first_s"] - max(e["start_s"], e["overlap_start_s"]))
+        judged = e["true_alert"]
+        e["first_correct"] = None if not judged or e["first"] is None \
+            else e["first"] == true_cylinder
+        e["final_correct"] = None if not judged or e["final"] is None \
+            else e["final"] == true_cylinder
+        e["first_any_correct"] = None if not judged or e["first_any"] is None \
+            else e["first_any"] == true_cylinder
+    return found
+
+
+def summarize_localization(found: list[dict[str, Any]]) -> dict[str, Any]:
+    """Episode-level localization rates for true alerts; false alerts counted apart.
+
+    Delays are from the later of alert start and fault onset to the first
+    cylinder named while the fault is active.
+    """
+    true_alerts = [e for e in found if e["true_alert"]]
+    located = [e for e in true_alerts if e["first"] is not None]
+    any_located = [e for e in true_alerts if e["first_any"] is not None]
+    delays = [e["delay_s"] for e in located]
+    return {
+        "true_alert_episodes": len(true_alerts),
+        "localized_fraction": len(located) / len(true_alerts) if true_alerts else None,
+        "first_correct": (sum(e["first_correct"] for e in located) / len(located)
+                          if located else None),
+        "final_correct": (sum(e["final_correct"] for e in located) / len(located)
+                          if located else None),
+        "first_any_correct": (sum(e["first_any_correct"] for e in any_located)
+                              / len(any_located) if any_located else None),
+        "wrong_cylinder_episodes": sum(not e["first_correct"] for e in located),
+        "episodes_with_changes": sum(e["changes"] > 0 for e in located),
+        "delay_p50_s": float(np.percentile(delays, 50)) if delays else None,
+        "delay_p95_s": float(np.percentile(delays, 95)) if delays else None,
+        "false_alert_episodes": sum(not e["true_alert"] for e in found),
+        "false_alert_episodes_localized": sum(
+            e["first_any"] is not None for e in found if not e["true_alert"]),
+    }
