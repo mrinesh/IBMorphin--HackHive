@@ -926,7 +926,6 @@ def label(class_name: str | None) -> str:
     return explain.names(class_name)
 
 
-@st.fragment(run_every=TICK_S)
 def live_view():
     rendered = time.perf_counter()
     state = st.session_state
@@ -934,6 +933,7 @@ def live_view():
         advance_to(min((time.monotonic() - state.anchor) * speed, duration))
         if state.next_packet >= len(run_packets):
             state.playing = False
+            st.rerun()  # the sidebar's Pause button turns back into Play and ticking stops
     if (profile and state.records and state.next_packet >= len(run_packets)
             and state.get("saved_history_run") is None):
         save_history_run(profile, complete=True)  # replay finished: save it once
@@ -1178,7 +1178,9 @@ def live_view():
     state.render_ms = 1000 * (time.perf_counter() - rendered)
 
 
-live_view()
+# Tick only while playing. A paused view has nothing new to show; re-rendering it every
+# TICK_S in every open tab kept the server busy, so clicks such as Pause queued for seconds.
+st.fragment(run_every=TICK_S if st.session_state.playing else None)(live_view)()
 
 
 def history_table(runs) -> pd.DataFrame:
