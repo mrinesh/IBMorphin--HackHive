@@ -7,13 +7,20 @@
 // What drives what (all from `data`, sent by dashboard/engine3d.py):
 //   rpm            crank speed (shown slowed by VISUAL_SPEED, labelled on screen)
 //   firing_order   which cylinder fires at each 180 deg of the 720 deg cycle
-//   effect         fault effect to show: the alert class, or an accepted fault class
-//   intensity      model confidence for that class (or evidence level / 3)
+//   animate        keep the engine running: while playing, and after the replay has
+//                  finished (on the final decision). `playing` alone (a mid-replay
+//                  pause) freezes it. Older payloads without it fall back to `playing`.
+//   faults         every fault the model reports now (active alerts plus this window's
+//                  detections): {fault, status, cylinder, intensity, color}.
+//                  `cylinder` is the one the localizer names (sensor data + cam phase
+//                  reference): the fault's effect is confined to it and it is marked
+//                  with a red piston and a ring in the fault's color. A fault without
+//                  a cylinder shows on every cylinder. Several faults compose: a
+//                  misfire weakens or skips the firing, knock adds sparks and jolts,
+//                  valve-train impacts add seat ticks. `intensity` is the model's
+//                  confidence for that fault (or evidence level / 3, or 0.45 held).
+//   effect         first reported fault (block outline color comes in edge_color)
 //   vibration_ratio  current vibration RMS / normal-reference RMS (real sensor data)
-//   model_cylinder cylinder the localizer names for the alert (sensor data + cam
-//                  phase reference); the effect is then confined to that cylinder
-//                  and marked with a ring in the state color. Without it, effects
-//                  are engine-wide.
 //   truth_cylinder only when the evaluation-truth overlay is on (marked as truth)
 //   egt            per-cylinder exhaust gas temperature scaled 0..1 (data contract 1.2
 //                  sensors); colors each exhaust runner on the inferno scale, the
@@ -30,6 +37,10 @@ const views = new WeakMap();
 // Instrumentation for the persistence check (read by scripts/check_engine3d.mjs).
 const stats = (window.__engine3d = window.__engine3d || { mounts: 0, updates: 0, disposed: 0 });
 stats.events = stats.events || { fired: 0, skipped: 0, knock: 0, valveTicks: 0 };
+stats.contextLost = stats.contextLost || 0;
+stats.contextRestored = stats.contextRestored || 0;
+stats.rebuilds = stats.rebuilds || 0;
+const FAULT_KINDS = ['misfire', 'knock_like', 'valve_clearance_like'];
 
 export function render(root, data) {
   let view = views.get(root);
@@ -93,33 +104,98 @@ const CAMERA = {
   engine: { radius: 11.5, target: new THREE.Vector3(0, DETAIL_Y + 0.95, 0) },
 };
 const CHAMBER_Y = 2.32;
+// WebGL context loss: browsers keep only a few contexts per page and drop the oldest
+// when more are made (the dashboard's charts are SVG so the 3D view is the only one),
+// and a GPU reset drops every context. Three.js restores a lost context when the
+// browser allows it; if that has not happened after REBUILD_MS, the renderer is rebuilt
+// on a fresh canvas with the same scene. The notice only shows if a loss lasts.
+const NOTICE_DELAY_MS = 750;
+const REBUILD_MS = 4000;
+const MAX_REBUILDS = 3; // per minute; after that the notice asks for a page reload
 
 function createView(root) {
   const hud = root.querySelector('.engine3d-hud');
-  let renderer;
-  try {
-    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-  } catch (error) {
-    return fallbackView(root);
-  }
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  root.prepend(renderer.domElement);
-
-  // If the GPU drops the WebGL context (driver reset, memory pressure), hide the blank
-  // canvas, say so, and let Three.js restore it; the scene state is kept.
-  const canvas = renderer.domElement;
   const notice = root.querySelector('.engine3d-fallback');
-  canvas.addEventListener('webglcontextlost', (event) => {
-    event.preventDefault();
-    canvas.style.visibility = 'hidden';
+  let renderer = makeRenderer();
+  if (!renderer) return fallbackView(root);
+  let disposed = false;
+  let noticeTimer = 0;
+  let rebuildTimer = 0;
+  const rebuildTimes = [];
+
+  function makeRenderer() {
+    let next;
+    try {
+      next = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    } catch (error) {
+      return null;
+    }
+    next.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    next.domElement.addEventListener('webglcontextlost', onContextLost);
+    next.domElement.addEventListener('webglcontextrestored', onContextRestored);
+    root.prepend(next.domElement);
+    return next;
+  }
+
+  function showNotice(text) {
+    renderer.domElement.style.visibility = 'hidden';
     notice.hidden = false;
-    notice.textContent = '3D view paused: the graphics context was reset. Restoring…';
-    stats.contextLost = (stats.contextLost || 0) + 1;
-  });
-  canvas.addEventListener('webglcontextrestored', () => {
-    canvas.style.visibility = '';
+    notice.textContent = text;
+  }
+
+  function hideNotice() {
+    renderer.domElement.style.visibility = '';
     notice.hidden = true;
-  });
+  }
+
+  function clearContextTimers() {
+    clearTimeout(noticeTimer);
+    clearTimeout(rebuildTimer);
+  }
+
+  function onContextLost(event) {
+    // preventDefault tells the browser we can restore, so it may hand the context back.
+    event.preventDefault();
+    if (disposed || event.target !== renderer.domElement) return;
+    stats.contextLost += 1;
+    clearContextTimers();
+    noticeTimer = setTimeout(() => showNotice(
+      '3D view paused: the browser reclaimed its graphics context. Restoring…'), NOTICE_DELAY_MS);
+    rebuildTimer = setTimeout(rebuild, REBUILD_MS);
+  }
+
+  function onContextRestored(event) {
+    if (disposed || event.target !== renderer.domElement) return;
+    stats.contextRestored += 1;
+    clearContextTimers();
+    hideNotice();
+  }
+
+  // New renderer and canvas for the same scene: Three.js uploads geometry, materials
+  // and textures again for the new context on its first render.
+  function rebuild() {
+    if (disposed) return;
+    const now = performance.now();
+    while (rebuildTimes.length && now - rebuildTimes[0] > 60000) rebuildTimes.shift();
+    const next = rebuildTimes.length < MAX_REBUILDS ? makeRenderer() : null;
+    if (!next) {
+      showNotice('3D view unavailable: the browser could not restore its graphics context. ' +
+                 'Reload the page to try again.');
+      return;
+    }
+    rebuildTimes.push(now);
+    const old = renderer;
+    old.setAnimationLoop(null);
+    old.domElement.removeEventListener('webglcontextlost', onContextLost);
+    old.domElement.removeEventListener('webglcontextrestored', onContextRestored);
+    old.domElement.remove();
+    old.dispose();
+    renderer = next;
+    resize();
+    hideNotice();
+    renderer.setAnimationLoop(frame);
+    stats.rebuilds += 1;
+  }
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(36, 1, 0.1, 200);
@@ -166,6 +242,7 @@ function createView(root) {
     ticks: [0, 0, 0, 0],
     alarm: [0, 0, 0, 0], // red highlight on the localized cylinder's piston, 0..1
     egt: [null, null, null, null], // eased exhaust runner temperature 0..1 (null: no sensor)
+    layout: layoutFaults([]), // reported faults per cylinder (set on each update)
     jolt: 0,
     edgeColor: new THREE.Color(COLORS.cyan),
     stutter: 0,
@@ -226,13 +303,13 @@ function createView(root) {
     const t = sim.target;
     const still = reduceMotion.matches;
     const rpm = Number(t.rpm) || 0;
-    const effect = t.effect || null;
-    const intensity = Math.min(Math.max(Number(t.intensity) || 0, 0), 1);
+    const running = isRunning(t);
+    const { perCylinder, located, misfire } = sim.layout;
 
     // Crank: real RPM scaled to a watchable speed. A misfire makes the crank stutter.
-    if (t.playing && !still) {
+    if (running && !still) {
       let omega = (rpm / 60) * 2 * Math.PI * VISUAL_SPEED;
-      if (effect === 'misfire') omega *= 1 - 0.25 * sim.stutter;
+      if (misfire) omega *= 1 - 0.25 * sim.stutter;
       sim.crank += omega * dt;
     }
     sim.stutter = Math.max(0, sim.stutter - dt * 2.5);
@@ -240,14 +317,11 @@ function createView(root) {
     stats.crank = theta;
     const cycle = mod(theta, 4 * Math.PI);
 
-    // A localized fault shows only on its cylinder; otherwise on every cylinder.
-    const located = Number.isInteger(t.model_cylinder) ? t.model_cylinder - 1 : null;
-    const effectOn = (k) => (located === null || located === k ? effect : null);
-
-    // Combustion events at each cylinder's compression TDC (plus a small offset).
+    // Combustion events at each cylinder's compression TDC (plus a small offset). Each
+    // cylinder shows its own localized faults plus any fault without a cylinder.
     engine.tdc.forEach((tdc, k) => {
       const fire = mod(tdc + (8 * Math.PI) / 180, 4 * Math.PI);
-      if (crossed(sim.lastCycle, cycle, fire) && t.playing) ignite(k, effectOn(k), intensity);
+      if (crossed(sim.lastCycle, cycle, fire) && running) ignite(k, perCylinder[k]);
     });
     sim.lastCycle = cycle;
 
@@ -267,8 +341,8 @@ function createView(root) {
       const a = mod(cycle - engine.tdc[k], 4 * Math.PI);
       const exhaust = lift(a, 0.85 * Math.PI, 2.08 * Math.PI);
       const intake = lift(a, 1.92 * Math.PI, 3.15 * Math.PI);
-      if (exhaust === 0 && cyl.exhaustOpen && t.playing) seatImpact(k, effectOn(k), intensity);
-      if (intake === 0 && cyl.intakeOpen && t.playing) seatImpact(k, effectOn(k), intensity);
+      if (exhaust === 0 && cyl.exhaustOpen && running) seatImpact(k, perCylinder[k]);
+      if (intake === 0 && cyl.intakeOpen && running) seatImpact(k, perCylinder[k]);
       cyl.exhaustOpen = exhaust > 0;
       cyl.intakeOpen = intake > 0;
       cyl.exhaust.position.y = cyl.valveY - 0.13 * exhaust;
@@ -277,12 +351,14 @@ function createView(root) {
       if (still) {
         // Reduced motion: no firing animation, so show the model state as a steady glow
         // (same colors as the animated effects) instead of hiding it.
-        const own = effectOn(k);
-        const steady = STEADY[own] || STEADY.normal;
-        sim.flash[k] = t.playing || own ? steady.flash * (own ? 0.5 + 0.5 * intensity : 1) : 0;
+        const own = perCylinder[k];
+        const steady = STEADY[own[0]?.fault] || STEADY.normal;
+        const strength = Math.max(0, ...own.map((f) => f.intensity));
+        sim.flash[k] = running || own.length
+          ? steady.flash * (own.length ? 0.5 + 0.5 * strength : 1) : 0;
         cyl.flameColor.set(steady.color);
-        sim.sparks[k] = own === 'knock_like' ? 0.7 : 0;
-        sim.ticks[k] = own === 'valve_clearance_like' ? 0.7 : 0;
+        sim.sparks[k] = has(own, 'knock_like') ? 0.7 : 0;
+        sim.ticks[k] = has(own, 'valve_clearance_like') ? 0.7 : 0;
       } else {
         // Effects decay.
         sim.flash[k] = Math.max(0, sim.flash[k] - dt * 1.7); // ~0.6 s burn
@@ -338,28 +414,25 @@ function createView(root) {
       material.color.copy(sim.edgeColor);
       material.opacity = material.userData.base * pulse;
     });
-    // Faulty-cylinder highlight: the piston the localizer names glows red and pulses;
-    // it fades in when a cylinder is named and out when the alert clears.
+    // Faulty-cylinder highlight: every piston the localizer names glows red and pulses,
+    // with a ring in its fault's color; each fades in when its cylinder is named and
+    // out when the fault is no longer reported.
     const beat = still ? 1 : 0.65 + 0.35 * Math.sin(timer.getElapsed() * 5);
     engine.cylinders.forEach((cyl, k) => {
-      const goal = k === located ? 1 : 0;
+      const goal = located[k] ? 1 : 0;
       sim.alarm[k] += (goal - sim.alarm[k]) * Math.min(1, dt * (still ? 60 : 4));
       const level = sim.alarm[k] * beat;
       cyl.piston.material.emissiveIntensity = 1.6 * level;
       cyl.alarm.material.opacity = 0.85 * level;
+      cyl.alarmLight.position.y = cyl.piston.position.y + 0.35;
+      cyl.alarmLight.intensity = 9 * level;
+      cyl.ring.visible = Boolean(located[k]);
+      if (located[k]) {
+        cyl.ring.material.color.set(located[k].color || '#f59e0b');
+        cyl.ring.material.opacity = 0.95 * pulse;
+      }
     });
-    if (located !== null) {
-      const hot = engine.cylinders[located];
-      engine.alarmLight.position.set(hot.x, hot.piston.position.y + 0.35, 0.45);
-    }
-    engine.alarmLight.intensity = located === null ? 0 : 9 * sim.alarm[located] * beat;
-    engine.model.visible = located !== null;
-    stats.modelCylinder = located === null ? null : located + 1; // for browser checks
-    if (engine.model.visible) {
-      engine.model.position.x = engine.cylinders[located].x;
-      engine.model.material.color.copy(sim.edgeColor);
-      engine.model.material.opacity = 0.95 * pulse;
-    }
+    stats.modelCylinders = located.flatMap((f, k) => (f ? [k + 1] : [])); // browser checks
     // Exhaust runners glow with their measured exhaust gas temperature.
     const egt = Array.isArray(t.egt) && t.egt.length === 4 ? t.egt : null;
     engine.cylinders.forEach((cyl, k) => {
@@ -384,9 +457,11 @@ function createView(root) {
     }
   }
 
-  function ignite(k, effect, intensity) {
+  // `faults`: the faults shown on cylinder k (its localized ones, then engine-wide ones).
+  function ignite(k, faults) {
     const cyl = engine.cylinders[k];
-    if (effect === 'misfire' && Math.random() < 0.35 + 0.5 * intensity) {
+    const misfire = find(faults, 'misfire');
+    if (misfire && Math.random() < 0.35 + 0.5 * misfire.intensity) {
       // Model says misfire (on the localized cylinder, or every cylinder when the
       // cylinder is not known): firing pulses become weak or missing.
       // A skipped firing stays dark; a weak one sputters: faint blue flicker, plug arc.
@@ -400,7 +475,11 @@ function createView(root) {
       cyl.burning = false; // no hot core or embers
       return;
     }
-    const fire = FIRE[effect] || FIRE.normal;
+    // Flame color: the cylinder's first fault other than a misfire (a misfire that did
+    // not skip this time burns blue).
+    const lead = faults.find((f) => f.fault !== 'misfire') || misfire;
+    const fire = FIRE[lead?.fault] || FIRE.normal;
+    const knock = find(faults, 'knock_like');
     sim.flash[k] = 1;
     sim.plug[k] = 1;
     sim.embers[k] = 1;
@@ -409,11 +488,11 @@ function createView(root) {
     cyl.flameColor.set(fire.flame);
     cyl.core.material.color.set(fire.core);
     cyl.plug.material.color.set(fire.plug);
-    launchEmbers(cyl, effect === 'knock_like', fire.ember);
-    if (effect === 'knock_like' && Math.random() < 0.4 + 0.6 * intensity) {
+    launchEmbers(cyl, Boolean(knock), fire.ember);
+    if (knock && Math.random() < 0.4 + 0.6 * knock.intensity) {
       sim.sparks[k] = 1;
       stats.events.knock += 1;
-      sim.jolt = Math.max(sim.jolt, 0.6 + 0.4 * intensity);
+      sim.jolt = Math.max(sim.jolt, 0.6 + 0.4 * knock.intensity);
       scatter(cyl.sparks.geometry);
     }
   }
@@ -447,14 +526,17 @@ function createView(root) {
     cyl.embers.geometry.attributes.position.needsUpdate = true;
   }
 
-  function seatImpact(k, effect, intensity) {
-    if (effect !== 'valve_clearance_like') return;
-    sim.ticks[k] = 0.5 + 0.5 * intensity;
+  function seatImpact(k, faults) {
+    const valve = find(faults, 'valve_clearance_like');
+    if (!valve) return;
+    sim.ticks[k] = 0.5 + 0.5 * valve.intensity;
     stats.events.valveTicks += 1;
-    sim.jolt = Math.max(sim.jolt, 0.25 * intensity);
+    sim.jolt = Math.max(sim.jolt, 0.25 * valve.intensity);
   }
 
   function dispose() {
+    disposed = true;
+    clearContextTimers();
     renderer.setAnimationLoop(null);
     timer.dispose();
     resizeObserver.disconnect();
@@ -469,6 +551,9 @@ function createView(root) {
       });
     });
     renderer.dispose();
+    // Hand the context back now rather than at garbage collection, so a remounted view
+    // does not count against the browser's limit of live WebGL contexts.
+    renderer.forceContextLoss();
     stats.disposed += 1;
   }
 
@@ -484,6 +569,7 @@ function createView(root) {
         setMode('engine');
       }
       sim.target = data;
+      sim.layout = layoutFaults(data.faults);
       if (firstOrder && Array.isArray(data.firing_order)) engine.setFiringOrder(data.firing_order);
       renderHud(hud, data);
       describe(root, data);
@@ -500,11 +586,17 @@ function renderHud(hud, data) {
     line(`Inline-4 engine · firing order ${order} · ${rpm} · ${speed}`),
     line(data.status_text || '', data.edge_color),
   );
+  if (data.finished) hud.append(line(finishedText(data)));
   if (Array.isArray(data.egt_c)) hud.append(line(egtText(data)));
   if (Number.isInteger(data.truth_cylinder)) {
     hud.append(line(`Evaluation truth overlay: fault in cylinder ${data.truth_cylinder} ` +
                     '(not used by the model)', '#fbbf24'));
   }
+}
+
+function finishedText(data) {
+  const at = Number.isFinite(data.t) ? ` at ${data.t.toFixed(1)} s` : '';
+  return `Replay ended${at} · engine shown running on the final decision`;
 }
 
 function egtText(data) {
@@ -581,7 +673,8 @@ function fallbackView(root) {
     if (!root.isConnected) return;
     const dt = Math.min((now - last) / 1000, 0.1);
     last = now;
-    if (target.playing && !reduceMotion.matches) {
+    const running = isRunning(target);
+    if (running && !reduceMotion.matches) {
       crank += ((Number(target.rpm) || 0) / 60) * 2 * Math.PI * VISUAL_SPEED * dt;
     }
     pistons.forEach(({ piston, glow }, k) => {
@@ -589,7 +682,7 @@ function fallbackView(root) {
       const height = CRANK_R * Math.cos(psi) + Math.sqrt(ROD_L ** 2 - (CRANK_R * Math.sin(psi)) ** 2);
       piston.setAttribute('y', String(56 + (CRANK_R + ROD_L - height) * 90));
       glow.setAttribute('opacity', String(Math.max(0, Math.cos(mod(crank - tdc[k], 4 * Math.PI)))
-                                          * (target.playing ? 0.6 : 0)));
+                                          * (running ? 0.6 : 0)));
     });
     requestAnimationFrame(frame);
   }
@@ -600,8 +693,12 @@ function fallbackView(root) {
       root.setAttribute('aria-label', `Engine schematic (2D). ${data.status_text || ''}.`);
       const color = data.edge_color || '#00e5e5';
       block.setAttribute('stroke', color);
-      pistons.forEach(({ glow, port }, k) => {
-        glow.setAttribute('fill', color);
+      const { located, perCylinder } = layoutFaults(data.faults);
+      pistons.forEach(({ glow, port, piston }, k) => {
+        // Each cylinder glows in its own fault's color (else the state color); a
+        // localized fault also turns that piston red.
+        glow.setAttribute('fill', perCylinder[k][0]?.color || color);
+        piston.setAttribute('fill', located[k] ? '#ff2d2d' : '#9fb3c8');
         const egt = Array.isArray(data.egt) ? Number(data.egt[k]) : NaN;
         port.setAttribute('fill', Number.isFinite(egt)
           ? `#${inferno(egt, new THREE.Color()).getHexString()}` : 'rgba(148,163,184,0.25)');
@@ -610,6 +707,7 @@ function fallbackView(root) {
         line('WebGL is unavailable, so a 2D schematic replaces the 3D view.'),
         line(data.status_text || '', color),
       );
+      if (data.finished) status.append(line(finishedText(data)));
       if (Array.isArray(data.egt_c)) status.append(line(egtText(data)));
       if (Number.isInteger(data.truth_cylinder)) {
         status.append(line(`Evaluation truth overlay: fault in cylinder ${data.truth_cylinder} ` +
@@ -820,9 +918,22 @@ function buildEngine() {
 
   const chamberLight = new THREE.PointLight(COLORS.flame, 0, 4, 2);
   shaker.add(chamberLight);
-  // Red light that follows the localized piston and tints the parts around it.
-  const alarmLight = new THREE.PointLight(COLORS.alarm, 0, 1.4, 2);
-  shaker.add(alarmLight);
+  // Per cylinder (several faults can be localized at once): a red light that follows
+  // the piston and tints the parts around it, and a localization ring above the head
+  // in the fault's color. Built once with zero intensity / hidden, so the light count
+  // never changes and no shader is recompiled when a fault appears.
+  const ringGeometry = new THREE.TorusGeometry(0.46, 0.03, 8, 64);
+  cylinders.forEach((cyl) => {
+    cyl.alarmLight = new THREE.PointLight(COLORS.alarm, 0, 1.4, 2);
+    cyl.alarmLight.position.set(cyl.x, CHAMBER_Y, 0.45);
+    cyl.ring = new THREE.Mesh(ringGeometry, new THREE.MeshBasicMaterial({
+      color: COLORS.amber, transparent: true, opacity: 0.95,
+    }));
+    cyl.ring.rotation.x = Math.PI / 2;
+    cyl.ring.position.set(cyl.x, DECK_Y + 0.95, 0);
+    cyl.ring.visible = false;
+    shaker.add(cyl.alarmLight, cyl.ring);
+  });
 
   // Evaluation-truth marker (only shown when the overlay is on).
   const truth = new THREE.Mesh(
@@ -834,21 +945,10 @@ function buildEngine() {
   truth.visible = false;
   shaker.add(truth);
 
-  // Model localization marker: the cylinder the localizer names, in the state color.
-  const model = new THREE.Mesh(
-    new THREE.TorusGeometry(0.46, 0.03, 8, 64),
-    new THREE.MeshBasicMaterial({ color: COLORS.amber, transparent: true, opacity: 0.95 }),
-  );
-  model.rotation.x = Math.PI / 2;
-  model.position.y = DECK_Y + 0.95;
-  model.visible = false;
-  shaker.add(model);
-
   const pins = [0, Math.PI, Math.PI, 0];
   const tdc = [0, 3 * Math.PI, Math.PI, 2 * Math.PI];
   const engine = {
-    group, shaker, crankshaft, camshafts, cylinders, chamberLight, alarmLight, truth, model,
-    edgeMaterials,
+    group, shaker, crankshaft, camshafts, cylinders, chamberLight, truth, edgeMaterials,
     pins, tdc,
     setFiringOrder(order) {
       // Compression TDC of the i-th cylinder in the firing order is at i * 180 deg of
@@ -1047,6 +1147,38 @@ function scatter(geometry) {
 
 // ---------------------------------------------------------------------------
 // Helpers
+
+// The engine turns while the replay plays and after it has finished; a pause freezes it.
+function isRunning(data) {
+  return Boolean(data.animate ?? data.playing);
+}
+
+// Reported faults per cylinder. perCylinder[k]: faults shown on cylinder k (the ones
+// localized to it, then those without a cylinder, which show on every cylinder).
+// located[k]: the first fault localized to cylinder k, or null. Unknown entries are
+// ignored; intensity is clamped to 0..1.
+function layoutFaults(faults) {
+  const list = (Array.isArray(faults) ? faults : [])
+    .filter((f) => f && FAULT_KINDS.includes(f.fault))
+    .map((f) => ({ ...f, intensity: clamp01(Number(f.intensity) || 0) }));
+  const cylinderOf = (f) => (Number.isInteger(f.cylinder) && f.cylinder >= 1 && f.cylinder <= 4
+    ? f.cylinder - 1 : null);
+  const wide = list.filter((f) => cylinderOf(f) === null);
+  const own = [0, 1, 2, 3].map((k) => list.filter((f) => cylinderOf(f) === k));
+  return {
+    perCylinder: own.map((faults) => faults.concat(wide)),
+    located: own.map((faults) => faults[0] || null),
+    misfire: list.some((f) => f.fault === 'misfire'),
+  };
+}
+
+function find(faults, kind) {
+  return faults.find((f) => f.fault === kind) || null;
+}
+
+function has(faults, kind) {
+  return faults.some((f) => f.fault === kind);
+}
 
 function lerp(a, b, t) {
   return a + (b - a) * t;

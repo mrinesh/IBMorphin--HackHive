@@ -23,6 +23,29 @@ PATTERN_TEXT = {"cold": "runs cold (EGT and CHT low): not firing → misfire",
                 "exhaust_hot": "exhaust hot, head not: hot gas past the valve → valve-like"}
 
 
+def peak_decimate(t, y, max_points: int) -> tuple[np.ndarray, np.ndarray]:
+    """Thin a trace for display to at most `max_points`, keeping each bin's extremes.
+
+    Plain striding (y[::k]) drops short spikes such as knock bursts and valve-train
+    impacts; keeping both the minimum and the maximum of every bin preserves them.
+    Charts are drawn as SVG, not WebGL (see the 3D view in dashboard/README.md), so
+    traces are kept to a few thousand points. NaN gaps stay NaN.
+    """
+    t, y = np.asarray(t), np.asarray(y)
+    if y.size <= max_points:
+        return t, y
+    bins = max(max_points // 2, 1)
+    size = -(-y.size // bins)  # ceil: every sample falls in a bin
+    values = np.pad(y.astype(np.float64), (0, size * bins - y.size), constant_values=np.nan)
+    blocks = values.reshape(bins, size)
+    nan = np.isnan(blocks)
+    low = np.argmin(np.where(nan, np.inf, blocks), axis=1)
+    high = np.argmax(np.where(nan, -np.inf, blocks), axis=1)
+    start = np.arange(bins) * size
+    index = np.unique(np.minimum(np.concatenate([start + low, start + high]), y.size - 1))
+    return t[index], y[index]
+
+
 def crank_speed_figure(crank: dict[str, Any]) -> go.Figure:
     """Crank speed over the last 0.5 s: per tooth (faint) and per stroke, TDCs marked.
 
@@ -31,10 +54,10 @@ def crank_speed_figure(crank: dict[str, Any]) -> go.Figure:
     error and timer jitter.
     """
     trace, marks = crank.get("speed_trace") or {}, crank.get("stroke_marks") or {}
-    fig = go.Figure(go.Scattergl(x=trace.get("t_s", []), y=trace.get("rpm", []), mode="lines",
-                                 line={"width": 1, "color": "rgba(0,229,229,0.35)"},
-                                 name="per tooth", hovertemplate="%{x:.3f} s: %{y:.0f} rpm"
-                                                                 "<extra>per tooth</extra>"))
+    fig = go.Figure(go.Scatter(x=trace.get("t_s", []), y=trace.get("rpm", []), mode="lines",
+                               line={"width": 1, "color": "rgba(0,229,229,0.35)"},
+                               name="per tooth", hovertemplate="%{x:.3f} s: %{y:.0f} rpm"
+                                                               "<extra>per tooth</extra>"))
     flagged = marks.get("flagged", [])
     fig.add_trace(go.Scatter(
         x=marks.get("t_s", []), y=marks.get("rpm", []), mode="lines+markers", name="per stroke",

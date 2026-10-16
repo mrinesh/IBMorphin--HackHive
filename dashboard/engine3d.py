@@ -15,70 +15,50 @@ import streamlit as st
 from dashboard import explain
 from dashboard.theme import CLASS_META, TOKENS, class_meta
 
-FAULTS = ("misfire", "knock_like", "valve_clearance_like")
+FAULTS = explain.FAULTS
 EGT_RANGE_C = (250.0, 850.0)  # exhaust runner color scale (cold dark -> hot white)
+HELD_INTENSITY = 0.45  # effect strength while a fault is only held by its alert
 
 
 def scene_state(record: dict[str, Any] | None, model, *, t_now: float, playing: bool,
-                rpm: float | None, firing_order: list[int],
+                rpm: float | None, firing_order: list[int], finished: bool = False,
                 truth: dict[str, Any] | None = None) -> dict[str, Any]:
     """Small JSON state for the 3D view, derived only from model output and sensor data.
 
-    The effect is the confirmed alert class if there is one, else an accepted fault.
-    Its intensity is the model's calibrated confidence for that class (v1), or the
-    evidence level / 3 for the temporary model, or 0.45 while an alert is only held.
+    `faults` lists every fault reported now (explain.reported_faults: active alerts
+    plus this window's detections), each with the cylinder the localizer names for it
+    (from sensor data and the cam phase reference only; None when not localized), its
+    status (confirmed / held / unconfirmed), its class color, and an effect intensity:
+    the model's calibrated probability for that fault (v2), its confidence (v1), the
+    evidence level / 3 (temporary model), or 0.45 while the fault is only held by its
+    alert. The view shows each fault on its own cylinder, or engine-wide when it has
+    none. `effect` is the first fault (block outline color).
     `vibration_ratio` is this window's vibration RMS over the normal-reference RMS.
-    `model_cylinder` is the cylinder the localizer names for the effect's alert (from
-    sensor data and the cam phase reference only); the view then confines the effect
-    to that cylinder. `truth` (evaluation truth) is only passed when the overlay is on,
-    and only its affected cylinder during an active fault interval reaches the browser.
+    `animate` keeps the engine running: while playing, and after the replay finished
+    (on the final decision, for review). A mid-replay pause freezes it.
+    `truth` (evaluation truth) is only passed when the overlay is on, and only its
+    affected cylinder during an active fault interval reaches the browser.
     With data contract 1.2 sensors, `egt` (each runner's exhaust gas temperature
     scaled to EGT_RANGE_C, 0-1) colors the exhaust runners and `egt_c` labels them;
     `crank_cylinder` and `thermal_cylinder` are the cylinders the independent crank
     and thermal paths name (sensor data only).
     """
-    state: dict[str, Any] = {"t": round(t_now, 2), "playing": playing,
+    state: dict[str, Any] = {"t": round(t_now, 2), "playing": playing, "finished": finished,
+                             "animate": playing or finished,
                              "rpm": None if rpm is None else round(rpm, 1),
-                             "firing_order": list(firing_order), "effect": None,
-                             "intensity": 0.0, "vibration_ratio": 1.0, "alert": None,
+                             "firing_order": list(firing_order), "effect": None, "faults": [],
+                             "vibration_ratio": 1.0, "alert": None,
                              "edge_color": TOKENS["cyan"], "status_text": "Model: warming up",
-                             "truth_cylinder": None, "model_cylinder": None,
-                             "egt": None, "egt_c": None, "crank_cylinder": None,
-                             "thermal_cylinder": None}
+                             "truth_cylinder": None, "egt": None, "egt_c": None,
+                             "crank_cylinder": None, "thermal_cylinder": None}
     if record is not None:
-        quality, accepted, alert = record["quality"], record["accepted"], record.get("alert")
-        if "+" in (alert or ""):  # v2 fault set: animate the first fault
-            alert = alert.split("+")[0]
-        if "+" in (accepted or ""):
-            accepted = accepted.split("+")[0]
-        effect = alert if alert in FAULTS else accepted if accepted in FAULTS else None
-        if effect and effect == accepted and quality == "ok":
-            if "probability" in record:
-                intensity = record["probability"]
-            else:
-                strength = explain.evidence_strength(record, model)
-                intensity = strength["level"] / 3 if strength else 0.45
-        else:
-            intensity = 0.45 if effect else 0.0
+        quality, accepted = record["quality"], record["accepted"]
+        faults = [fault_state(entry, record, model) for entry in explain.reported_faults(record)]
+        effect = faults[0]["fault"] if faults else None
         meta = CLASS_META[effect] if effect else class_meta(accepted, quality)
-        if quality != "ok":
-            status = "Model: no decision (data quality)"
-        elif accepted in FAULTS:
-            confidence = (f" · confidence {record['probability']:.2f}"
-                          if "probability" in record else "")
-            label = explain.names(record["accepted"])
-            status = f"Model: {label}{confidence}"
-        else:
-            status = f"Model: {class_meta(accepted)['label']}"
-        if alert and alert != accepted:
-            status += f" · alert held: {CLASS_META.get(alert, {'label': alert})['label']}"
-        where = (record.get("localization") or {}).get(effect) if effect else None
-        if effect:
-            status += location_text(where, "localization" in record)
-        if where and where.get("cylinder") is not None:
-            state["model_cylinder"] = int(where["cylinder"])
-        state.update(effect=effect, intensity=round(float(intensity), 3), alert=alert,
-                     edge_color=meta["color"], status_text=status,
+        state.update(effect=effect, faults=faults, alert=record.get("alert"),
+                     edge_color=meta["color"],
+                     status_text=status_text(record, faults, "localization" in record),
                      vibration_ratio=_vibration_ratio(record, model))
         state.update(sensor_state(record))
     if truth is not None:
@@ -90,6 +70,49 @@ def scene_state(record: dict[str, Any] | None, model, *, t_now: float, playing: 
         if active and truth.get("condition") in FAULTS and isinstance(cylinder, int):
             state["truth_cylinder"] = cylinder
     return state
+
+
+def fault_state(entry: dict[str, str], record: dict[str, Any], model) -> dict[str, Any]:
+    """One reported fault for the view: cylinder, status, color and effect intensity."""
+    fault, status = entry["fault"], entry["status"]
+    intensity = fault_probability(entry, record)
+    if intensity is None:
+        strength = explain.evidence_strength(record, model) if status != "held" else None
+        intensity = strength["level"] / 3 if strength else HELD_INTENSITY
+    cylinder = ((record.get("localization") or {}).get(fault) or {}).get("cylinder")
+    return {"fault": fault, "status": status,
+            "cylinder": int(cylinder) if cylinder is not None else None,
+            "intensity": round(float(intensity), 3), "color": CLASS_META[fault]["color"]}
+
+
+def fault_probability(entry: dict[str, str], record: dict[str, Any]) -> float | None:
+    """The model's calibrated probability for a fault detected in this window, if any."""
+    if entry["status"] == "held":  # not detected in this window: nothing to quote
+        return None
+    if "detected" in record:  # v2: one calibrated detector per fault
+        return record["probabilities"][entry["fault"]]
+    return record.get("probability")  # v1: confidence of the accepted class
+
+
+def status_text(record: dict[str, Any], faults: list[dict[str, Any]], localizing: bool) -> str:
+    """HUD line naming each reported fault with its own confidence, status and cylinder."""
+    if not faults:
+        if record["quality"] != "ok":
+            return "Model: no decision (data quality)"
+        return f"Model: {class_meta(record['accepted'])['label']}"
+    parts = []
+    for f in faults:
+        p = fault_probability(f, record)
+        fields = [CLASS_META[f["fault"]]["label"],
+                  *([f"confidence {p:.2f}"] if p is not None else []),
+                  *([STATUS_TEXT[f["status"]]] if f["status"] in STATUS_TEXT else [])]
+        where = (record.get("localization") or {}).get(f["fault"])
+        parts.append(", ".join(fields) + location_text(where, localizing))
+    prefix = "Model (no decision this window): " if record["quality"] != "ok" else "Model: "
+    return prefix + "; ".join(parts)
+
+
+STATUS_TEXT = {"held": "alert held", "unconfirmed": "not confirmed yet"}
 
 
 def sensor_state(record: dict[str, Any]) -> dict[str, Any]:
@@ -112,16 +135,16 @@ def sensor_state(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def location_text(where: dict[str, Any] | None, localizing: bool) -> str:
-    """Status suffix describing where the model places the alerted fault."""
+    """Suffix describing where the model places one reported fault."""
     if not localizing:
-        return " · cylinder not identified (no localizer loaded)"
+        return ", cylinder not identified (no localizer loaded)"
     if not where:
-        return " · locating cylinder…"
+        return ", locating cylinder…"
     if where.get("cylinder") is not None:
-        return f" · cylinder {where['cylinder']} (confidence {where['confidence']:.2f})"
+        return f", cylinder {where['cylinder']} (location confidence {where['confidence']:.2f})"
     if where.get("slot") is not None:
-        return f" · firing slot {where['slot']} (no cam reference: cylinder unknown)"
-    return " · locating cylinder…"
+        return f", firing slot {where['slot']} (no cam reference: cylinder unknown)"
+    return ", locating cylinder…"
 
 
 def _vibration_ratio(record: dict[str, Any], model) -> float:

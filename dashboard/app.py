@@ -101,7 +101,10 @@ PRESETS_PATH = ROOT / "configs/demo_presets.json"
 HOLDOUT_DATASET = "integration_v1"
 FEATURES_PATH = ROOT / "data/processed/integration_v1_features.parquet"
 REPORT_PATH = ROOT / "reports/generated/temporary_model_report.json"
-DISPLAY_DECIMATION = 8
+# Points per displayed trace (min/max per bin, so short spikes survive). Charts are SVG:
+# WebGL (Scattergl) traces would compete with the 3D view for the browser's few WebGL
+# contexts, and the browser then drops the oldest one, the 3D view's.
+DISPLAY_POINTS = 2000
 SPECTROGRAM_S = 10.0
 TICK_S = 0.5
 CONTEXT_SIGNALS = ("rpm", "load", "throttle")
@@ -669,8 +672,9 @@ def evidence_figure(panel: EvidencePanel) -> go.Figure:
                         subplot_titles=[f"{SIGNAL_NAMES[i.signal]}: {i.trace_label}"
                                         for i in panel.indicators])
     for row, ind in enumerate(panel.indicators, start=1):
-        fig.add_trace(go.Scattergl(x=ind.trace_t, y=ind.trace_y, name=ind.trace_label,
-                                   line={"width": 1, "color": "#555"}), row=row, col=1)
+        x, y = sensors.peak_decimate(ind.trace_t, ind.trace_y, DISPLAY_POINTS)
+        fig.add_trace(go.Scatter(x=x, y=y, name=ind.trace_label,
+                                 line={"width": 1, "color": "#555"}), row=row, col=1)
     add_bands(fig, [(a, b, SIGNAL_COLORS[ind.signal], 0.3, row, 1)
                     for row, ind in enumerate(panel.indicators, start=1)
                     for a, b in ind.segments])
@@ -1031,10 +1035,11 @@ def live_view():
     has_probability = bool(latest and "probability" in latest)
     confirm = getattr(model, "confirm_updates", config["runtime"]["confirm_fault_updates"])
 
-    # Sections whose element count changes during playback (alert banners, lab
-    # response, evidence panels) each live in one fixed container, so elements after
-    # them keep their place in the page and the 3D view is not remounted (which would
-    # rebuild the scene and reset its camera) whenever an alert appears or clears.
+    # Sections whose element count changes during playback or between models (alert
+    # banners, per-fault probabilities, lab response, evidence panels) each live in one
+    # fixed container, so elements after them keep their place in the page and the 3D
+    # view is not remounted (which would rebuild the scene, reset its camera and open a
+    # new WebGL context) whenever an alert appears or clears or the model type changes.
     active = active_alerts(latest)
     with st.container(key="alerts"):
         if active:
@@ -1048,17 +1053,33 @@ def live_view():
             st.success("No active alert — the engine sounds normal so far",
                        icon=":material/check_circle:")
 
+    # Decision: every fault reported now (same faults as the alert banners), else this
+    # window's class. A note marks faults held by their alert but not detected in this
+    # window, or detected but not confirmed yet.
+    reported = explain.reported_faults(latest)
     cols = st.container(key="readout").columns(7)
     cols[0].metric("Replay time", f"{t_now:.1f} s")
-    cols[1].metric("Decision", label(latest["accepted"]) if latest else "Warming up",
-                   help="What the model accepts for this window after its confidence and "
+    cols[1].metric("Decision",
+                   explain.reported_names(reported) if reported
+                   else label(latest["accepted"]) if latest else "Warming up",
+                   delta=explain.status_note(reported) or None, delta_color="off",
+                   delta_arrow="off",
+                   help="Faults the model reports now: confirmed alerts plus faults detected "
+                        "in this window. Alerts are confirmed over several updates and held "
+                        "through brief dropouts, so the note marks a fault that is held but "
+                        "not detected in this window, or detected but not confirmed yet. "
+                        "Without a fault: this window's class after the confidence and "
                         "anomaly checks.")
     cols[2].metric("Best guess", label(latest["predicted"]) if latest else "-",
-                   help="The classifier's top class before the acceptance checks.")
+                   help="The classifier's top class for this window, before the acceptance "
+                        "checks.")
     if multi:
-        cols[3].metric("Faults detected", len(latest["detected"]) if latest else "-",
-                       help="Each fault has its own calibrated detector and threshold, so "
-                            "several can be reported in the same window.")
+        cols[3].metric("Detected this window", len(latest["detected"]) if latest else "-",
+                       help="Faults whose own calibrated detector fired in this "
+                            f"{config['analysis']['window_s']:g} s window. "
+                            "Each fault has its own detector and threshold, so several can "
+                            "be detected together; an alert can stay active through a "
+                            "window where its fault is not detected.")
     elif has_probability:
         cols[3].metric("Calibrated confidence", f"{latest['probability']:.2f}",
                        help=f"Accepted only if ≥ {model.probability_min:.2f}; calibrated on "
@@ -1076,13 +1097,14 @@ def live_view():
                    if latest else "-",
                    help="Model processing per decision / dashboard update time (server).")
 
-    if multi:
-        fault_cols = st.columns(len(model.fault_classes))
-        for col, fault in zip(fault_cols, model.fault_classes, strict=True):
-            col.metric(f"P({fault})",
-                       f"{latest['probabilities'][fault]:.2f}" if has_probability else "-",
-                       help=f"Detected at ≥ {model.thresholds[fault]:.2f}; calibrated on "
-                            "separate calibration engines (synthetic).")
+    with st.container(key="fault_probabilities"):  # v2 only: fixed slot (see above)
+        if multi:
+            fault_cols = st.columns(len(model.fault_classes))
+            for col, fault in zip(fault_cols, model.fault_classes, strict=True):
+                col.metric(f"P({fault})",
+                           f"{latest['probabilities'][fault]:.2f}" if has_probability else "-",
+                           help=f"Detected at ≥ {model.thresholds[fault]:.2f}; calibrated on "
+                                "separate calibration engines (synthetic).")
 
     with st.container(key="lab_response"):
         if lab_log:
@@ -1102,6 +1124,9 @@ def live_view():
     with view_col, st.container(key="viewport"):
         engine3d.render(engine3d.scene_state(
             latest, model, t_now=t_now, playing=bool(state.playing),
+            # At the end the engine keeps running on the final decision (browser-side
+            # animation only; nothing reruns on the server).
+            finished=bool(latest) and state.next_packet >= len(run_packets),
             rpm=next(c["value"] for c in cards if c["label"] == "RPM"),
             firing_order=config["engine"]["firing_order"],
             truth=load_truth_cached(dataset, run_id) if show_truth else None))
@@ -1132,8 +1157,9 @@ def live_view():
         x = engine.buffers[m][-round(window_s * fs):]
         t = t_now - (x.size - np.arange(x.size)) / fs
         color = theme.MODALITY_COLORS[m]
-        waves.add_trace(go.Scattergl(x=t[::DISPLAY_DECIMATION], y=x[::DISPLAY_DECIMATION],
-                                     name=m, line={"width": 1, "color": color}), row=row, col=1)
+        shown_t, shown_x = sensors.peak_decimate(t, x, DISPLAY_POINTS)
+        waves.add_trace(go.Scatter(x=shown_t, y=shown_x, name=m,
+                                   line={"width": 1, "color": color}), row=row, col=1)
         if x.size >= config["analysis"]["welch_segment_samples"]:
             clean = np.nan_to_num(x.astype(np.float64))
             f, p = welch(clean, fs=fs, window="hann",
@@ -1142,10 +1168,10 @@ def live_view():
                                      line={"width": 1.5, "color": color}))
             if m == "vibration":
                 env = _band_envelope(clean, fs, HIGH_ENVELOPE_HZ)
-                waves.add_trace(go.Scattergl(x=t[::DISPLAY_DECIMATION],
-                                             y=env[::DISPLAY_DECIMATION], name="envelope",
-                                             line={"width": 1,
-                                                   "color": theme.MODALITY_COLORS["envelope"]}),
+                env_t, env_y = sensors.peak_decimate(t, env, DISPLAY_POINTS)
+                waves.add_trace(go.Scatter(x=env_t, y=env_y, name="envelope",
+                                           line={"width": 1,
+                                                 "color": theme.MODALITY_COLORS["envelope"]}),
                                 row=3, col=1)
     # Link: same segments and colors as the evidence panels.
     add_bands(waves, [(a, b, SIGNAL_COLORS[ind.signal], 0.2, row, 1)

@@ -118,3 +118,77 @@ def test_background_text_is_marked_as_not_model_output():
     assert "general background, not model output" in card
     assert "Typical checks on a real engine" in card
     assert "Evidence strength for Knock-like" in card
+
+
+V2 = SimpleNamespace(model_version="v2-test", anomaly_threshold=2.5,
+                     fault_classes=("misfire", "knock_like", "valve_clearance_like"),
+                     thresholds={"misfire": 0.5, "knock_like": 0.5, "valve_clearance_like": 0.5})
+
+
+def v2_record(**overrides):
+    """Knock and misfire alerts active; only misfire detected in this window."""
+    return record(predicted="misfire", accepted="misfire", detected=["misfire"],
+                  probabilities={"misfire": 0.97, "knock_like": 0.4, "valve_clearance_like": 0.1},
+                  alerts=["knock_like", "misfire"], alert="knock_like+misfire") | overrides
+
+
+def test_reported_faults_combine_alerts_and_this_windows_detections():
+    held = explain.reported_faults(v2_record())
+    assert held == [{"fault": "knock_like", "status": "held"},
+                    {"fault": "misfire", "status": "confirmed"}]
+    assert explain.reported_names(held) == "Knock-like + Misfire"
+    assert explain.status_note(held) == "Knock-like held (not in this window)"
+    pending = explain.reported_faults(v2_record(accepted="knock_like+misfire",
+                                                alerts=["misfire"], alert="misfire"))
+    assert [r["status"] for r in pending] == ["unconfirmed", "confirmed"]
+    assert explain.status_note(pending) == "Knock-like awaiting confirmation"
+    both = explain.reported_faults(v2_record(accepted="knock_like+misfire"))
+    assert [r["status"] for r in both] == ["confirmed", "confirmed"]
+    assert explain.status_note(both) == ""
+    # v1: one alert class; a data-quality window detects nothing, so alerts are held.
+    assert explain.reported_faults(record(alert="knock_like")) == [
+        {"fault": "knock_like", "status": "confirmed"}]
+    assert explain.reported_faults(record(quality="clipped", accepted="uncertain",
+                                          alert="knock_like")) == [
+        {"fault": "knock_like", "status": "held"}]
+    assert explain.reported_faults(record(accepted="normal", predicted="normal")) == []
+    assert explain.reported_faults(None) == []
+
+
+def test_status_card_names_every_reported_fault():
+    result = explain.diagnose(v2_record(), V2, {"misfire": 2, "knock_like": 3,
+                                                "valve_clearance_like": 2})
+    assert result["meta"]["label"] == "Knock-like + Misfire"  # same faults as the banners
+    assert result["subtitle"] == "Classifier: Misfire · Knock-like held (not in this window)"
+    assert result["alert"] == "Knock-like + Misfire (confirmed by 3 consistent updates)"
+
+
+def test_peak_decimate_keeps_short_spikes_within_the_point_budget():
+    import numpy as np
+
+    from dashboard import sensors
+
+    t = np.arange(20_000) / 10_000
+    y = np.zeros_like(t)
+    y[12_345], y[777] = 9.0, -7.0  # one-sample spikes a stride would usually skip
+    y[5_000:5_010] = np.nan  # a waveform gap stays a gap
+    shown_t, shown_y = sensors.peak_decimate(t, y, 2000)
+    assert shown_y.size <= 2000 and np.all(np.diff(shown_t) > 0)
+    assert np.nanmax(shown_y) == 9.0 and np.nanmin(shown_y) == -7.0
+    assert shown_t[np.nanargmax(shown_y)] == t[12_345]
+    short_t, short_y = sensors.peak_decimate(t[:500], y[:500], 2000)
+    assert short_y.size == 500  # short traces pass through unchanged
+
+
+def test_dashboard_charts_use_no_webgl_traces():
+    """The 3D view needs the page's WebGL context. Browsers keep only a few per page and
+    drop the oldest (the 3D view) when charts keep creating new ones, so charts are SVG."""
+    import re
+    from pathlib import Path
+
+    pattern = re.compile(r"Scattergl\s*\(|['\"]scattergl['\"]|render_mode\s*=\s*['\"]webgl")
+    dashboard = Path(__file__).resolve().parents[1] / "dashboard"
+    offenders = [f"{path.name}:{n}" for path in dashboard.glob("*.py")
+                 for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+                 if pattern.search(line)]
+    assert offenders == []
