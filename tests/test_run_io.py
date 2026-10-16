@@ -171,3 +171,65 @@ def test_loader_does_not_reference_evaluation_truth():
     source = Path(run_io.__file__).read_text(encoding="utf-8")
     code = source.split('"""', 2)[2]  # skip the module docstring that names it
     assert "evaluation_truth" not in code and "_events.json" not in code
+
+
+def with_cam(parts, pulses=None, **overrides):
+    """Upgrade a bundle to contract 1.1 with a cam phase reference at 1500 rpm."""
+    pulses = np.arange(0.01, DURATION_S, 120 / 1500) if pulses is None else pulses
+    parts["mat"]["cam_sync_s"] = np.asarray(pulses, dtype=np.float64).reshape(-1, 1)
+    parts["metadata"]["schema_version"] = "1.1"
+    parts["metadata"]["streams"]["cam_sync"] = {
+        "unit": "s", "clock": "vibration", "reference": "cylinder_1_firing_tdc",
+        "angle_deg": 0, "n_pulses": len(pulses), **overrides}
+
+
+def test_cam_sync_round_trips(tmp_path, config):
+    bundle = run_io.load_run(write_bundle(tmp_path, config, mutate=with_cam))
+    assert run_io.validate_run(bundle, config) == []
+    assert bundle.cam_sync_s.ndim == 1 and bundle.cam_sync_s.size == 25
+    assert run_io.run_warnings(bundle, config) == []
+
+
+def test_contract_1_0_bundle_has_no_cam_reference(tmp_path, config):
+    bundle = run_io.load_run(write_bundle(tmp_path, config))
+    assert bundle.cam_sync_s is None
+    assert run_io.validate_run(bundle, config) == []
+
+
+@pytest.mark.parametrize(
+    ("description", "mutate", "expected"),
+    [
+        ("1.1 without pulses", lambda p: p["metadata"].update(schema_version="1.1"),
+         "needs both"),
+        ("count mismatch", lambda p: with_cam(p, n_pulses=3), "metadata n_pulses"),
+        ("wrong angle", lambda p: with_cam(p, angle_deg=90), "angle_deg"),
+        ("wrong clock", lambda p: with_cam(p, clock="audio"), "clock"),
+        ("not increasing", lambda p: with_cam(p, pulses=[0.5, 0.4, 0.9]), "strictly"),
+        ("outside run", lambda p: with_cam(p, pulses=[0.5, 0.9, DURATION_S + 1]), "outside"),
+        ("undeclared pulses", lambda p: p["mat"].update(cam_sync_s=np.ones((3, 1))),
+         "no streams.cam_sync"),
+        ("unknown version", lambda p: p["metadata"].update(schema_version="2.0"),
+         "schema_version"),
+    ],
+)
+def test_cam_sync_violations(tmp_path, config, description, mutate, expected):
+    issues = issues_for(tmp_path, config, mutate)
+    assert any(expected in issue for issue in issues), (description, issues)
+
+
+def test_missing_cam_pulses_are_a_warning_not_a_violation(tmp_path, config):
+    pulses = np.delete(np.arange(0.01, DURATION_S, 120 / 1500), [5, 12])
+    bundle = run_io.load_run(write_bundle(tmp_path, config,
+                                          mutate=lambda p: with_cam(p, pulses=pulses)))
+    assert run_io.validate_run(bundle, config) == []
+    assert any("2 gaps" in w for w in run_io.run_warnings(bundle, config))
+
+
+def test_speed_ramp_does_not_warn_about_cam_gaps(tmp_path, config):
+    # Cycle period shrinking from 0.12 s to 0.045 s over the run: no pulse is missing.
+    pulses = np.cumsum(np.linspace(0.12, 0.045, 24))
+    pulses = pulses[pulses < DURATION_S]
+    bundle = run_io.load_run(write_bundle(tmp_path, config,
+                                          mutate=lambda p: with_cam(p, pulses=pulses)))
+    assert run_io.validate_run(bundle, config) == []
+    assert run_io.run_warnings(bundle, config) == []

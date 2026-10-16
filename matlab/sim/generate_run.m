@@ -19,6 +19,8 @@ function run = generate_run(projectConfig, batchConfig, scenario)
     [events, profile] = apply_fault(events, profile, scenario, params, engineParams, streams.fault);
     events = add_unrelated_impacts(events, profile, scenario, params, durationS, warmupS, ...
         streams.disturbance);
+    % Cam phase reference from the final crank profile (after misfire RPM dips).
+    camSyncS = cam_sync_times(profile, projectConfig.engine.cam_sync_angle_deg, durationS);
 
     audioFs = projectConfig.streams.audio.sample_rate_hz;
     vibrationFs = projectConfig.streams.vibration.sample_rate_hz;
@@ -58,8 +60,10 @@ function run = generate_run(projectConfig, batchConfig, scenario)
     run.audio_fs_hz = audioFs;
     run.vibration_fs_hz = vibrationFs;
     run.telemetry = telemetry;
+    run.cam_sync_s = camSyncS;
     run.render_info = struct('audio', audioInfo, 'vibration', vibrationInfo);
-    run.metadata = build_metadata(projectConfig, batchConfig, scenario, audio, vibration);
+    run.metadata = build_metadata(projectConfig, batchConfig, scenario, audio, vibration, ...
+        camSyncS);
     run.truth = build_truth(batchConfig, scenario, events, durationS, masterSeed, streamIndices);
     run.profile = profile;
     run.engine_params = engineParams;
@@ -122,11 +126,11 @@ function e = draw_engine_params(v, stream)
     e.ltft_offset_pct = v.ltft_offset_range_pct(1) + diff(v.ltft_offset_range_pct) * rand(stream);
 end
 
-function metadata = build_metadata(projectConfig, batchConfig, scenario, audio, vibration)
+function metadata = build_metadata(projectConfig, batchConfig, scenario, audio, vibration, camSyncS)
     streamsCfg = projectConfig.streams;
     sensors = batchConfig.generator_params.sensors;
     metadata = struct();
-    metadata.schema_version = '1.0';
+    metadata.schema_version = '1.1';  % 1.1 adds the cam_sync phase reference
     metadata.run_id = scenario.run_id;
     metadata.engine_id = scenario.engine_id;
     metadata.batch_id = batchConfig.batch_id;
@@ -138,7 +142,8 @@ function metadata = build_metadata(projectConfig, batchConfig, scenario, audio, 
     metadata.duration_s = batchConfig.duration_s;
     metadata.streams = struct( ...
         'audio', stream_info(streamsCfg.audio, sensors.audio, numel(audio)), ...
-        'vibration', stream_info(streamsCfg.vibration, sensors.vibration, numel(vibration)));
+        'vibration', stream_info(streamsCfg.vibration, sensors.vibration, numel(vibration)), ...
+        'cam_sync', cam_sync_info(projectConfig.engine, camSyncS));
     rates = streamsCfg.telemetry_rates_hz;
     units = struct('rpm', 'rpm', 'load', 'percent', 'throttle', 'percent', ...
         'coolant_temp', 'degC', 'short_term_fuel_trim', 'percent', 'long_term_fuel_trim', 'percent');
@@ -154,6 +159,12 @@ end
 function info = stream_info(streamCfg, sensor, n)
     info = struct('fs_hz', streamCfg.sample_rate_hz, 't0_s', 0, 'unit', streamCfg.unit, ...
         'n_samples', n, 'full_scale', sensor.full_scale);
+end
+
+function info = cam_sync_info(engine, camSyncS)
+    % Pulse timestamps share the vibration acquisition clock (same DAQ).
+    info = struct('unit', 's', 'clock', 'vibration', 'reference', 'cylinder_1_firing_tdc', ...
+        'angle_deg', engine.cam_sync_angle_deg, 'n_pulses', numel(camSyncS));
 end
 
 function s = summarize(x)

@@ -1,4 +1,8 @@
-# Data contract, version 1.0
+# Data contract, version 1.1
+
+Version 1.1 (2026-10-16) adds the cam phase reference `cam_sync_s` (see Cam phase
+reference). Version 1.0 bundles have none; Python still reads them, but cannot
+name the affected cylinder (only a relative firing slot).
 
 ## Shared settings
 
@@ -25,7 +29,7 @@ label, fault schedule, severity, or seeds.
 
 | File | Fields and rules |
 |---|---|
-| `waveforms.mat` | Version 7 (`-v7`); numeric `single` column vectors `audio` and `vibration`; `double` scalars `audio_fs_hz`, `vibration_fs_hz`, `audio_t0_s`, `vibration_t0_s`. MATLAB may store integer-valued doubles compactly; read with `loadmat(..., mat_dtype=True)` |
+| `waveforms.mat` | Version 7 (`-v7`); numeric `single` column vectors `audio` and `vibration`; `double` scalars `audio_fs_hz`, `vibration_fs_hz`, `audio_t0_s`, `vibration_t0_s`; from 1.1 a `double` column vector `cam_sync_s` (pulse times, may be empty). MATLAB may store integer-valued doubles compactly; read with `loadmat(..., mat_dtype=True)` |
 | `telemetry.csv` | Long-form columns `t_s,signal,value,unit,valid` (see Telemetry) |
 | `metadata.json` | Public run description (see Metadata) |
 | `manifest.json` | SHA-256 and byte size of every public file, per run |
@@ -86,6 +90,8 @@ label, fault schedule, severity, or seeds.
 - `schema_version`, `run_id`, `engine_id`, `batch_id`, `generator_version`,
   `config_schema_version`, `created_utc`, `synthetic` (always `true`), `duration_s`
 - `streams.audio` and `streams.vibration`: `fs_hz`, `t0_s`, `unit`, `n_samples`
+- `streams.cam_sync` (1.1): `unit` (`s`), `clock` (`vibration`), `reference`
+  (`cylinder_1_firing_tdc`), `angle_deg`, `n_pulses`
 - `telemetry_signals`: for each signal, `rate_hz` and `unit`
 - `clock`: `offset_s` and `drift_ppm` for `audio`, `vibration`, `telemetry`
 - `waveform_summary.audio` and `waveform_summary.vibration`: `n_samples`,
@@ -93,6 +99,32 @@ label, fault schedule, severity, or seeds.
   NaN), computed in MATLAB in double precision from the exported `single` arrays.
   Missing waveform samples are NaN; up to 5% per run is allowed. Python compares these against the loaded arrays
   to confirm values survived the export (round-trip check).
+
+## Cam phase reference
+
+A real engine controller knows which cylinder is firing from a cam position
+sensor: one pulse per 720-degree cycle at a fixed crank angle. The audio and
+vibration channels hear every cylinder through the same path and RPM telemetry
+carries speed, not angle, so without this reference a one-cylinder fault can
+only be placed in one of four firing slots, not named.
+
+- `cam_sync_s` holds the times at which the crank passes
+  `engine.cam_sync_angle_deg` (configs/mvp.json, `[0, 720)`) after cylinder 1's
+  firing TDC. Crank angle 0 mod 720 is cylinder 1's firing TDC; TDCs of the
+  firing order `engine.firing_order` follow every 180 degrees.
+- Pulses follow the final crank profile (after misfire RPM dips), lie in
+  `[0, duration_s)`, strictly increase, and share the vibration acquisition
+  clock (same DAQ): corrected like vibration under `metadata.clock`.
+- The generator draws no random numbers for the reference, so every other
+  stream is bit-identical to contract 1.0 output for the same seed.
+- Python `validate-runs` requires the vector and `streams.cam_sync` together
+  from 1.1, checks the metadata, angle, count, ordering, and a feasible cycle
+  period, and warns (does not fail) on gaps longer than 1.5 median cycles.
+  MATLAB `validate_run_matlab` also checks, against truth, that the pulses are
+  phase-locked to cylinder 1 combustion.
+- The reference is a waveform-side observation and may reach inference. It is
+  used only to attribute strokes to cylinders (feature `cyl_phase` and
+  `cyl<N>_*` columns, `pipeline/cylinders.py`); it is not a detector input.
 
 ## Checksums
 
@@ -180,6 +212,24 @@ otherwise it is `transition` and excluded from training. A per-fault label is
 1 when the window lies inside that fault's active interval (more than 0.5 s
 after a change), 0 when it is more than 0.5 s clear of every interval, and NaN
 otherwise; NaN windows are ignored for that fault only.
+
+## Cylinder signature and localizer
+
+`build-features` also writes, per window, `cyl_phase` (`cam_sync`, `relative`
+without a reference stream, or `none`) and, for `cam_sync` windows, 72
+`cyl<N>_<band>_<a>_<b>` columns: each cylinder's log energy ratio to the median
+cylinder in the combustion (300-1000 Hz), mid (2-5 kHz), and high (5-9 kHz)
+bands over six crank-angle sectors after its stroke onset
+(`CYLINDER_FEATURE_VERSION` 1.0.0). They are localizer inputs only.
+
+`engine-diagnostics train-localizer` writes
+`artifacts/models/cylinder_localizer.joblib` (`localizer-1.0.0`) and
+`reports/generated/training_localizer.json`. Replay with a localizer adds
+`localization` to each decision: for every active alert, `status`
+(`localized`, `locating`, or `slot_only`), `phase`, `cylinder` (cam phase
+only), `slot` (relative phase only), `confidence`, `windows`, and accumulated
+`probabilities`. `evaluate-localization` scores the frozen localizer once on
+the test engines (`reports/generated/final_localization.json`).
 
 ## Temporary model
 

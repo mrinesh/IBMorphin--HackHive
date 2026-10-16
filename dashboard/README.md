@@ -56,9 +56,12 @@ shades each fault's own active intervals.
   follow slider-crank kinematics at the run's RPM, shown slowed by 1/25, firing
   in the configured order. Effects follow the model only: the alert class or
   accepted fault, scaled by the model's confidence; shake follows the window's
-  vibration RMS relative to the normal reference. The model does not localize
-  faults, so effects are engine-wide; the faulty cylinder appears only with the
-  evaluation-truth overlay, labelled as truth. The scene is created once and
+  vibration RMS relative to the normal reference. When the cylinder localizer
+  (`artifacts/models/cylinder_localizer.joblib`) names the alert's cylinder, the
+  effect is confined to that cylinder and marked with a ring in the state color;
+  until then (or without the localizer) effects are engine-wide. The evaluation
+  truth cylinder appears only with the truth overlay, as a separate amber ring
+  labelled as truth. The scene is created once and
   updated with a small state dict on each rerun. Reduced motion shows a steady
   state glow; without WebGL a 2D schematic replaces it
 - Diagnosis card: decision with icon and text, why a window is uncertain,
@@ -86,6 +89,12 @@ shades each fault's own active intervals.
   The weak, missing, or burst firings and RPM dips are shaded in the panel's chart
   and, in the same colors, on the waveform and RPM charts. RPM is "not expected" for
   knock and valve faults. Valve-clearance evidence is usually weak, matching the model
+- Cylinder location per active alert (`runtime/localization.py`, needs
+  `train-localizer`): the alert banner names the cylinder ("Misfire detected in
+  cylinder 3"), and the evidence panel shows its confidence, how many decision
+  windows support it, and the accumulated probability of each cylinder. Runs
+  without the cam phase reference show a firing slot (A-D) instead, labelled as
+  such; until enough windows agree the panel says it is still locating.
 
 ## Health timeline (deterioration demonstration)
 

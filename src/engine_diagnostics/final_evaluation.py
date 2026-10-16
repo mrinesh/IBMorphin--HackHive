@@ -14,7 +14,13 @@ import pandas as pd
 from scipy.stats import spearmanr
 
 from engine_diagnostics.data.run_io import load_run
-from engine_diagnostics.evaluation import score_run, severity_at, summarize
+from engine_diagnostics.evaluation import (
+    localization_episodes,
+    score_run,
+    severity_at,
+    summarize,
+    summarize_localization,
+)
 from engine_diagnostics.models.diagnostic import thin
 from engine_diagnostics.models.temporary import (
     ABLATIONS,
@@ -241,4 +247,54 @@ def evaluate_final_multi(model, table: pd.DataFrame, truths: dict[str, dict], ra
         }
         if baseline is not None:
             report[subset]["single_label_baseline"] = single_label_baseline(baseline, rows)
+    return report
+
+
+def localization_replay_metrics(model, localizer, run_ids: list[str], raw_dir: Path,
+                                truths: dict[str, dict], config: dict) -> dict[str, Any]:
+    """Replay runs with detector + localizer; score each fault's alert episodes."""
+    from engine_diagnostics.pipeline.labels import fault_cylinders, fault_intervals
+
+    episodes = {f: [] for f in localizer.faults}
+    latencies = []
+    for run_id in run_ids:
+        records = replay_run(load_run(raw_dir / run_id), model, config, localizer=localizer)
+        cylinders = fault_cylinders(truths[run_id])
+        intervals = fault_intervals(truths[run_id])
+        for fault in localizer.faults:
+            for e in localization_episodes(records, fault, cylinders.get(fault),
+                                           intervals.get(fault, [])):
+                episodes[fault].append({"run_id": run_id, **e})
+        latencies += [r["processing_ms"] for r in records]
+    return {"per_fault": {f: summarize_localization(e) for f, e in episodes.items()},
+            "processing_ms_p95": float(np.percentile(latencies, 95)) if latencies else None,
+            "episodes": episodes}
+
+
+def evaluate_final_localization(model, localizer, table: pd.DataFrame,
+                                truths: dict[str, dict], raw_dir: Path, config: dict,
+                                model_path: Path, localizer_path: Path) -> dict[str, Any]:
+    """Window-level (given the fault) and replay-level localization on test engines."""
+    from engine_diagnostics.models.localizer import evaluate_windows
+
+    test = table[table["split"] == "test"]
+    report = {
+        "status": "FINAL cylinder-localization evaluation on held-out test engines; "
+                  "synthetic data only",
+        "localizer_version": localizer.model_version,
+        "cylinder_feature_version": localizer.feature_version,
+        "localizer_sha256": sha256(localizer_path),
+        "detector_version": model.model_version, "detector_sha256": sha256(model_path),
+        "dataset_manifest_sha256": (sha256(raw_dir / "manifest.json")
+                                    if (raw_dir / "manifest.json").is_file() else None),
+        "test_engines": sorted(test["engine_id"].unique()),
+        "settings": {"min_confidence": localizer.min_confidence,
+                     "temperatures": localizer.temperatures},
+        "windows_given_fault": evaluate_windows(localizer, test, truths, config, "test"),
+    }
+    for subset in ("core", "challenge"):
+        rows = test[test["subset"] == subset]
+        if not rows.empty:
+            report[subset] = localization_replay_metrics(
+                model, localizer, sorted(rows["run_id"].unique()), raw_dir, truths, config)
     return report
