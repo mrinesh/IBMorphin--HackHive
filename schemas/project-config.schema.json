@@ -42,6 +42,29 @@
             "short_term_fuel_trim": {"$ref": "#/$defs/positiveNumber"},
             "long_term_fuel_trim": {"$ref": "#/$defs/positiveNumber"}
           }
+        },
+        "crank_wheel": {
+          "description": "Crank trigger wheel for data contract 1.2 tooth-edge streams.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["teeth_per_rev", "missing_teeth", "first_tooth_angle_deg", "timer_resolution_s"],
+          "properties": {
+            "teeth_per_rev": {"type": "integer", "minimum": 12},
+            "missing_teeth": {"type": "integer", "minimum": 1},
+            "first_tooth_angle_deg": {"type": "number", "minimum": 0, "exclusiveMaximum": 360},
+            "timer_resolution_s": {"$ref": "#/$defs/positiveNumber"}
+          }
+        },
+        "thermal": {
+          "description": "Per-cylinder EGT and CHT telemetry for data contract 1.2.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["egt_rate_hz", "cht_rate_hz", "unit"],
+          "properties": {
+            "egt_rate_hz": {"$ref": "#/$defs/positiveNumber"},
+            "cht_rate_hz": {"$ref": "#/$defs/positiveNumber"},
+            "unit": {"const": "degC"}
+          }
         }
       }
     },
@@ -75,6 +98,53 @@
         "load_throttle_max_age_s": {"$ref": "#/$defs/positiveNumber"},
         "max_missing_fraction": {"type": "number", "minimum": 0, "maximum": 1},
         "max_clipped_fraction": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "obd_misfire": {
+      "description": "Simulated OBD-II crankshaft-speed misfire monitor (benchmark; contract 1.2 data).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type_a_revs", "type_a_rate_pct", "type_b_revs", "type_b_rate_pct", "single_cylinder_share", "rpm_bin_edges", "stroke_threshold_quantile", "threshold_margin", "min_strokes_per_bin"],
+      "properties": {
+        "type_a_revs": {"type": "integer", "minimum": 1},
+        "type_a_rate_pct": {"type": "number", "exclusiveMinimum": 0, "maximum": 100},
+        "type_b_revs": {"type": "integer", "minimum": 1},
+        "type_b_rate_pct": {"type": "number", "exclusiveMinimum": 0, "maximum": 100},
+        "single_cylinder_share": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "rpm_bin_edges": {"type": "array", "minItems": 2, "items": {"$ref": "#/$defs/positiveNumber"}},
+        "stroke_threshold_quantile": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1},
+        "threshold_margin": {"$ref": "#/$defs/positiveNumber"},
+        "min_strokes_per_bin": {"type": "integer", "minimum": 1}
+      }
+    },
+    "crank_detector": {
+      "description": "Independent crank-speed misfire path (contract 1.2 data).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stroke_lag_s", "cylinder_threshold_quantile", "threshold_margin", "confirm_updates", "clear_updates"],
+      "properties": {
+        "stroke_lag_s": {"$ref": "#/$defs/positiveNumber"},
+        "cylinder_threshold_quantile": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1},
+        "threshold_margin": {"$ref": "#/$defs/positiveNumber"},
+        "confirm_updates": {"type": "integer", "minimum": 1},
+        "clear_updates": {"type": "integer", "minimum": 1}
+      }
+    },
+    "thermal_detector": {
+      "description": "Per-cylinder EGT/CHT cross-check (contract 1.2 data).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["quantile", "threshold_margin", "min_z", "min_spread_c", "confirm_updates", "clear_updates"],
+      "properties": {
+        "quantile": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1},
+        "threshold_margin": {"$ref": "#/$defs/positiveNumber"},
+        "min_z": {"$ref": "#/$defs/positiveNumber"},
+        "min_spread_c": {
+          "type": "object", "additionalProperties": false, "required": ["egt", "cht"],
+          "properties": {"egt": {"$ref": "#/$defs/positiveNumber"}, "cht": {"$ref": "#/$defs/positiveNumber"}}
+        },
+        "confirm_updates": {"type": "integer", "minimum": 1},
+        "clear_updates": {"type": "integer", "minimum": 1}
       }
     },
     "dataset": {

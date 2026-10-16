@@ -4,7 +4,10 @@ Only public run files are read: waveforms.mat, telemetry.csv, metadata.json.
 Evaluation truth lives elsewhere and is never opened here. Contract 1.1 adds
 the cam phase reference `cam_sync_s` (one pulse per 720 crank degrees at a
 fixed angle after cylinder 1's firing TDC, on the vibration clock); 1.0
-bundles have none and are still read.
+bundles have none and are still read. Contract 1.2 adds the 60-2 crank
+trigger wheel `crank_tooth_s` (tooth falling-edge times on the vibration
+clock) and per-cylinder `egt_cyl<N>` / `cht_cyl<N>` telemetry; older bundles
+have neither.
 """
 
 import hashlib
@@ -40,9 +43,14 @@ RUN_ID = re.compile(r"^run_\d{5}$")
 # this fraction of a run; windows that contain them are flagged by the feature path.
 MAX_RUN_MISSING_FRACTION = 0.05
 ENGINE_ID = re.compile(r"^engine_\d{3}$")
-SCHEMA_VERSIONS = ("1.0", "1.1")
+SCHEMA_VERSIONS = ("1.0", "1.1", "1.2")
 CAM_SYNC_SCHEMA = "1.1"  # first data contract version with the cam phase reference
 CAM_SYNC_INFO = {"unit": "s", "clock": "vibration", "reference": "cylinder_1_firing_tdc"}
+SENSORS_SCHEMA = "1.2"  # first version with the crank wheel and cylinder temperatures
+CRANK_TEETH_INFO = {**CAM_SYNC_INFO, "edge": "falling"}
+CRANK_WHEEL_FIELDS = ("teeth_per_rev", "missing_teeth", "first_tooth_angle_deg",
+                      "timer_resolution_s")
+THERMAL_KINDS = ("egt", "cht")
 CAM_LOCAL_SPACINGS = 2  # neighbours on each side that set a pulse gap's local cycle period
 
 
@@ -58,6 +66,30 @@ class RunBundle:
     telemetry: pd.DataFrame
     metadata: dict[str, Any]
     cam_sync_s: np.ndarray | None = None  # pulse times on the vibration clock (contract 1.1)
+    crank_tooth_s: np.ndarray | None = None  # 60-2 wheel edge times, vibration clock (1.2)
+
+
+def thermal_signals(config: dict[str, Any]) -> dict[str, float]:
+    """Per-cylinder temperature signal names (contract 1.2) and their rates."""
+    thermal = config["streams"].get("thermal")
+    if thermal is None:
+        return {}
+    return {f"{kind}_cyl{c}": thermal[f"{kind}_rate_hz"]
+            for kind in THERMAL_KINDS for c in range(1, config["engine"]["cylinders"] + 1)}
+
+
+def wheel_gaps(edges: np.ndarray) -> np.ndarray:
+    """Indices i where the edge period edges[i+1]-edges[i] spans the missing teeth.
+
+    A gap period is about (missing + 1) times its neighbours; comparing with the
+    larger neighbour keeps speed ramps and per-tooth noise from looking like gaps.
+    """
+    period = np.diff(np.asarray(edges, dtype=np.float64))
+    if period.size < 3:
+        return np.zeros(0, dtype=int)
+    before = np.r_[period[0], period[:-1]]
+    after = np.r_[period[1:], period[-1]]
+    return np.flatnonzero(period > 2 * np.maximum(before, after))
 
 
 def load_run(run_dir: Path) -> RunBundle:
@@ -90,6 +122,13 @@ def load_run(run_dir: Path) -> RunBundle:
             raise ValueError(f"{run_dir.name}: cam_sync_s must be an (N, 1) column vector, "
                              f"got shape {cam.shape}")
         cam_sync_s = cam.astype(np.float64).reshape(-1)
+    crank_tooth_s = None
+    if "crank_tooth_s" in mat:  # contract 1.2
+        teeth = mat["crank_tooth_s"]
+        if teeth.size and (teeth.ndim != 2 or teeth.shape[1] != 1):
+            raise ValueError(f"{run_dir.name}: crank_tooth_s must be an (N, 1) column vector, "
+                             f"got shape {teeth.shape}")
+        crank_tooth_s = teeth.astype(np.float64).reshape(-1)
 
     telemetry = pd.read_csv(
         run_dir / "telemetry.csv",
@@ -105,6 +144,7 @@ def load_run(run_dir: Path) -> RunBundle:
         telemetry=telemetry,
         metadata=metadata,
         cam_sync_s=cam_sync_s,
+        crank_tooth_s=crank_tooth_s,
         **scalars,
     )
 
@@ -119,6 +159,7 @@ def validate_run(bundle: RunBundle, config: dict[str, Any]) -> list[str]:
                 issues += _check_waveform(bundle, name, duration, config)
             issues += _check_telemetry(bundle.telemetry, bundle.metadata, duration, config)
             issues += _check_cam_sync(bundle, duration, config)
+            issues += _check_crank_teeth(bundle, duration, config)
         except KeyError as error:
             issues.append(f"metadata field missing: {error}")
     return [f"{bundle.run_id}: {issue}" for issue in issues]
@@ -192,6 +233,40 @@ def _check_cam_sync(bundle: RunBundle, duration: float, config: dict) -> list[st
     return issues
 
 
+def _check_crank_teeth(bundle: RunBundle, duration: float, config: dict) -> list[str]:
+    """The crank wheel (contract 1.2): vector and metadata together, consistent."""
+    declared = bundle.metadata["streams"].get("crank_teeth")
+    edges = bundle.crank_tooth_s
+    if declared is None and edges is None:
+        return []
+    if _version(bundle.metadata["schema_version"]) < _version(SENSORS_SCHEMA):
+        return ["crank_teeth: present in a bundle older than contract 1.2"]
+    if declared is None or edges is None:
+        return ["crank_teeth: contract 1.2 needs both waveforms.mat crank_tooth_s and "
+                "metadata.streams.crank_teeth"]
+    wheel = config["streams"].get("crank_wheel")
+    if wheel is None:
+        return ["crank_teeth: configuration has no streams.crank_wheel"]
+    issues = [f"crank_teeth: {key} '{declared.get(key)}', expected '{value}'"
+              for key, value in CRANK_TEETH_INFO.items() if declared.get(key) != value]
+    issues += [f"crank_teeth: {key} {declared.get(key)} differs from config {wheel[key]}"
+               for key in CRANK_WHEEL_FIELDS if declared.get(key) != wheel[key]]
+    if declared.get("n_edges") != edges.size:
+        issues.append(f"crank_teeth: {edges.size} edges, metadata n_edges "
+                      f"{declared.get('n_edges')}")
+    if not np.all(np.isfinite(edges)):
+        return issues + ["crank_teeth: non-finite edge times"]
+    if ((edges < 0) | (edges >= duration)).any():
+        issues.append(f"crank_teeth: edge times outside [0, {duration})")
+    # A tooth period cannot be shorter than at twice the engine's maximum speed.
+    shortest = 0.5 * 60 / (config["engine"]["rpm_max"] * wheel["teeth_per_rev"])
+    if edges.size > 1 and np.diff(edges).min() < shortest:
+        issues.append("crank_teeth: edges not strictly increasing at a feasible tooth period")
+    elif edges.size > 2 * wheel["teeth_per_rev"] and wheel_gaps(edges).size == 0:
+        issues.append("crank_teeth: no missing-tooth gap found")
+    return issues
+
+
 def _check_waveform(bundle: RunBundle, name: str, duration: float, config: dict) -> list[str]:
     issues = []
     x = getattr(bundle, name)
@@ -255,6 +330,13 @@ def run_warnings(bundle: RunBundle, config: dict[str, Any]) -> list[str]:
         gaps = int(np.sum(cam_cycle_steps(np.diff(bundle.cam_sync_s)) - 1))
         if gaps:
             warnings.append(f"{bundle.run_id}: cam_sync has {gaps} gaps (missing pulses)")
+    wheel = bundle.metadata["streams"].get("crank_teeth")
+    if bundle.crank_tooth_s is not None and wheel and bundle.crank_tooth_s.size > 3:
+        teeth = wheel["teeth_per_rev"] - wheel["missing_teeth"]
+        irregular = int(np.sum(np.diff(wheel_gaps(bundle.crank_tooth_s)) != teeth))
+        if irregular:
+            warnings.append(f"{bundle.run_id}: crank wheel has {irregular} irregular gap "
+                            "spacings (lost or extra teeth)")
     invalid = int((bundle.telemetry["valid"] == 0).sum())
     if invalid:
         warnings.append(f"{bundle.run_id}: {invalid} invalid telemetry rows")
@@ -276,8 +358,17 @@ def _check_telemetry(telemetry: pd.DataFrame, metadata: dict, duration: float,
     if (telemetry["valid"].eq(1) & telemetry["value"].isna()).any():
         issues.append("telemetry rows marked valid have empty values")
 
-    rates = config["streams"]["telemetry_rates_hz"]
-    for signal, unit in TELEMETRY_UNITS.items():
+    rates = dict(config["streams"]["telemetry_rates_hz"])
+    expected_units = dict(TELEMETRY_UNITS)
+    # Cylinder temperatures (contract 1.2) are required once metadata declares any.
+    thermal = thermal_signals(config)
+    declares_thermal = any(name in metadata["telemetry_signals"] for name in thermal)
+    if declares_thermal and _version(metadata["schema_version"]) < _version(SENSORS_SCHEMA):
+        issues.append("cylinder temperatures in a bundle older than contract 1.2")
+    if declares_thermal:
+        rates.update(thermal)
+        expected_units.update({name: config["streams"]["thermal"]["unit"] for name in thermal})
+    for signal, unit in expected_units.items():
         rows = telemetry[telemetry["signal"] == signal]
         if rows.empty:
             issues.append(f"telemetry signal '{signal}' missing")
@@ -291,7 +382,7 @@ def _check_telemetry(telemetry: pd.DataFrame, metadata: dict, duration: float,
         expected = duration * rates[signal]
         if abs(len(rows) - expected) > 0.05 * expected:
             issues.append(f"telemetry '{signal}' has {len(rows)} rows, expected ~{expected:g}")
-    unknown = set(telemetry["signal"]) - set(TELEMETRY_UNITS)
+    unknown = set(telemetry["signal"]) - set(expected_units)
     if unknown:
         issues.append(f"unknown telemetry signals {sorted(unknown)}")
     return issues

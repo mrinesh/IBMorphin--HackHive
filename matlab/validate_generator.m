@@ -2,7 +2,8 @@ function report = validate_generator(options)
 %VALIDATE_GENERATOR Generator checks that do not depend on one exported run.
 %   report = validate_generator() from the repository root writes
 %   reports/generated/generator_validation/validation.json and
-%   matlab_features.json (MATLAB reference values for Python feature checks).
+%   matlab_features.json (MATLAB reference values for Python feature checks);
+%   other batches (Config=...) write to generator_validation/<batch_id>/.
 %   Checks:
 %     1. firing frequency from the audio envelope at fixed RPM (within 1%)
 %     2. each fault's signature increases with severity
@@ -13,6 +14,9 @@ function report = validate_generator(options)
 %     7. fault combinations: in every pair and the triple, each fault keeps at
 %        least half of its single-fault signature effect (vs normal) when the
 %        same run is compared with and without that fault (not masked)
+%     8. contract 1.2 batches (crank and/or thermal generator_params): the
+%        1.1 streams are bit-identical with those blocks removed, and a
+%        misfire slows the crank on the misfiring stroke and cools its EGT
 
     arguments
         options.Config (1,1) string = ""
@@ -26,6 +30,9 @@ function report = validate_generator(options)
     project = load_project_config(root);
     batch = jsondecode(fileread(options.Config));
     outDir = fullfile(root, "reports", "generated", "generator_validation");
+    if batch.batch_id ~= "core_v1"  % keep the core_v1 reference files in place
+        outDir = fullfile(outDir, batch.batch_id);
+    end
     if ~isfolder(outDir)
         mkdir(outDir);
     end
@@ -101,7 +108,11 @@ function report = validate_generator(options)
     first = generate_run(project, batch, scenario(1800, 0.4, 'misfire', 8, 0.6));
     second = generate_run(project, batch, scenario(1800, 0.4, 'misfire', 8, 0.6));
     report.reproducible = isequaln(first.audio, second.audio) ...
-        && isequaln(first.vibration, second.vibration) && isequaln(first.telemetry, second.telemetry);
+        && isequaln(first.vibration, second.vibration) && isequaln(first.telemetry, second.telemetry) ...
+        && isequaln(first.cam_sync_s, second.cam_sync_s);
+    if isfield(first, 'crank_tooth_s')
+        report.reproducible = report.reproducible && isequaln(first.crank_tooth_s, second.crank_tooth_s);
+    end
 
     % 6. MATLAB reference features for the Python implementation.
     reference = struct('run_id', {}, 'window_end_s', {}, 'name', {}, 'value', {});
@@ -164,9 +175,31 @@ function report = validate_generator(options)
     end
     report.combinations = combos;
     report.combinations_passed = all([combos.ratio] > 1) && all([combos.retained] >= 0.5);
+    % 8. Contract 1.2 streams leave the 1.1 streams untouched.
+    report.sensors_1_2_passed = true;
+    if isfield(batch.generator_params, 'crank') || isfield(batch.generator_params, 'thermal')
+        older = batch;
+        older.generator_params = rmfield(older.generator_params, ...
+            intersect(fieldnames(older.generator_params), {'crank', 'thermal'}));
+        base = generate_run(project, older, scenario(1800, 0.4, 'misfire', 8, 0.6));
+        thermalRows = startsWith(first.telemetry.signal, ["egt", "cht"]);
+        unchanged = isequaln(first.audio, base.audio) && isequaln(first.vibration, base.vibration) ...
+            && isequaln(first.cam_sync_s, base.cam_sync_s) ...
+            && isequaln(first.telemetry(~thermalRows, :), base.telemetry);
+        egt = @(c, t0, t1) mean(first.telemetry.value(first.telemetry.signal == "egt_cyl" + c ...
+            & first.telemetry.t_s >= t0 & first.telemetry.t_s < t1));
+        cooled = (egt(2, 2, 7) - egt(2, 25, 30)) - (egt(1, 2, 7) - egt(1, 25, 30));
+        report.sensors_1_2 = struct('unchanged_1_1_streams', unchanged, ...
+            'misfire_egt_cooling_c', cooled, ...
+            'crank_misfire_strokes', first.render_info.crank.misfire_strokes, ...
+            'crank_p95_phase_error_deg', first.render_info.crank.p95_phase_error_deg);
+        report.sensors_1_2_passed = unchanged && cooled > 20 ...
+            && first.render_info.crank.misfire_strokes > 0 ...
+            && first.render_info.crank.p95_phase_error_deg < 3;
+    end
     report.passed = report.firing_frequency_passed && report.severity_sweep_passed ...
         && report.cross_modal_lag_passed && report.aliasing_passed && report.reproducible ...
-        && report.combinations_passed;
+        && report.combinations_passed && report.sensors_1_2_passed;
 
     write_json(report, fullfile(outDir, "validation.json"));
     write_json(reference, fullfile(outDir, "matlab_features.json"));
@@ -181,6 +214,11 @@ function report = validate_generator(options)
     for c = combos
         fprintf('%-45s %-21s with/without %.3f (alone %.3f, retained %.0f%%)\n', ...
             c.faults, c.fault, c.ratio, c.single_ratio, 100 * c.retained);
+    end
+    if isfield(report, 'sensors_1_2')
+        fprintf('1.2 sensors: 1.1 streams unchanged %d, misfire EGT cooling %.0f C, p95 phase %.2f deg\n', ...
+            report.sensors_1_2.unchanged_1_1_streams, report.sensors_1_2.misfire_egt_cooling_c, ...
+            report.sensors_1_2.crank_p95_phase_error_deg);
     end
     fprintf('reproducible %d; reference features %d; PASSED %d\n', report.reproducible, ...
         numel(reference), report.passed);

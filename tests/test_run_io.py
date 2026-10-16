@@ -233,3 +233,90 @@ def test_speed_ramp_does_not_warn_about_cam_gaps(tmp_path, config):
                                           mutate=lambda p: with_cam(p, pulses=pulses)))
     assert run_io.validate_run(bundle, config) == []
     assert run_io.run_warnings(bundle, config) == []
+
+
+def wheel_edges(rpm=1500.0, duration=DURATION_S, first_deg=270.0, teeth=60, missing=2):
+    """Ideal 60-2 falling-edge times at constant speed (crank angle 0 at t = 0)."""
+    angles = [first_deg + 360 * rev + 360 / teeth * k
+              for rev in range(-1, int(duration * rpm / 60) + 2)
+              for k in range(teeth - missing)]
+    times = np.asarray(sorted(angles)) / (6 * rpm)
+    return times[(times >= 0) & (times < duration)]
+
+
+def with_sensors(parts, edges=None, thermal=True, **overrides):
+    """Upgrade a bundle to contract 1.2: cam reference, crank wheel, temperatures."""
+    with_cam(parts)
+    parts["metadata"]["schema_version"] = "1.2"
+    edges = wheel_edges() if edges is None else np.asarray(edges, dtype=np.float64)
+    parts["mat"]["crank_tooth_s"] = edges.reshape(-1, 1)
+    parts["metadata"]["streams"]["crank_teeth"] = {
+        "unit": "s", "clock": "vibration", "reference": "cylinder_1_firing_tdc",
+        "edge": "falling", "teeth_per_rev": 60, "missing_teeth": 2,
+        "first_tooth_angle_deg": 270, "timer_resolution_s": 1e-6,
+        "n_edges": edges.size, **overrides}
+    if thermal:
+        rates = {"egt": 10, "cht": 2}
+        for kind, rate in rates.items():
+            for c in range(1, 5):
+                name = f"{kind}_cyl{c}"
+                parts["rows"] += [(k / rate, name, 600.0, "degC", 1)
+                                  for k in range(DURATION_S * rate)]
+                parts["metadata"]["telemetry_signals"][name] = {"rate_hz": rate, "unit": "degC"}
+        parts["rows"].sort(key=lambda row: (row[0], row[1]))
+
+
+def test_contract_1_2_bundle_round_trips(tmp_path, config):
+    bundle = run_io.load_run(write_bundle(tmp_path, config, mutate=with_sensors))
+    assert run_io.validate_run(bundle, config) == []
+    assert run_io.run_warnings(bundle, config) == []
+    assert bundle.crank_tooth_s.ndim == 1 and bundle.crank_tooth_s.size == wheel_edges().size
+    assert {"egt_cyl3", "cht_cyl1"} <= set(bundle.telemetry["signal"])
+    teeth = 58
+    assert np.all(np.diff(run_io.wheel_gaps(bundle.crank_tooth_s)) == teeth)
+
+
+def test_contract_1_1_bundle_has_no_wheel_or_temperatures(tmp_path, config):
+    bundle = run_io.load_run(write_bundle(tmp_path, config, mutate=with_cam))
+    assert bundle.crank_tooth_s is None
+    assert run_io.validate_run(bundle, config) == []
+
+
+def _drop_signal(parts, name):
+    parts["rows"] = [r for r in parts["rows"] if r[1] != name]
+
+
+@pytest.mark.parametrize(
+    ("description", "mutate", "expected"),
+    [
+        ("1.2 vector without metadata", lambda p: (
+            with_sensors(p), p["metadata"]["streams"].pop("crank_teeth")), "needs both"),
+        ("wheel in a 1.1 bundle", lambda p: (
+            with_sensors(p), p["metadata"].update(schema_version="1.1")), "older than"),
+        ("count mismatch", lambda p: with_sensors(p, n_edges=3), "metadata n_edges"),
+        ("wrong wheel", lambda p: with_sensors(p, teeth_per_rev=36), "teeth_per_rev"),
+        ("wrong edge", lambda p: with_sensors(p, edge="rising"), "edge"),
+        ("not increasing", lambda p: with_sensors(p, edges=wheel_edges()[::-1]), "strictly"),
+        ("outside run", lambda p: with_sensors(p, edges=np.r_[wheel_edges(), DURATION_S + 1]),
+         "outside"),
+        ("no gap", lambda p: with_sensors(p, edges=np.arange(0.001, DURATION_S, 60 / 1500 / 60)),
+         "no missing-tooth gap"),
+        ("temperature missing", lambda p: (with_sensors(p), _drop_signal(p, "cht_cyl2")),
+         "'cht_cyl2' missing"),
+        ("undeclared temperature", lambda p: (
+            with_sensors(p), [p["metadata"]["telemetry_signals"].pop(f"{k}_cyl{c}")
+                              for k in ("egt", "cht") for c in range(1, 5)]),
+         "unknown telemetry signals"),
+    ],
+)
+def test_contract_1_2_violations(tmp_path, config, description, mutate, expected):
+    issues = issues_for(tmp_path, config, mutate)
+    assert any(expected in issue for issue in issues), (description, issues)
+
+
+def test_lost_teeth_are_a_warning_not_a_violation(tmp_path, config):
+    edges = np.delete(wheel_edges(), [200, 201])
+    bundle = run_io.load_run(write_bundle(tmp_path, config,
+                                          mutate=lambda p: with_sensors(p, edges=edges)))
+    assert run_io.validate_run(bundle, config) == []
+    assert any("irregular gap" in w for w in run_io.run_warnings(bundle, config))

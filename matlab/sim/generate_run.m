@@ -1,6 +1,10 @@
 function run = generate_run(projectConfig, batchConfig, scenario)
 %GENERATE_RUN Synthesize one run: waveforms, telemetry, metadata, private truth.
 %   run.audio and run.vibration are single column vectors at native rates.
+%   Batches whose generator_params include crank and/or thermal (data
+%   contract 1.2) also get 60-2 crank tooth edge times (run.crank_tooth_s)
+%   and per-cylinder EGT/CHT telemetry rows; these use their own random
+%   streams, so every 1.1 stream is bit-identical to the same batch without them.
 %   run.metadata is public; run.truth holds labels and source events and must
 %   only be written to evaluation_truth/.
 
@@ -21,6 +25,18 @@ function run = generate_run(projectConfig, batchConfig, scenario)
         streams.disturbance);
     % Cam phase reference from the final crank profile (after misfire RPM dips).
     camSyncS = cam_sync_times(profile, projectConfig.engine.cam_sync_angle_deg, durationS);
+    hasCrank = isfield(params, 'crank');
+    hasThermal = isfield(params, 'thermal');
+    if hasCrank || hasThermal
+        sensorParams = draw_sensor_params(params, projectConfig, streams.engine_sensors);
+    end
+    crankToothS = [];
+    crankInfo = struct();
+    if hasCrank
+        [crankToothS, crankInfo] = render_crank_teeth(profile, events, ...
+            projectConfig.streams.crank_wheel, params, sensorParams.tooth_error_deg, durationS, ...
+            streams.crank);
+    end
 
     audioFs = projectConfig.streams.audio.sample_rate_hz;
     vibrationFs = projectConfig.streams.vibration.sample_rate_hz;
@@ -37,6 +53,11 @@ function run = generate_run(projectConfig, batchConfig, scenario)
         NoiseScale=scenario.noise_scale);
     telemetry = render_telemetry(profile, projectConfig.streams.telemetry_rates_hz, params, ...
         engineParams, durationS, streams.telemetry);
+    if hasThermal
+        thermal = render_thermal(profile, events, projectConfig.engine, ...
+            projectConfig.streams.thermal, params, sensorParams, durationS, streams.thermal);
+        telemetry = sortrows([telemetry; thermal], {'t_s', 'signal'});
+    end
 
     % Data-quality problems: a waveform gap (NaN) and a telemetry dropout (invalid rows).
     gap = scenario.missing_gap_s;
@@ -61,9 +82,12 @@ function run = generate_run(projectConfig, batchConfig, scenario)
     run.vibration_fs_hz = vibrationFs;
     run.telemetry = telemetry;
     run.cam_sync_s = camSyncS;
-    run.render_info = struct('audio', audioInfo, 'vibration', vibrationInfo);
+    if hasCrank
+        run.crank_tooth_s = crankToothS;
+    end
+    run.render_info = struct('audio', audioInfo, 'vibration', vibrationInfo, 'crank', crankInfo);
     run.metadata = build_metadata(projectConfig, batchConfig, scenario, audio, vibration, ...
-        camSyncS);
+        camSyncS, crankToothS, hasCrank, hasThermal);
     run.truth = build_truth(batchConfig, scenario, events, durationS, masterSeed, streamIndices);
     run.profile = profile;
     run.engine_params = engineParams;
@@ -126,11 +150,31 @@ function e = draw_engine_params(v, stream)
     e.ltft_offset_pct = v.ltft_offset_range_pct(1) + diff(v.ltft_offset_range_pct) * rand(stream);
 end
 
-function metadata = build_metadata(projectConfig, batchConfig, scenario, audio, vibration, camSyncS)
+function s = draw_sensor_params(params, projectConfig, stream)
+    % Per-engine sensor and cylinder variation for the 1.2 streams, from their
+    % own engine substream (fixed for every run of the same virtual engine).
+    wheel = projectConfig.streams.crank_wheel;
+    s = struct('tooth_error_deg', zeros(1, wheel.teeth_per_rev - wheel.missing_teeth), ...
+        'egt_c', zeros(1, projectConfig.engine.cylinders), ...
+        'cht_c', zeros(1, projectConfig.engine.cylinders));
+    if isfield(params, 'crank')
+        s.tooth_error_deg = params.crank.tooth_error_deg_sd * randn(stream, size(s.tooth_error_deg));
+    end
+    if isfield(params, 'thermal')
+        s.egt_c = params.thermal.egt_cylinder_spread_c * randn(stream, size(s.egt_c));
+        s.cht_c = params.thermal.cht_cylinder_spread_c * randn(stream, size(s.cht_c));
+    end
+end
+
+function metadata = build_metadata(projectConfig, batchConfig, scenario, audio, vibration, ...
+        camSyncS, crankToothS, hasCrank, hasThermal)
     streamsCfg = projectConfig.streams;
     sensors = batchConfig.generator_params.sensors;
     metadata = struct();
     metadata.schema_version = '1.1';  % 1.1 adds the cam_sync phase reference
+    if hasCrank || hasThermal
+        metadata.schema_version = '1.2';  % 1.2 adds crank teeth and EGT/CHT
+    end
     metadata.run_id = scenario.run_id;
     metadata.engine_id = scenario.engine_id;
     metadata.batch_id = batchConfig.batch_id;
@@ -144,12 +188,23 @@ function metadata = build_metadata(projectConfig, batchConfig, scenario, audio, 
         'audio', stream_info(streamsCfg.audio, sensors.audio, numel(audio)), ...
         'vibration', stream_info(streamsCfg.vibration, sensors.vibration, numel(vibration)), ...
         'cam_sync', cam_sync_info(projectConfig.engine, camSyncS));
+    if hasCrank
+        metadata.streams.crank_teeth = crank_teeth_info(streamsCfg.crank_wheel, crankToothS);
+    end
     rates = streamsCfg.telemetry_rates_hz;
     units = struct('rpm', 'rpm', 'load', 'percent', 'throttle', 'percent', ...
         'coolant_temp', 'degC', 'short_term_fuel_trim', 'percent', 'long_term_fuel_trim', 'percent');
     names = fieldnames(rates);
     for k = 1:numel(names)
         metadata.telemetry_signals.(names{k}) = struct('rate_hz', rates.(names{k}), 'unit', units.(names{k}));
+    end
+    if hasThermal
+        for c = 1:projectConfig.engine.cylinders
+            metadata.telemetry_signals.("egt_cyl" + c) = struct( ...
+                'rate_hz', streamsCfg.thermal.egt_rate_hz, 'unit', 'degC');
+            metadata.telemetry_signals.("cht_cyl" + c) = struct( ...
+                'rate_hz', streamsCfg.thermal.cht_rate_hz, 'unit', 'degC');
+        end
     end
     zeroClock = struct('offset_s', 0, 'drift_ppm', 0);
     metadata.clock = struct('audio', zeroClock, 'vibration', zeroClock, 'telemetry', zeroClock);
@@ -165,6 +220,17 @@ function info = cam_sync_info(engine, camSyncS)
     % Pulse timestamps share the vibration acquisition clock (same DAQ).
     info = struct('unit', 's', 'clock', 'vibration', 'reference', 'cylinder_1_firing_tdc', ...
         'angle_deg', engine.cam_sync_angle_deg, 'n_pulses', numel(camSyncS));
+end
+
+function info = crank_teeth_info(wheel, toothS)
+    % Falling-edge times of the 60-2 wheel on the vibration clock. The tooth
+    % after the gap sits first_tooth_angle_deg after cylinder 1 firing TDC
+    % (mod 360); cam_sync resolves which revolution of the cycle it is.
+    info = struct('unit', 's', 'clock', 'vibration', 'reference', 'cylinder_1_firing_tdc', ...
+        'edge', 'falling', 'teeth_per_rev', wheel.teeth_per_rev, ...
+        'missing_teeth', wheel.missing_teeth, ...
+        'first_tooth_angle_deg', wheel.first_tooth_angle_deg, ...
+        'timer_resolution_s', wheel.timer_resolution_s, 'n_edges', numel(toothS));
 end
 
 function s = summarize(x)

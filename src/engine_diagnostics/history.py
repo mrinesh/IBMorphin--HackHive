@@ -121,18 +121,21 @@ class RawData:
     vibration_fs_hz: float
     telemetry: pd.DataFrame
     cam_sync_s: np.ndarray | None = None
+    crank_tooth_s: np.ndarray | None = None
 
 
 def raw_from_bundle(bundle, up_to_s: float) -> RawData:
     """Raw data a replay had received by stream time up_to_s (t0 = 0, as in replay)."""
     tel = bundle.telemetry
     cam = bundle.cam_sync_s
+    teeth = getattr(bundle, "crank_tooth_s", None)
     return RawData(
         audio=np.asarray(bundle.audio[:round(up_to_s * bundle.audio_fs_hz)]),
         vibration=np.asarray(bundle.vibration[:round(up_to_s * bundle.vibration_fs_hz)]),
         audio_fs_hz=float(bundle.audio_fs_hz), vibration_fs_hz=float(bundle.vibration_fs_hz),
         telemetry=tel[tel["t_s"] < up_to_s][TELEMETRY_COLUMNS].reset_index(drop=True),
-        cam_sync_s=None if cam is None else np.asarray(cam[cam < up_to_s]))
+        cam_sync_s=None if cam is None else np.asarray(cam[cam < up_to_s]),
+        crank_tooth_s=None if teeth is None else np.asarray(teeth[teeth < up_to_s]))
 
 
 def _now() -> str:
@@ -345,10 +348,13 @@ class HistoryStore:
         folder = self.root / rows[0]["raw_path"]
         with np.load(folder / "signals.npz") as z:
             cam = z["cam_sync_s"] if bool(z["has_cam_sync"]) else None
+            # Runs saved before data contract 1.2 have no crank wheel fields.
+            has_teeth = "has_crank_teeth" in z.files and bool(z["has_crank_teeth"])
             raw = RawData(audio=z["audio"], vibration=z["vibration"],
                           audio_fs_hz=float(z["audio_fs_hz"]),
                           vibration_fs_hz=float(z["vibration_fs_hz"]),
-                          telemetry=pd.DataFrame(), cam_sync_s=cam)
+                          telemetry=pd.DataFrame(), cam_sync_s=cam,
+                          crank_tooth_s=z["crank_tooth_s"] if has_teeth else None)
         raw.telemetry = pd.read_csv(folder / "telemetry.csv")
         return raw
 
@@ -432,8 +438,11 @@ def _decision_row(run_id: int, k: int, r: dict[str, Any], stage: str | None) -> 
 def _write_raw(folder: Path, raw: RawData) -> None:
     folder.mkdir(parents=True, exist_ok=False)
     has_cam = raw.cam_sync_s is not None
+    has_teeth = raw.crank_tooth_s is not None
     np.savez_compressed(folder / "signals.npz", audio=raw.audio, vibration=raw.vibration,
                         audio_fs_hz=raw.audio_fs_hz, vibration_fs_hz=raw.vibration_fs_hz,
                         has_cam_sync=has_cam,
-                        cam_sync_s=raw.cam_sync_s if has_cam else np.empty(0))
+                        cam_sync_s=raw.cam_sync_s if has_cam else np.empty(0),
+                        has_crank_teeth=has_teeth,
+                        crank_tooth_s=raw.crank_tooth_s if has_teeth else np.empty(0))
     raw.telemetry[TELEMETRY_COLUMNS].to_csv(folder / "telemetry.csv", index=False)

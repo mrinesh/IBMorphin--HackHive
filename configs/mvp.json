@@ -30,6 +30,17 @@
       "coolant_temp": 1,
       "short_term_fuel_trim": 2,
       "long_term_fuel_trim": 2
+    },
+    "crank_wheel": {
+      "teeth_per_rev": 60,
+      "missing_teeth": 2,
+      "first_tooth_angle_deg": 270,
+      "timer_resolution_s": 1e-6
+    },
+    "thermal": {
+      "egt_rate_hz": 10,
+      "cht_rate_hz": 2,
+      "unit": "degC"
     }
   },
   "analysis": {
@@ -63,6 +74,32 @@
     "runs_per_engine": 8,
     "split_engines": {"train": 18, "tuning": 4, "calibration": 4, "test": 4},
     "challenge_runs": 16
+  },
+  "obd_misfire": {
+    "type_a_revs": 200,
+    "type_a_rate_pct": 5.0,
+    "type_b_revs": 1000,
+    "type_b_rate_pct": 1.5,
+    "single_cylinder_share": 0.8,
+    "rpm_bin_edges": [600, 1200, 1600, 2000, 2400, 2800, 3200, 4000],
+    "stroke_threshold_quantile": 0.9999,
+    "threshold_margin": 1.25,
+    "min_strokes_per_bin": 2000
+  },
+  "crank_detector": {
+    "stroke_lag_s": 0.15,
+    "cylinder_threshold_quantile": 0.999,
+    "threshold_margin": 1.25,
+    "confirm_updates": 2,
+    "clear_updates": 3
+  },
+  "thermal_detector": {
+    "quantile": 0.999,
+    "threshold_margin": 1.25,
+    "min_z": 4.0,
+    "min_spread_c": {"egt": 1.0, "cht": 0.3},
+    "confirm_updates": 4,
+    "clear_updates": 6
   },
   "conditions": ["normal", "misfire", "knock_like", "valve_clearance_like"],
   "inference_context_fields": ["rpm", "load", "throttle"]

@@ -51,7 +51,8 @@ function [events, profile] = apply_one(events, profile, fault, durationS, params
             events.intensity(hit) = events.intensity(hit) .* residual;
             events.faulted(hit) = true;
             events.fault(hit) = condition;
-            profile = add_rpm_dips(profile, events.time_s(hit), 1 - residual, f);
+            profile = add_rpm_dips(profile, events.time_s(hit), events.angle_deg(hit), ...
+                1 - residual, f);
             events.time_s = crank_event_times(profile, events.angle_deg);
 
         case "knock_like"
@@ -109,8 +110,11 @@ function severity = severity_schedule(fault, durationS, t)
     end
 end
 
-function profile = add_rpm_dips(profile, times, depthFraction, f)
+function profile = add_rpm_dips(profile, times, angles, depthFraction, f)
     % A missing power stroke briefly slows the crank; shift later crank angles.
+    % The dips are recorded so the crank wheel can resolve them per stroke.
+    profile.misfire_dips = struct('time_s', times, 'angle_deg', angles, ...
+        'depth', depthFraction, 'amplitude_rpm', f.rpm_dip_rpm, 'sigma_s', f.rpm_dip_sigma_s);
     dip = zeros(size(profile.t));
     for k = 1:numel(times)
         dip = dip + depthFraction(k) * exp(-0.5 * ((profile.t - times(k) - 2 * f.rpm_dip_sigma_s) ...

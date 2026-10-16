@@ -9,7 +9,11 @@ function report = validate_run_matlab(runDir, truthPath)
 %   5-9 kHz energy after knocked vs unknocked combustion must exceed 1.1x;
 %   below 2x it is reported as faint). Multi-fault runs also check that no
 %   knock burst follows a misfired stroke on the same cylinder. Truth written
-%   before per-fault fields existed is read as one fault.
+%   before per-fault fields existed is read as one fault. Contract 1.2 runs
+%   also check the 60-2 crank tooth edges (count, order, one gap per
+%   revolution, revolution count against RPM) and that every EGT/CHT signal
+%   is present at its rate; for misfire, the affected cylinder's EGT drop
+%   after onset is reported (egt_drop_c).
 %   Python validate-runs repeats the format checks independently.
 
     config = load_project_config();
@@ -69,7 +73,21 @@ function report = validate_run_matlab(runDir, truthPath)
             times(kinds == "combustion" & cylinders == 1))];
         metrics.cam_sync_pulses = numel(w.cam_sync_s);
     end
+    if isfield(w, 'crank_tooth_s')  % data contract 1.2 crank wheel
+        [crankIssues, metrics.crank_revolutions] = check_crank_teeth(w.crank_tooth_s, ...
+            metadata, config, rpm, duration);
+        issues = [issues; crankIssues];
+    end
+    hasThermal = any(startsWith(telemetry.signal, "egt_cyl"));
+    if hasThermal
+        issues = [issues; check_thermal(telemetry, config, duration)];
+    end
     faults = truth_faults(truth);
+    if hasThermal && any(string({faults.condition}) == "misfire")
+        f = faults(string({faults.condition}) == "misfire");
+        metrics.egt_drop_c = egt_drop(telemetry, f.affected_cylinder, f.onset_s, ...
+            config.engine.cylinders);
+    end
     if isfield(truth.events, 'fault')
         eventFault = string({truth.events.fault})';
     else  % older truth: every faulted event belongs to the run's one condition
@@ -176,6 +194,68 @@ function issues = check_cam_sync(pulses, metadata, config, rpm, duration, cylind
     if isempty(phase) || std(phase) > 3 || abs(mean(phase) - expected) > 30
         issues(end + 1) = "cam_sync: pulses are not phase-locked to cylinder 1 combustion";
     end
+end
+
+function [issues, revolutions] = check_crank_teeth(edges, metadata, config, rpm, duration)
+    % Falling edges increase inside [0, duration); every revolution shows one
+    % long gap (missing_teeth + 1 pitches); the revolution count follows RPM.
+    issues = strings(0, 1);
+    edges = edges(:);
+    info = metadata.streams.crank_teeth;
+    wheel = config.streams.crank_wheel;
+    revolutions = 0;
+    if numel(edges) ~= info.n_edges || info.teeth_per_rev ~= wheel.teeth_per_rev ...
+            || info.missing_teeth ~= wheel.missing_teeth
+        issues(end + 1) = "crank_teeth: edge count or wheel geometry disagrees with metadata/config";
+        return
+    end
+    if any(diff(edges) <= 0) || any(edges < 0 | edges >= duration)
+        issues(end + 1) = "crank_teeth: edges not increasing inside [0, duration)";
+        return
+    end
+    period = diff(edges);
+    neighbours = max([period(1); period(1:end - 1)], [period(2:end); period(end)]);
+    gaps = find(period > 2 * neighbours);
+    revolutions = numel(gaps);
+    teeth = wheel.teeth_per_rev - wheel.missing_teeth;
+    if any(diff(gaps) ~= teeth)
+        issues(end + 1) = "crank_teeth: gap spacing is not one per revolution";
+    end
+    expected = trapz([rpm.t_s; duration], [rpm.value; rpm.value(end)]) / 60;
+    if abs(revolutions - expected) > 0.02 * expected + 1
+        issues(end + 1) = sprintf("crank_teeth: %d revolutions vs %.1f from RPM", ...
+            revolutions, expected);
+    end
+end
+
+function issues = check_thermal(telemetry, config, duration)
+    issues = strings(0, 1);
+    rates = config.streams.thermal;
+    for c = 1:config.engine.cylinders
+        for kind = ["egt", "cht"]
+            rows = telemetry(telemetry.signal == kind + "_cyl" + c, :);
+            expected = round(duration * rates.(kind + "_rate_hz"));
+            if height(rows) ~= expected || any(rows.unit ~= "degC")
+                issues(end + 1) = sprintf("%s_cyl%d: %d rows (expected %d degC)", ...
+                    kind, c, height(rows), expected); %#ok<AGROW>
+            end
+        end
+    end
+end
+
+function drop = egt_drop(telemetry, cylinder, onset, cylinders)
+    % Affected cylinder EGT relative to the others' median, last 3 s versus
+    % the 3 s before onset (positive = the misfiring cylinder runs colder).
+    relative = @(t0, t1) mean(signal_mean(telemetry, cylinder, t0, t1) ...
+        - median(arrayfun(@(c) signal_mean(telemetry, c, t0, t1), setdiff(1:cylinders, cylinder))));
+    tEnd = max(telemetry.t_s);
+    drop = relative(max(onset - 3, 0), onset) - relative(tEnd - 3, tEnd);
+end
+
+function m = signal_mean(telemetry, cylinder, t0, t1)
+    rows = telemetry.signal == "egt_cyl" + cylinder & telemetry.t_s >= t0 & telemetry.t_s < t1 ...
+        & telemetry.valid == 1;
+    m = mean(telemetry.value(rows));
 end
 
 function faults = truth_faults(truth)

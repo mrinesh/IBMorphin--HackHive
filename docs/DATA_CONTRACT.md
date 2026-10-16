@@ -1,4 +1,12 @@
-# Data contract, version 1.1
+# Data contract, version 1.2
+
+Version 1.2 (2026-10-17) adds a 60-2 crank trigger wheel stream `crank_tooth_s`
+and per-cylinder exhaust gas and cylinder head temperatures (see Crank tooth
+wheel and Cylinder temperatures). A batch gets them when its
+`generator_params` contain `crank` and/or `thermal` (core_v3); every 1.1 stream
+of such a batch is bit-identical to the same batch without those blocks
+(core_v3 equals core_v2 apart from the new streams). 1.1 bundles have none and
+remain valid.
 
 Version 1.1 (2026-10-16) adds the cam phase reference `cam_sync_s` (see Cam phase
 reference). Version 1.0 bundles have none; Python still reads them, but cannot
@@ -29,7 +37,7 @@ label, fault schedule, severity, or seeds.
 
 | File | Fields and rules |
 |---|---|
-| `waveforms.mat` | Version 7 (`-v7`); numeric `single` column vectors `audio` and `vibration`; `double` scalars `audio_fs_hz`, `vibration_fs_hz`, `audio_t0_s`, `vibration_t0_s`; from 1.1 a `double` column vector `cam_sync_s` (pulse times, may be empty). MATLAB may store integer-valued doubles compactly; read with `loadmat(..., mat_dtype=True)` |
+| `waveforms.mat` | Version 7 (`-v7`); numeric `single` column vectors `audio` and `vibration`; `double` scalars `audio_fs_hz`, `vibration_fs_hz`, `audio_t0_s`, `vibration_t0_s`; from 1.1 a `double` column vector `cam_sync_s` (pulse times, may be empty); from 1.2 a `double` column vector `crank_tooth_s` (tooth edge times). MATLAB may store integer-valued doubles compactly; read with `loadmat(..., mat_dtype=True)` |
 | `telemetry.csv` | Long-form columns `t_s,signal,value,unit,valid` (see Telemetry) |
 | `metadata.json` | Public run description (see Metadata) |
 | `manifest.json` | SHA-256 and byte size of every public file, per run |
@@ -61,6 +69,8 @@ label, fault schedule, severity, or seeds.
 | `coolant_temp` | `degC` | 1 Hz | 2 s | Display |
 | `short_term_fuel_trim` | `percent` | 2 Hz | 1 s | Display |
 | `long_term_fuel_trim` | `percent` | 2 Hz | 1 s | Display |
+| `egt_cyl1` … `egt_cyl4` (1.2) | `degC` | 10 Hz (`streams.thermal.egt_rate_hz`) | 0.5 s | Thermal cross-check (not a classifier input) |
+| `cht_cyl1` … `cht_cyl4` (1.2) | `degC` | 2 Hz (`streams.thermal.cht_rate_hz`) | 1 s | Thermal cross-check (not a classifier input) |
 
 - Sample `k` of a signal is nominally at `k / rate_hz`; timestamps lie in
   `[0, duration_s)`.
@@ -92,6 +102,9 @@ label, fault schedule, severity, or seeds.
 - `streams.audio` and `streams.vibration`: `fs_hz`, `t0_s`, `unit`, `n_samples`
 - `streams.cam_sync` (1.1): `unit` (`s`), `clock` (`vibration`), `reference`
   (`cylinder_1_firing_tdc`), `angle_deg`, `n_pulses`
+- `streams.crank_teeth` (1.2): `unit` (`s`), `clock` (`vibration`), `reference`
+  (`cylinder_1_firing_tdc`), `edge` (`falling`), `teeth_per_rev`,
+  `missing_teeth`, `first_tooth_angle_deg`, `timer_resolution_s`, `n_edges`
 - `telemetry_signals`: for each signal, `rate_hz` and `unit`
 - `clock`: `offset_s` and `drift_ppm` for `audio`, `vibration`, `telemetry`
 - `waveform_summary.audio` and `waveform_summary.vibration`: `n_samples`,
@@ -125,6 +138,63 @@ only be placed in one of four firing slots, not named.
 - The reference is a waveform-side observation and may reach inference. It is
   used only to attribute strokes to cylinders (feature `cyl_phase` and
   `cyl<N>_*` columns, `pipeline/cylinders.py`); it is not a detector input.
+
+## Crank tooth wheel (1.2)
+
+Production engines measure crank angle with a toothed trigger wheel; the 60-2
+wheel has 60 tooth positions (6 degrees apart) with two teeth removed to mark
+one angle per revolution. Its tooth period carries crankshaft speed at about
+one sample per 6 degrees, so each cylinder's power stroke is visible as a small
+acceleration and a misfire as a deceleration on that stroke.
+
+- `crank_tooth_s` holds the falling-edge times of the remaining teeth
+  (`configs/mvp.json` `streams.crank_wheel`). The tooth after the gap sits
+  `first_tooth_angle_deg` (`[0, 360)`) after cylinder 1's firing TDC, mod 360;
+  tooth `k` is at `first_tooth_angle_deg + 6k`, `k = 0..57`. The wheel turns once
+  per revolution, so it cannot tell cylinder 1's firing TDC from cylinder 4's;
+  `cam_sync_s` resolves the 720-degree phase.
+- Edges strictly increase, lie in `[0, duration_s)`, are quantized to
+  `timer_resolution_s`, and share the vibration acquisition clock.
+- Simulation (`matlab/sim/render_crank_teeth.m`, `generator_params.crank`):
+  the control-rate RPM profile plus stroke-resolved terms the 1 kHz profile
+  cannot carry: a zero-mean gas-torque ripple per power stroke (scaled by that
+  stroke's combustion intensity, inversely with RPM, and with load), a misfire
+  deficit that builds through the misfiring stroke and recovers exponentially,
+  and a second-order reciprocating-inertia term that grows with RPM. The
+  misfire recovery is sized so the lost crank angle equals the smooth misfire
+  RPM dip already in the profile, keeping the wheel phase-locked to the audio
+  and vibration events: the residual phase difference is about 0.1 degrees in
+  runs without misfire and up to about 2 degrees (p95) and 5 degrees (max)
+  during dense misfire. Each engine has fixed tooth-spacing errors
+  (`tooth_error_deg_sd`); edges have timestamp jitter (`edge_jitter_s`).
+- The wheel draws from its own random streams, so it changes no other stream.
+- Python `validate-runs` requires the vector and `streams.crank_teeth` together
+  from 1.2 and checks the metadata, ordering, range, and one gap per
+  revolution. MATLAB `validate_run_matlab` also checks the revolution count
+  against RPM telemetry.
+- The wheel is a waveform-side observation and may reach inference (as on a
+  real ECU). It feeds the crank-speed misfire path and the simulated OBD
+  misfire monitor, and gives exact crank angle for cylinder attribution.
+
+## Cylinder temperatures (1.2)
+
+Per-cylinder exhaust gas temperature (EGT, thermocouple in each exhaust
+runner) and cylinder head temperature (CHT), as on aircraft piston-engine
+monitors. They are slow (seconds) but independent of the acoustic path.
+
+- Telemetry rows `egt_cyl<N>` and `cht_cyl<N>` (`degC`) for each cylinder, at
+  `streams.thermal.egt_rate_hz` and `cht_rate_hz`, with the usual telemetry
+  rules (sorted rows, `valid`, empty value when missing).
+- Simulation (`matlab/sim/render_thermal.m`, `generator_params.thermal`): each
+  cylinder relaxes (first order, `egt_tau_s`, `cht_tau_s`) toward a target set
+  by its latest combustion stroke's energy and the operating point. A misfiring
+  cylinder runs cold (EGT and CHT). Knock raises CHT (`knock_cht_rise_c`) and
+  slightly lowers EGT; EGT alone is not a knock signature. A
+  valve_clearance_like fault adds a small EGT rise (`valve_egt_rise_c`). Each
+  engine has fixed per-cylinder offsets. CHT's time constant is shortened from
+  real heads (minutes) so effects appear inside a 30 s run. All mappings are
+  heuristic, not fitted to engine measurements.
+- Python requires all eight signals at the configured rates from 1.2.
 
 ## Checksums
 
@@ -291,7 +361,8 @@ data/engine_history/
   raw/profile_<id>/run_<id>/
     telemetry.csv                      t_s,signal,value,unit,valid (as received)
     signals.npz                        audio, vibration (float32), audio_fs_hz,
-                                       vibration_fs_hz, has_cam_sync, cam_sync_s
+                                       vibration_fs_hz, has_cam_sync, cam_sync_s,
+                                       has_crank_teeth, crank_tooth_s
 ```
 
 Timestamps are UTC ISO 8601 (`2026-10-16T17:05:00+00:00`). History run ids are
