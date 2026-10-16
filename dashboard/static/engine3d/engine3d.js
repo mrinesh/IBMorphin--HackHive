@@ -51,6 +51,7 @@ const COLORS = {
   flameCore: 0xfff1b0, // white-hot core
   ember: 0xffa53d, // glowing particles thrown out by the burn
   plug: 0xe8f9ff, // spark-plug arc
+  alarm: 0xff2d2d, // localized faulty piston
 };
 const EMBERS = 26; // ember particles per cylinder
 // Fire colors per model state: fireball, hot core, embers and spark-plug arc.
@@ -157,6 +158,7 @@ function createView(root) {
     plug: [0, 0, 0, 0], // spark-plug arc 0..1, just before the fireball
     embers: [0, 0, 0, 0], // ember life 0..1
     ticks: [0, 0, 0, 0],
+    alarm: [0, 0, 0, 0], // red highlight on the localized cylinder's piston, 0..1
     jolt: 0,
     edgeColor: new THREE.Color(COLORS.cyan),
     stutter: 0,
@@ -329,6 +331,21 @@ function createView(root) {
       material.color.copy(sim.edgeColor);
       material.opacity = material.userData.base * pulse;
     });
+    // Faulty-cylinder highlight: the piston the localizer names glows red and pulses;
+    // it fades in when a cylinder is named and out when the alert clears.
+    const beat = still ? 1 : 0.65 + 0.35 * Math.sin(timer.getElapsed() * 5);
+    engine.cylinders.forEach((cyl, k) => {
+      const goal = k === located ? 1 : 0;
+      sim.alarm[k] += (goal - sim.alarm[k]) * Math.min(1, dt * (still ? 60 : 4));
+      const level = sim.alarm[k] * beat;
+      cyl.piston.material.emissiveIntensity = 1.6 * level;
+      cyl.alarm.material.opacity = 0.85 * level;
+    });
+    if (located !== null) {
+      const hot = engine.cylinders[located];
+      engine.alarmLight.position.set(hot.x, hot.piston.position.y + 0.35, 0.45);
+    }
+    engine.alarmLight.intensity = located === null ? 0 : 9 * sim.alarm[located] * beat;
     engine.model.visible = located !== null;
     stats.modelCylinder = located === null ? null : located + 1; // for browser checks
     if (engine.model.visible) {
@@ -634,7 +651,18 @@ function buildEngine() {
 
     const bore = new THREE.Mesh(boreGeometry, glass(0.08));
     bore.position.set(x, 1.85, 0);
-    const piston = edged(new THREE.Mesh(pistonGeometry, pistonMaterial), 0.35);
+    // Own material per piston so only the localized one glows red.
+    const piston = edged(new THREE.Mesh(pistonGeometry, pistonMaterial.clone()), 0.35);
+    piston.material.emissive = new THREE.Color(COLORS.alarm);
+    piston.material.emissiveIntensity = 0;
+    // Red halo that rides on the piston (child, so it follows the stroke).
+    const alarm = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: flameTexture, color: COLORS.alarm, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    }));
+    alarm.scale.set(1.3, 0.8, 1);
+    alarm.position.y = PISTON_H / 2 + 0.06; // on the crown, visible through the bore
+    piston.add(alarm);
     piston.position.x = x;
     const rod = new THREE.Mesh(rodGeometry, rodMaterial);
 
@@ -690,7 +718,7 @@ function buildEngine() {
     tick.scale.set(0.9, 0.45, 1);
 
     shaker.add(bore, piston, rod, intake, exhaust, flame, core, plug, embers, sparks, tick);
-    cylinders.push({ x, piston, rod, intake, exhaust, valveY, flame, core, plug, embers,
+    cylinders.push({ x, piston, alarm, rod, intake, exhaust, valveY, flame, core, plug, embers,
                      emberVel: new Float32Array(EMBERS * 3), burning: false, sparks, tick,
                      crankPin,
                      flameColor: new THREE.Color(COLORS.flame), intakeOpen: false,
@@ -716,6 +744,9 @@ function buildEngine() {
 
   const chamberLight = new THREE.PointLight(COLORS.flame, 0, 4, 2);
   shaker.add(chamberLight);
+  // Red light that follows the localized piston and tints the parts around it.
+  const alarmLight = new THREE.PointLight(COLORS.alarm, 0, 1.4, 2);
+  shaker.add(alarmLight);
 
   // Evaluation-truth marker (only shown when the overlay is on).
   const truth = new THREE.Mesh(
@@ -740,7 +771,8 @@ function buildEngine() {
   const pins = [0, Math.PI, Math.PI, 0];
   const tdc = [0, 3 * Math.PI, Math.PI, 2 * Math.PI];
   const engine = {
-    group, shaker, crankshaft, camshafts, cylinders, chamberLight, truth, model, edgeMaterials,
+    group, shaker, crankshaft, camshafts, cylinders, chamberLight, alarmLight, truth, model,
+    edgeMaterials,
     pins, tdc,
     setFiringOrder(order) {
       // Compression TDC of the i-th cylinder in the firing order is at i * 180 deg of
