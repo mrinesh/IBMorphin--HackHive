@@ -263,6 +263,70 @@ and decides at `window_ends()`; it currently requires `t0_s = 0` for all streams
 Truth comparison (`--with-truth`) happens after replay and is printed under
 `[evaluation]`.
 
+## Engine history (optional profiles)
+
+Engine profiles are optional and only the dashboard writes them. With no
+profile selected nothing is saved and replay output is unchanged.
+
+**Profile.** `make`, `model`, `serial` (the three identify the engine; case and
+repeated spaces are ignored, so one profile per identity), optional `nickname`,
+`specs`, and `spec_source`: `catalog` (equal to the catalog entry),
+`catalog_edited` (catalog entry changed by hand), or `manual`. `specs` holds the
+schema's engine fields `cylinders`, `strokes`, `displacement_l`, `firing_order`,
+`rpm_min`, `rpm_max`, `load_min`, `load_max` (load as fractions 0-1), looked up
+by make + model in `configs/engine_catalog.json`. Specs are validated with the
+schema's engine rules plus `rpm_min < rpm_max`, `load_min < load_max`, and a
+firing order listing each cylinder once. Only `cylinders` and `strokes` are
+relaxed (any positive cylinder count; 2 or 4 strokes): the schema stays pinned
+to 4/4, and other engines are saved with a reliability warning. Profile specs
+are descriptive; they are not passed to features or models, which keep using
+`configs/mvp.json`.
+
+**Location.** `data/engine_history/` (not tracked; `ENGINE_HISTORY_DIR`
+overrides it):
+
+```text
+data/engine_history/
+  history.sqlite                       profiles, runs, decisions, notes
+  raw/profile_<id>/run_<id>/
+    telemetry.csv                      t_s,signal,value,unit,valid (as received)
+    signals.npz                        audio, vibration (float32), audio_fs_hz,
+                                       vibration_fs_hz, has_cam_sync, cam_sync_s
+```
+
+Timestamps are UTC ISO 8601 (`2026-10-16T17:05:00+00:00`). History run ids are
+integers, separate from the recording's `run_id`.
+
+| Table | Fields |
+|---|---|
+| `profiles` | `id`, `make`, `model`, `serial`, `nickname`, `identity_key`, `specs_json`, `spec_source`, `created_utc`, `updated_utc` |
+| `runs` | `id`, `profile_id`, `created_utc`, `source_json`, `specs_json` (the profile's specs when saved), `summary_json`, `feature_names_json`, `complete` (1 = replay reached the end), `analyzed_s`, `duration_s`, `raw_path` (null once pruned), `raw_pruned_utc` |
+| `decisions` | `run_id`, `idx`, `t_end_s`, `quality`, `predicted`, `accepted`, `alert`, `anomaly_score`, `margin`, `probabilities_json`, `health_stage`, `localization`, `context_json`, `features_json` (ordered as `feature_names_json`) |
+| `notes` | `id`, `profile_id`, `run_id` (null for a note about the engine), `created_utc`, `text` |
+
+`source_json`: `mode` (`recorded` or `lab`), `dataset`, `recording_run_id`,
+`held_out_engine`, `config`, `model_version`, `feature_version`, and
+`lab_injection` (the user's lab settings, which are shown on screen; null for
+recorded replays). `summary_json`: `predicted_fault` (alerted faults joined with
+`+`, `normal` if no alert, `no data` if no window passed quality checks),
+`alerts` (`fault`, `onset_s` of each alert episode), `decision_counts`,
+`windows`, `ok_windows`, `max_probabilities`, `peak_anomaly_score`,
+`mean_anomaly_score`, `anomaly_threshold`, `final_health_stage`,
+`health_summary`, `warning_leads_s`, `localization`, `model_version`,
+`feature_version`. NaN is stored as null.
+
+**Retention.** Results (`runs`, `decisions`) and notes are permanent. Raw folders
+are kept for the newest N runs of each engine (default 10,
+`ENGINE_HISTORY_RAW_KEEP`); older ones are deleted when a run is saved, setting
+`raw_path` to null and `raw_pruned_utc`.
+
+**Leakage.** History records only what the dashboard user saw: model outputs,
+the signals the model received, and the user's own inputs. It never reads or
+stores `evaluation_truth/`, the truth overlay, or demo preset names, notes, or
+scenario tags (these describe the simulated condition). Lab-mode
+`lab_injection` is the user's configured injection and must not be used as
+training or evaluation labels.
+
 ## Integration batch checks
 
 Verify MATLAB/Python array orientation, values, dtype, sampling rates, timestamps,

@@ -189,6 +189,7 @@ Execution tracker. Checked items have been completed; unchecked items remain fut
 - [x] Confirm current predictions never consume future replay samples. `tests/test_replay.py`.
 - [x] Decimate display traces while preserving full-rate analytical processing.
 - [x] Measure inference and display latency on the declared demo machine.
+- [x] Optional engine profiles with per-engine history: make/model/serial with catalog or hand-entered specs (validated; warning for engines that are not 4-cylinder 4-stroke), saved runs, results, notes, and raw data pruned beyond the newest 10 runs. Off by default; see `docs/DATA_CONTRACT.md`, "Engine history".
 - [ ] Rehearse normal → RPM/load change → fault onset → signature change → alert → evidence.
 
 **Artifacts:** integrated local dashboard, demo presets, prediction logs, performance report.

@@ -167,6 +167,33 @@ Measured on the macOS development machine: processing p95 13 ms per decision;
 server-side render 105 ms median / 157 ms max per 0.5 s tick with the redesigned panels
 (AppTest; browser drawing not included).
 
+## Engine profiles and history
+
+Optional. The sidebar's **Engine profile** section defaults to *None (history
+off)*: nothing is saved and the dashboard behaves as without the feature.
+
+1. Choose **+ New engine profile**, pick a make and model from
+   `configs/engine_catalog.json` (specs fill in and can be edited) or choose
+   *Other* and enter the specs by hand, then enter a serial/ID and an optional
+   nickname. Specs are validated as you type; engines that are not inline
+   4-cylinder 4-stroke can be saved but show a warning that diagnostic results
+   may not be reliable.
+2. With the profile selected, replay any run. When the replay reaches the end
+   it is saved once to that engine's history; **Save run so far** saves a
+   partial replay. Restart, seek, or a new run starts a new analysis.
+3. The **Engine history** panel below the live view lists the engine's runs
+   (newest first: source, analysed time, predicted fault, alerts, max
+   P(fault), peak anomaly score, final health stage, whether raw data is still
+   kept), the per-window decisions of a chosen run, and notes. Add a note about
+   the engine or one run (e.g. "replaced injector 3").
+
+History lives in `data/engine_history/` (`ENGINE_HISTORY_DIR`); raw signals are
+kept for the newest 10 runs per engine (`ENGINE_HISTORY_RAW_KEEP`), results and
+notes permanently. Format and leakage rules: `docs/DATA_CONTRACT.md`, "Engine
+history". Profile specs are stored metadata only: the analysis still uses
+`configs/mvp.json`, and recorded replays are synthetic runs, not measurements of
+the profiled engine.
+
 ## Checking the 3D view
 
 With the dashboard running, `node scripts/check_engine3d.mjs` (Node 22+, Google

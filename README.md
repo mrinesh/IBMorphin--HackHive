@@ -47,7 +47,11 @@ frozen v1 model, and the final reports) at the repository root, then:
 uv run --all-extras streamlit run dashboard/app.py
 ```
 
-Choose a demo preset in the sidebar and press Play.
+Choose a demo preset in the sidebar and press Play. Optionally create an
+**Engine profile** in the sidebar (make, model, serial; specs from
+`configs/engine_catalog.json` or by hand) to save each analysis and notes to that
+engine's history in `data/engine_history/`; see
+[dashboard/README.md](dashboard/README.md#engine-profiles-and-history).
 
 **Full reproduction.** Generate the core dataset in MATLAB (about 40 minutes in
 one process, or split `Runs` across several processes), then run the Python
@@ -101,7 +105,7 @@ Prefix each with `uv run --all-extras`.
 ## Structure
 
 ```text
-configs/                   mvp.json (shared settings), core_v1.json, integration_batch.json, demo_presets.json
+configs/                   mvp.json (shared settings), core_v1.json, integration_batch.json, demo_presets.json, engine_catalog.json
 schemas/                   Configuration schema
 matlab/                    Generator entry points, export, validation, review plots
 matlab/sim/                Scenario sampling, crank/event model, faults, sensor and telemetry rendering
@@ -110,6 +114,7 @@ dashboard/                 Streamlit replay dashboard
 scripts/                   One-shot Python pipeline
 data/raw/                  Exported run bundles (generated, not tracked)
 data/processed/            Feature tables (generated)
+data/engine_history/       Optional per-engine history saved by the dashboard (not tracked)
 evaluation_truth/          Evaluation-only labels and source events (generated)
 artifacts/                 Models, prediction logs, submission sample (generated)
 reports/generated/         Validation and evaluation reports (generated)
