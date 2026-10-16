@@ -245,6 +245,13 @@ as stop now / soon / monitor, data gaps, and a decision-support disclaimer.
 Each diagnosis is saved to the engine's history (inputs digest, output, model,
 whether it was the basic version) and can be reopened from **Saved diagnoses**.
 
+Demo engine: `uv run --all-extras python scripts/seed_demo_engine.py` creates
+*Demo engine (DRIVEX Sim Synthetic 1.6 I4 · DEMO-058)* with four saved core_v3
+runs of one test engine (two healthy, a cylinder 3 misfire, then the misfire
+again with knock) and notes, including a spark-plug replacement that did not fix
+it. It replays the runs through the dashboard, so they are saved exactly as a
+user's replays (needs core_v3 and `calibrate-crosscheck`).
+
 Key setup: create a free key at <https://aistudio.google.com/apikey>, then set
 `GEMINI_API_KEY` in the environment or put `GEMINI_API_KEY=...` in a `.env`
 file at the repository root (git-ignored; see `.env.example`).
