@@ -44,7 +44,19 @@ const COLORS = {
   steel: 0x1b2a3f,
   steelLight: 0x3a5272,
   piston: 0x9fb3c8,
-  flame: 0x7dd3fc,
+  flame: 0xff7a1a, // combustion fireball
+  flameCore: 0xfff1b0, // white-hot core
+  ember: 0xffa53d, // glowing particles thrown out by the burn
+  plug: 0xe8f9ff, // spark-plug arc
+};
+const EMBERS = 26; // ember particles per cylinder
+// Fire colors per model state: fireball, hot core, embers and spark-plug arc.
+// Each scenario has its own color so it is recognizable at a glance.
+const FIRE = {
+  normal: { flame: 0xff7a1a, core: 0xfff1b0, ember: 0xffa53d, plug: 0xfff8e1 }, // orange
+  misfire: { flame: 0x2f8bff, core: 0xd2e8ff, ember: 0x6cb6ff, plug: 0xe8f4ff }, // blue
+  knock_like: { flame: 0xb48cff, core: 0xf1e8ff, ember: 0xcdb4ff, plug: 0xf7f2ff }, // lavender
+  valve_clearance_like: { flame: 0x22c55e, core: 0xd9ffe6, ember: 0x5ee38f, plug: 0xeafff1 }, // green
 };
 
 // Geometry (arbitrary units; one cylinder pitch = 1).
@@ -61,10 +73,10 @@ const DETAIL_Y = 1.6;
 const TRANSITION_S = 1.3;
 // Reduced-motion stand-ins for the animated effects (steady glow per model state).
 const STEADY = {
-  normal: { flash: 0.35, color: 0x7dd3fc },
-  misfire: { flash: 0.3, color: 0xfbbf24 },
-  knock_like: { flash: 0.6, color: 0xf472b6 },
-  valve_clearance_like: { flash: 0.35, color: 0x7dd3fc },
+  normal: { flash: 0.35, color: 0xff7a1a },
+  misfire: { flash: 0.3, color: 0x2f8bff },
+  knock_like: { flash: 0.6, color: 0xb48cff },
+  valve_clearance_like: { flash: 0.35, color: 0x22c55e },
 };
 const CAMERA = {
   car: { radius: 17, target: new THREE.Vector3(0, 1.0, 0.3) },
@@ -139,6 +151,8 @@ function createView(root) {
     flash: [0, 0, 0, 0], // per-cylinder combustion glow 0..1
     flashColor: new THREE.Color(COLORS.flame),
     sparks: [0, 0, 0, 0],
+    plug: [0, 0, 0, 0], // spark-plug arc 0..1, just before the fireball
+    embers: [0, 0, 0, 0], // ember life 0..1
     ticks: [0, 0, 0, 0],
     jolt: 0,
     edgeColor: new THREE.Color(COLORS.cyan),
@@ -254,13 +268,31 @@ function createView(root) {
         sim.ticks[k] = effect === 'valve_clearance_like' ? 0.7 : 0;
       } else {
         // Effects decay.
-        sim.flash[k] = Math.max(0, sim.flash[k] - dt * 3.2);
+        sim.flash[k] = Math.max(0, sim.flash[k] - dt * 1.7); // ~0.6 s burn
         sim.sparks[k] = Math.max(0, sim.sparks[k] - dt * 5);
+        sim.plug[k] = Math.max(0, sim.plug[k] - dt * 14);
+        sim.embers[k] = Math.max(0, sim.embers[k] - dt * 1.1);
+        if (sim.embers[k] > 0) driftEmbers(cyl, dt);
         sim.ticks[k] = Math.max(0, sim.ticks[k] - dt * 6);
       }
       cyl.flame.material.opacity = sim.flash[k];
       cyl.flame.material.color.copy(cyl.flameColor);
-      cyl.flame.scale.setScalar(0.55 + 0.45 * sim.flash[k]);
+      // Fireball: bright and tight at ignition, then expands as it fades.
+      // It fills the chamber between the head and the descending piston crown.
+      const burn = sim.flash[k];
+      const crown = cyl.piston.position.y + PISTON_H / 2;
+      const gap = Math.max(DECK_Y - crown, 0.12);
+      const fireY = still ? CHAMBER_Y : crown + gap / 2;
+      cyl.flame.position.y = fireY;
+      cyl.core.position.y = fireY + 0.04;
+      cyl.embers.position.y = fireY;
+      cyl.flame.scale.set(still ? 0.8 : 0.75 + 0.55 * (1 - burn),
+                          still ? 0.8 : Math.max(0.6, gap * 1.6) + 0.3 * (1 - burn), 1);
+      cyl.core.material.opacity = still ? 0 : Math.min(1, burn * 1.4) * (cyl.burning ? 1 : 0);
+      cyl.core.scale.setScalar(0.3 + 0.35 * burn);
+      cyl.plug.material.opacity = still ? 0 : sim.plug[k];
+      cyl.plug.scale.setScalar(0.12 + 0.18 * sim.plug[k]);
+      cyl.embers.material.opacity = still ? 0 : sim.embers[k];
       cyl.sparks.material.opacity = sim.sparks[k];
       if (!still) cyl.sparks.rotation.y += dt * 6;
       cyl.tick.material.opacity = sim.ticks[k];
@@ -270,7 +302,7 @@ function createView(root) {
     let brightest = 0;
     sim.flash.forEach((value, k) => { if (value > sim.flash[brightest]) brightest = k; });
     engine.chamberLight.position.set(engine.cylinders[brightest].x, CHAMBER_Y, 0);
-    engine.chamberLight.intensity = 14 * sim.flash[brightest];
+    engine.chamberLight.intensity = 22 * sim.flash[brightest];
     engine.chamberLight.color.copy(engine.cylinders[brightest].flameColor);
 
     // Shake: the measured vibration level relative to normal, plus knock jolts.
@@ -300,21 +332,62 @@ function createView(root) {
     const cyl = engine.cylinders[k];
     if (effect === 'misfire' && Math.random() < 0.35 + 0.5 * intensity) {
       // Model says misfire (cylinder unknown): firing pulses become weak or missing.
-      sim.flash[k] = Math.random() < 0.5 ? 0 : 0.25;
+      // A skipped firing stays dark; a weak one sputters: faint blue flicker, plug arc.
+      const weak = Math.random() >= 0.5;
+      sim.flash[k] = weak ? 0.25 : 0;
+      sim.plug[k] = weak ? 0.6 : 0;
       stats.events.skipped += 1;
       sim.stutter = 1;
-      cyl.flameColor.set(COLORS.amber);
+      cyl.flameColor.set(FIRE.misfire.flame);
+      cyl.plug.material.color.set(FIRE.misfire.plug);
+      cyl.burning = false; // no hot core or embers
       return;
     }
+    const fire = FIRE[effect] || FIRE.normal;
     sim.flash[k] = 1;
+    sim.plug[k] = 1;
+    sim.embers[k] = 1;
+    cyl.burning = true;
     stats.events.fired += 1;
-    cyl.flameColor.set(effect === 'knock_like' ? COLORS.magenta : COLORS.flame);
+    cyl.flameColor.set(fire.flame);
+    cyl.core.material.color.set(fire.core);
+    cyl.plug.material.color.set(fire.plug);
+    launchEmbers(cyl, effect === 'knock_like', fire.ember);
     if (effect === 'knock_like' && Math.random() < 0.4 + 0.6 * intensity) {
       sim.sparks[k] = 1;
       stats.events.knock += 1;
       sim.jolt = Math.max(sim.jolt, 0.6 + 0.4 * intensity);
       scatter(cyl.sparks.geometry);
     }
+  }
+
+  function launchEmbers(cyl, violent, color) {
+    // Embers start at the spark plug and burst outward, mostly sideways and down
+    // (the burning charge pushes the piston), faster and pinker for knock.
+    const positions = cyl.embers.geometry.attributes.position.array;
+    const speed = violent ? 2.6 : 1.5;
+    for (let i = 0; i < EMBERS; i += 1) {
+      const angle = Math.random() * Math.PI * 2;
+      const out = speed * (0.35 + Math.random() * 0.65);
+      positions[i * 3] = (Math.random() - 0.5) * 0.06;
+      positions[i * 3 + 1] = 0.08;
+      positions[i * 3 + 2] = (Math.random() - 0.5) * 0.06;
+      cyl.emberVel[i * 3] = Math.cos(angle) * out * 0.5;
+      cyl.emberVel[i * 3 + 1] = -Math.random() * out * 0.6 + 0.25;
+      cyl.emberVel[i * 3 + 2] = Math.sin(angle) * out * 0.4;
+    }
+    cyl.embers.material.color.set(color);
+    cyl.embers.geometry.attributes.position.needsUpdate = true;
+  }
+
+  function driftEmbers(cyl, dt) {
+    const positions = cyl.embers.geometry.attributes.position.array;
+    const drag = Math.exp(-dt * 3);
+    for (let i = 0; i < EMBERS * 3; i += 1) {
+      cyl.emberVel[i] *= drag;
+      positions[i] += cyl.emberVel[i] * dt;
+    }
+    cyl.embers.geometry.attributes.position.needsUpdate = true;
   }
 
   function seatImpact(k, effect, intensity) {
@@ -569,20 +642,41 @@ function buildEngine() {
     flame.scale.setScalar(0.9);
 
     const sparks = new THREE.Points(sparkGeometry(), new THREE.PointsMaterial({
-      color: COLORS.magenta, size: 0.06, transparent: true, opacity: 0,
+      color: FIRE.knock_like.ember, size: 0.06, transparent: true, opacity: 0,
       blending: THREE.AdditiveBlending, depthWrite: false,
     }));
     sparks.position.set(x, CHAMBER_Y, 0);
 
+    const core = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: flameTexture, color: COLORS.flameCore, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    }));
+    core.position.set(x, CHAMBER_Y + 0.02, 0);
+    const plug = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: flameTexture, color: COLORS.plug, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    }));
+    plug.position.set(x, DECK_Y - 0.06, 0);
+    const emberGeometry = new THREE.BufferGeometry();
+    emberGeometry.setAttribute('position',
+                               new THREE.BufferAttribute(new Float32Array(EMBERS * 3), 3));
+    const embers = new THREE.Points(emberGeometry, new THREE.PointsMaterial({
+      color: COLORS.ember, size: 0.12, map: flameTexture, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    }));
+    embers.position.set(x, CHAMBER_Y, 0);
+
     const tick = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: flameTexture, color: COLORS.violet, transparent: true, opacity: 0,
+      map: flameTexture, color: FIRE.valve_clearance_like.ember, transparent: true, opacity: 0,
       blending: THREE.AdditiveBlending, depthWrite: false,
     }));
     tick.position.set(x, DECK_Y + 0.12, 0);
     tick.scale.set(0.9, 0.45, 1);
 
-    shaker.add(bore, piston, rod, intake, exhaust, flame, sparks, tick);
-    cylinders.push({ x, piston, rod, intake, exhaust, valveY, flame, sparks, tick, crankPin,
+    shaker.add(bore, piston, rod, intake, exhaust, flame, core, plug, embers, sparks, tick);
+    cylinders.push({ x, piston, rod, intake, exhaust, valveY, flame, core, plug, embers,
+                     emberVel: new Float32Array(EMBERS * 3), burning: false, sparks, tick,
+                     crankPin,
                      flameColor: new THREE.Color(COLORS.flame), intakeOpen: false,
                      exhaustOpen: false });
   }
