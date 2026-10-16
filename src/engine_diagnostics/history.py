@@ -4,10 +4,11 @@ Storage is one SQLite file (stdlib `sqlite3`) plus one folder of raw data per
 saved run, under a history directory (default data/engine_history, overridden
 by ENGINE_HISTORY_DIR):
 
-    history.sqlite                 profiles, runs, decisions, notes
+    history.sqlite                 profiles, runs, decisions, notes, diagnoses
     raw/profile_<id>/run_<id>/     telemetry.csv (long form) and signals.npz
 
-Results (run summary and per-window decisions) and notes are kept permanently.
+Results (run summary and per-window decisions), notes, and saved diagnoses are
+kept permanently.
 Raw data is kept for the most recent `raw_keep` runs of each engine (default
 10, ENGINE_HISTORY_RAW_KEEP); older raw folders are deleted when a run is
 saved, and the run keeps its results. Nothing is written until the first
@@ -69,6 +70,12 @@ CREATE TABLE IF NOT EXISTS notes (
     profile_id INTEGER NOT NULL REFERENCES profiles(id),
     run_id INTEGER REFERENCES runs(id),
     created_utc TEXT NOT NULL, text TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS diagnoses (
+    id INTEGER PRIMARY KEY,
+    profile_id INTEGER NOT NULL REFERENCES profiles(id),
+    latest_run_id INTEGER REFERENCES runs(id),
+    created_utc TEXT NOT NULL, model TEXT NOT NULL, fallback INTEGER NOT NULL,
+    fallback_reason TEXT, inputs_digest TEXT NOT NULL, output_json TEXT NOT NULL);
 """
 
 
@@ -110,6 +117,20 @@ class Note:
     run_id: int | None
     created_utc: str
     text: str
+
+
+@dataclass(frozen=True)
+class Diagnosis:
+    """A saved diagnosis: the output (summary, causes, actions, data gaps) and how it was made."""
+    id: int
+    profile_id: int
+    latest_run_id: int | None
+    created_utc: str
+    model: str
+    fallback: bool
+    fallback_reason: str | None
+    inputs_digest: str
+    output: dict[str, Any]
 
 
 @dataclass
@@ -394,6 +415,32 @@ class HistoryStore:
                 for r in self._read("SELECT * FROM notes WHERE profile_id = ? ORDER BY id DESC",
                                     (profile_id,))]
 
+    # -- diagnoses --------------------------------------------------------------------
+    def save_diagnosis(self, profile_id: int, output: dict[str, Any], *, model: str,
+                       fallback: bool, inputs_digest: str, latest_run_id: int | None = None,
+                       fallback_reason: str | None = None) -> Diagnosis:
+        """Save one diagnosis of an engine (kept permanently, like notes)."""
+        self._require_profile(profile_id)
+        now = _now()
+        with closing(self._connect()) as con, con:
+            cur = con.execute(
+                "INSERT INTO diagnoses (profile_id, latest_run_id, created_utc, model, fallback, "
+                "fallback_reason, inputs_digest, output_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (profile_id, latest_run_id, now, model, int(fallback), fallback_reason,
+                 inputs_digest, _dumps(output)))
+        return Diagnosis(cur.lastrowid, profile_id, latest_run_id, now, model, bool(fallback),
+                         fallback_reason, inputs_digest, _clean(output))
+
+    def list_diagnoses(self, profile_id: int) -> list[Diagnosis]:
+        """Diagnoses of one engine, newest first."""
+        return [_diagnosis(r) for r in self._read(
+            "SELECT * FROM diagnoses WHERE profile_id = ? ORDER BY id DESC", (profile_id,))]
+
+    def latest_diagnosis(self, profile_id: int) -> Diagnosis | None:
+        rows = self._read("SELECT * FROM diagnoses WHERE profile_id = ? ORDER BY id DESC "
+                          "LIMIT 1", (profile_id,))
+        return _diagnosis(rows[0]) if rows else None
+
     # -- helpers ----------------------------------------------------------------------
     def _require_profile(self, profile_id: int) -> Profile:
         profile = self.get_profile(profile_id)
@@ -420,6 +467,12 @@ def _run(row: sqlite3.Row) -> RunEntry:
                     json.loads(row["source_json"]), json.loads(row["specs_json"]),
                     json.loads(row["summary_json"]), bool(row["complete"]), row["analyzed_s"],
                     row["duration_s"], row["raw_path"] is not None)
+
+
+def _diagnosis(row: sqlite3.Row) -> Diagnosis:
+    return Diagnosis(row["id"], row["profile_id"], row["latest_run_id"], row["created_utc"],
+                     row["model"], bool(row["fallback"]), row["fallback_reason"],
+                     row["inputs_digest"], json.loads(row["output_json"]))
 
 
 def _decision_row(run_id: int, k: int, r: dict[str, Any], stage: str | None) -> tuple:
