@@ -10,8 +10,14 @@ uses full-rate samples. Display panels may show any data already received
 and is never passed to the engine. For the integration dataset, "Hold out this
 run's engine" replays with a temporary model refitted without that engine, and
 the cross-engine panel shows the leave-one-engine-out report from train-temporary.
+
+Engine profiles are optional. With none selected nothing is saved. With one
+selected, each replay that reaches the end (or "Save run so far") is saved to
+that engine's history (engine_diagnostics.history) and the history panel shows
+its runs and notes. History never stores evaluation truth or preset text.
 """
 
+import dataclasses
 import json
 import sys
 import time
@@ -32,6 +38,12 @@ if str(ROOT) not in sys.path:  # `dashboard` package (theme, explain) for `strea
 from dashboard import engine3d, explain, theme  # noqa: E402
 from engine_diagnostics.config import load_config  # noqa: E402
 from engine_diagnostics.data.run_io import find_runs, load_run, validate_run  # noqa: E402
+from engine_diagnostics.history import (  # noqa: E402
+    HistoryStore,
+    Profile,
+    raw_from_bundle,
+    summarize_run,
+)
 from engine_diagnostics.lab import (  # noqa: E402
     LAB_FAULTS,
     LabSettings,
@@ -45,6 +57,13 @@ from engine_diagnostics.pipeline.features import (  # noqa: E402
     _band_envelope,
     _firing_rate_hz,
     window_slice,
+)
+from engine_diagnostics.profiles import (  # noqa: E402
+    load_catalog,
+    lookup,
+    reliability_warning,
+    spec_source,
+    validate_specs,
 )
 from engine_diagnostics.runtime.evidence import EvidencePanel, build_evidence  # noqa: E402
 from engine_diagnostics.runtime.health import STAGES, HealthTimeline, health_timeline  # noqa: E402
@@ -106,6 +125,14 @@ LAB_NOISE = [1.0, 1.5, 2.0, 3.0, 5.0]  # x recorded noise; 2x is the challenge-r
 LAB_SENSORS = {"audio": "Microphone (audio)", "vibration": "Accelerometer (vibration)",
                "rpm": "RPM telemetry"}
 STAGE_COLORS = dict(zip(STAGES, ("#2ca02c", "#ff9f1c", "#d62728", "#bbbbbb"), strict=True))
+# Engine profiles (optional): selecting one turns on saving to that engine's history.
+NEW_PROFILE = "new"
+OTHER = "Other (not in catalog)…"
+MANUAL_SPECS = {"cylinders": 4, "strokes": 4, "displacement_l": 1.6, "firing_order": [1, 3, 4, 2],
+                "rpm_min": 800, "rpm_max": 6000, "load_min": 0.1, "load_max": 0.9}
+SPEC_SOURCE_NAMES = {"catalog": "from the engine catalog",
+                     "catalog_edited": "from the catalog, edited by hand",
+                     "manual": "entered by hand"}
 
 st.set_page_config(page_title="DRIVEX · EngineSense", layout="wide",
                    initial_sidebar_state="auto")
@@ -223,7 +250,8 @@ def start_run(dataset: str, run_id: str, held_out: str | None = None,
                             lab=lab, lab_log=lab_log, bundle=bundle, packets=run_packets,
                             engine=ReplayEngine(model, config, bundle.metadata,
                                                 localizer=localizer),
-                            next_packet=0, records=[], stream_t=0.0, playing=False)
+                            next_packet=0, records=[], stream_t=0.0, playing=False,
+                            saved_history_run=None)
 
 
 def advance_to(target_s: float) -> None:
@@ -319,6 +347,130 @@ def lab_controls() -> None:
             st.session_state.anchor = time.monotonic()
 
 
+@st.cache_resource
+def engine_catalog():
+    return load_catalog()
+
+
+def parse_firing_order(text: str):
+    """'1-3-4-2' (or commas/spaces) -> [1, 3, 4, 2]; unparseable text is returned for validation."""
+    try:
+        return [int(p) for p in text.replace(",", " ").replace("-", " ").split()]
+    except ValueError:
+        return text
+
+
+def spec_inputs(defaults: dict, key: str) -> dict:
+    """Spec fields prefilled from `defaults`; returns the entered (unvalidated) specs."""
+    left, right = st.columns(2)
+    return {
+        "cylinders": left.number_input("Cylinders", value=int(defaults["cylinders"]), step=1,
+                                       key=f"{key}_cylinders"),
+        "strokes": right.selectbox("Strokes", [4, 2], index=[4, 2].index(defaults["strokes"]),
+                                   key=f"{key}_strokes"),
+        "displacement_l": left.number_input("Displacement (L)",
+                                            value=float(defaults["displacement_l"]), step=0.1,
+                                            format="%.2f", key=f"{key}_displacement"),
+        "firing_order": parse_firing_order(right.text_input(
+            "Firing order", "-".join(map(str, defaults["firing_order"])), key=f"{key}_order")),
+        "rpm_min": left.number_input("RPM min", value=float(defaults["rpm_min"]), step=50.0,
+                                     format="%.0f", key=f"{key}_rpm_min"),
+        "rpm_max": right.number_input("RPM max", value=float(defaults["rpm_max"]), step=50.0,
+                                      format="%.0f", key=f"{key}_rpm_max"),
+        "load_min": left.number_input("Load min (0-1)", value=float(defaults["load_min"]),
+                                      step=0.05, format="%.2f", key=f"{key}_load_min"),
+        "load_max": right.number_input("Load max (0-1)", value=float(defaults["load_max"]),
+                                       step=0.05, format="%.2f", key=f"{key}_load_max"),
+    }
+
+
+def specs_valid(specs: dict, warn: bool = True) -> bool:
+    """Show validation problems (and the reliability warning); True if the specs are valid."""
+    problems = validate_specs(specs)
+    if problems:
+        st.error("Check the specs:\n" + "\n".join(f"- {p}" for p in problems))
+    elif warn and reliability_warning(specs):
+        st.warning(reliability_warning(specs), icon=":material/warning:")
+    return not problems
+
+
+def specs_text(profile: Profile) -> str:
+    s = profile.specs
+    return (f"{s['cylinders']} cyl · {s['strokes']}-stroke · {s['displacement_l']:g} L · "
+            f"firing order {'-'.join(map(str, s['firing_order']))} · "
+            f"{s['rpm_min']:,.0f}-{s['rpm_max']:,.0f} rpm · load {s['load_min']:g}-"
+            f"{s['load_max']:g} · specs {SPEC_SOURCE_NAMES[profile.spec_source]}")
+
+
+def new_profile_controls() -> None:
+    """Identify an engine (make, model, serial); specs come from the catalog or by hand."""
+    catalog = engine_catalog()
+    make = st.selectbox("Make", sorted({e.make for e in catalog}) + [OTHER],
+                        key="new_profile_make")
+    if make == OTHER:
+        make = st.text_input("Make", key="new_profile_make_text")
+        model_name = st.text_input("Model", key="new_profile_model_text")
+    else:
+        model_name = st.selectbox("Model", [e.model for e in catalog if e.make == make] + [OTHER],
+                                  key="new_profile_model")
+        if model_name == OTHER:
+            model_name = st.text_input("Model (not in catalog)", key="new_profile_model_text")
+    serial = st.text_input("Serial / ID", key="new_profile_serial",
+                           placeholder="e.g. engine number or VIN")
+    nickname = st.text_input("Nickname (optional)", key="new_profile_nickname")
+    entry = lookup(catalog, make, model_name)
+    st.caption("Specs found in the engine catalog; edit them if this engine differs."
+               if entry else "Not in the catalog: enter the specs by hand.")
+    specs = spec_inputs(entry.engine if entry else MANUAL_SPECS,
+                        key=f"new_specs_{entry.make}_{entry.model}" if entry else "new_specs")
+    valid = specs_valid(specs)
+    if st.button("Create profile", type="primary", width="stretch", disabled=not valid):
+        try:
+            created = store.create_profile(make, model_name, serial, specs,
+                                           spec_source(entry, specs), nickname)
+        except ValueError as error:
+            st.error(str(error))
+        else:
+            st.session_state.pending_profile = created.id
+            st.rerun()
+
+
+def profile_controls() -> Profile | None:
+    """Optional engine profile. None (the default) means nothing is saved."""
+    state = st.session_state
+    if "pending_profile" in state:  # just created: select it before the widget is drawn
+        state.profile_choice = state.pop("pending_profile")
+    profiles = {p.id: p for p in store.list_profiles()}
+    if state.get("profile_choice") not in (None, NEW_PROFILE, *profiles):
+        state.profile_choice = None
+    choice = st.selectbox(
+        "Engine", [None, *profiles, NEW_PROFILE], key="profile_choice",
+        format_func=lambda c: ("None (history off)" if c is None else
+                               "+ New engine profile" if c == NEW_PROFILE else profiles[c].label),
+        help="Optional. Pick or create an engine to save each analysis to its history.")
+    if choice == NEW_PROFILE:
+        new_profile_controls()
+        return None
+    if choice is None:
+        st.caption("No engine selected: analyses are not saved.")
+        return None
+    selected = profiles[choice]
+    st.caption(specs_text(selected))
+    if reliability_warning(selected.specs):
+        st.warning(reliability_warning(selected.specs), icon=":material/warning:")
+    with st.expander("Edit specs"):
+        specs = spec_inputs(selected.specs, key=f"edit_specs_{selected.id}")
+        valid = specs_valid(specs, warn=False)
+        if st.button("Save specs", width="stretch", disabled=not valid,
+                     key=f"save_specs_{selected.id}"):
+            entry = lookup(engine_catalog(), selected.make, selected.model)
+            store.update_specs(selected.id, specs, spec_source(entry, specs))
+            st.rerun()
+        st.caption("Saved runs keep the specs they were analysed with.")
+    return selected
+
+
+store = HistoryStore()  # nothing is written until a profile is created
 
 with st.sidebar:
     st.html(f'<div class="sidebar-brand">{theme.wordmark_html("small")}'
@@ -404,6 +556,9 @@ with st.sidebar:
                f"step {config['analysis']['step_s']:g} s")
     if issues:
         st.error("Run failed validation:\n" + "\n".join(issues))
+
+    st.header("Engine profile")
+    profile = profile_controls()
 
 if held_out:
     st.warning(f"Unseen-engine replay: the model was refitted without {held_out}, so "
@@ -632,6 +787,33 @@ def run_health(records) -> HealthTimeline:
         [fault_probability(r) for r in records])
 
 
+def save_history_run(engine: Profile, complete: bool) -> int:
+    """Save the current replay (decisions so far, results, received raw data) to history.
+
+    The source names how the run was produced; it never includes evaluation truth
+    or demo preset/scenario text, which describe the simulated condition.
+    """
+    state = st.session_state
+    records = state.records
+    health = run_health(records)
+    lab = state.get("lab")
+    source = {"mode": "lab" if lab else "recorded", "dataset": state.dataset,
+              "recording_run_id": state.run_id, "held_out_engine": state.held_out,
+              "config": "configs/mvp.json", "model_version": model.model_version,
+              "feature_version": model.feature_version,
+              # The user's own lab settings (shown on screen), not evaluation truth.
+              "lab_injection": dataclasses.asdict(lab) if lab else None}
+    summary = {**summarize_run(records, health.stage, health.summary(), health.warning_leads()),
+               "anomaly_threshold": model.anomaly_threshold}
+    run_id = store.save_run(engine.id, records, source=source, summary=summary,
+                            feature_names=list(model.feature_names), duration_s=duration,
+                            complete=complete, raw=raw_from_bundle(state.bundle, state.stream_t),
+                            stages=health.stage)
+    state.saved_history_run = run_id
+    state.history_notice = f"Saved run #{run_id} to the history of {engine.label}"
+    return run_id
+
+
 def health_figure(health: HealthTimeline) -> go.Figure:
     step = config["analysis"]["step_s"]
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.78, 0.22],
@@ -752,6 +934,10 @@ def live_view():
         advance_to(min((time.monotonic() - state.anchor) * speed, duration))
         if state.next_packet >= len(run_packets):
             state.playing = False
+    if (profile and state.records and state.next_packet >= len(run_packets)
+            and state.get("saved_history_run") is None):
+        save_history_run(profile, complete=True)  # replay finished: save it once
+        st.rerun()  # refresh the history panel outside this fragment
     t_now = state.stream_t
     records = state.records
     latest = records[-1] if records else None
@@ -993,6 +1179,98 @@ def live_view():
 
 
 live_view()
+
+
+def history_table(runs) -> pd.DataFrame:
+    """One row per saved run (newest first) with its predicted fault and key scores."""
+    rows = []
+    for run in runs:
+        s, src = run.summary, run.source
+        faults = [p for c, p in (s.get("max_probabilities") or {}).items() if c != "normal"]
+        peak = s.get("peak_anomaly_score")
+        rows.append({
+            "run": f"#{run.id}",
+            "saved (UTC)": run.created_utc[:16].replace("T", " "),
+            "source": (f"lab · {src.get('recording_run_id')}" if src.get("mode") == "lab"
+                       else f"{src.get('dataset')} · {src.get('recording_run_id')}"),
+            "analysed": f"{run.analyzed_s:.1f} / {run.duration_s:g} s"
+                        + ("" if run.complete else " (partial)"),
+            "predicted fault": label(s["predicted_fault"]),
+            "alerts": ", ".join(f"{label(a['fault'])} {a['onset_s']:.1f} s"
+                                for a in s["alerts"]) or "none",
+            "max P(fault)": round(max(faults), 2) if faults else None,
+            "peak anomaly": round(peak, 2) if peak is not None else None,
+            "final health": s.get("final_health_stage") or "-",
+            "model": s.get("model_version"),
+            "raw data": "kept" if run.raw_available else "pruned",
+        })
+    return pd.DataFrame(rows)
+
+
+def engine_history_panel(engine: Profile) -> None:
+    """Saved runs and notes of the selected engine, and a form to add a note."""
+    state = st.session_state
+    notice = state.pop("history_notice", None)
+    if notice:
+        st.toast(notice, icon=":material/save:")
+    st.subheader(f"Engine history · {engine.label}")
+    if reliability_warning(engine.specs):
+        st.warning(reliability_warning(engine.specs), icon=":material/warning:")
+    runs = store.list_runs(engine.id)
+    saved = state.get("saved_history_run")
+    info_col, save_col = st.columns([3, 1], vertical_alignment="center")
+    info_col.caption(
+        (f"This replay is saved as run #{saved}. " if saved else
+         "This replay is saved automatically when it reaches the end. ")
+        + f"Raw signals are kept for the newest {store.raw_keep} runs of this engine; results "
+          "and notes are kept permanently. Recorded replays are synthetic runs, not "
+          "measurements of this engine.")
+    if save_col.button("Save run so far", width="stretch",
+                       disabled=not state.records or saved is not None,
+                       help="Save the decisions and signals received up to now."):
+        save_history_run(engine, complete=False)
+        st.rerun()
+    runs_col, notes_col = st.columns([3, 2], gap="medium")
+    with runs_col:
+        st.markdown("**Saved runs** (newest first)")
+        if runs:
+            st.dataframe(history_table(runs), hide_index=True)
+            with st.expander("Decisions of a saved run"):
+                pick = st.selectbox("Run", [r.id for r in runs], format_func=lambda r: f"#{r}",
+                                    key="history_run_detail")
+                decisions = store.decisions(pick)
+                st.dataframe(decisions[[c for c in ("t_end_s", "quality", "accepted", "alert",
+                                                    "anomaly_score", "health_stage",
+                                                    "localization") if c in decisions]],
+                             hide_index=True)
+        else:
+            st.info("No saved runs yet. Play a run to the end, or use Save run so far.")
+    with notes_col:
+        st.markdown("**Notes**")
+        run_ids = [None, *[r.id for r in runs]]
+        with st.form("history_note", clear_on_submit=True):
+            text = st.text_area("New note", placeholder="e.g. replaced injector 3", height=80)
+            about = st.selectbox("About", run_ids,
+                                 index=run_ids.index(saved) if saved in run_ids else 0,
+                                 format_func=lambda r: "This engine (no specific run)"
+                                 if r is None else f"Run #{r}")
+            if st.form_submit_button("Add note", width="stretch"):
+                try:
+                    store.add_note(engine.id, text, about)
+                except ValueError as error:
+                    st.warning(str(error))
+        notes = store.list_notes(engine.id)
+        for note in notes:
+            with st.container(border=True):
+                st.caption(f"{note.created_utc[:16].replace('T', ' ')} UTC · "
+                           + (f"run #{note.run_id}" if note.run_id else "engine"))
+                st.markdown(note.text)
+        if not notes:
+            st.caption("No notes yet.")
+
+
+if profile:
+    engine_history_panel(profile)
 
 
 def cross_engine_panel():
