@@ -99,6 +99,49 @@ def names(classes: str | None) -> str:
     return " + ".join(CLASS_META.get(c, {"label": c})["label"] for c in classes.split("+"))
 
 
+FAULTS = ("misfire", "knock_like", "valve_clearance_like")
+
+
+def reported_faults(record: dict[str, Any] | None) -> list[dict[str, str]]:
+    """Faults the dashboard reports now: active alerts plus this window's detected faults.
+
+    Alerts are debounced: confirmed over several updates and held through brief
+    dropouts. So a fault can be alerted while missing from one window, or detected
+    before its alert is confirmed. Each entry's status says which: 'confirmed'
+    (alert active and detected in this window), 'held' (alert active, not detected
+    in this window) or 'unconfirmed' (detected in this window, alert not confirmed
+    yet). Sorted by name, the order of the model's '+'-joined sets and the banners.
+    """
+    if record is None:
+        return []
+    alerts = record.get("alerts")
+    if alerts is None:  # v1 / temporary model: one alert class (or None)
+        alerts = (record.get("alert") or "").split("+")
+    alerted = {a for a in alerts if a in FAULTS}
+    detected = ({c for c in (record.get("accepted") or "").split("+") if c in FAULTS}
+                if record.get("quality") == "ok" else set())
+    return [{"fault": f, "status": "confirmed" if f in alerted and f in detected
+             else "held" if f in alerted else "unconfirmed"}
+            for f in sorted(alerted | detected)]
+
+
+def reported_names(reported: list[dict[str, str]]) -> str:
+    """'Knock-like + Misfire' for a reported_faults list."""
+    return names("+".join(r["fault"] for r in reported))
+
+
+def status_note(reported: list[dict[str, str]]) -> str:
+    """Short note on reported faults that are not confirmed in this window ('' if none)."""
+    held = [r["fault"] for r in reported if r["status"] == "held"]
+    pending = [r["fault"] for r in reported if r["status"] == "unconfirmed"]
+    notes = []
+    if held:
+        notes.append(f"{names('+'.join(held))} held (not in this window)")
+    if pending:
+        notes.append(f"{names('+'.join(pending))} awaiting confirmation")
+    return " · ".join(notes)
+
+
 def uncertain_reason(record: dict[str, Any], model) -> str:
     """Why the accepted decision is 'uncertain', from the same rules the model applies."""
     predicted = record.get("predicted")
@@ -186,14 +229,20 @@ def diagnose(record: dict[str, Any] | None, model, confirm_updates: int) -> dict
     quality = record["quality"]
     accepted = record["accepted"]
     meta = class_meta(accepted, quality)
-    if quality == "ok" and "+" in accepted:  # v2 fault set: first fault's style, full name
-        meta = class_meta(accepted.split("+")[0]) | {"label": names(accepted)}
+    # Title: every fault reported now (alerts and this window's detections), in the
+    # first fault's style, so it names the same faults as the alert banners.
+    reported = reported_faults(record)
+    if reported:
+        meta = class_meta(reported[0]["fault"]) | {"label": reported_names(reported)}
     if quality != "ok":
         subtitle = f"No prediction: {_quality_text(quality)}. Alert state is held."
     elif accepted == "uncertain":
         subtitle = f"Not accepted: {uncertain_reason(record, model)}."
     else:
         subtitle = f"Classifier: {names(record['predicted'])}"
+    note = status_note(reported)
+    if note and quality == "ok":
+        subtitle += f" · {note}"
 
     metrics = []
     if hasattr(model, "fault_classes") and quality == "ok":

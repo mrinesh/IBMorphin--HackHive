@@ -272,8 +272,32 @@ def test_core_v2_shows_one_probability_and_alert_row_per_fault():
     assert set(record["probabilities"]) == {"misfire", "knock_like", "valve_clearance_like"}
     assert isinstance(record["alerts"], list)
     assert {m.label for m in app.metric} >= {"P(misfire)", "P(knock_like)",
-                                             "P(valve_clearance_like)", "Faults detected"}
+                                             "P(valve_clearance_like)", "Detected this window"}
     assert len([e for e in app.error if "ALERT" in e.value]) == len(record["alerts"])
+
+
+@pytest.mark.skipif(not (ROOT / "data/raw/core_v2/run_00240").is_dir()
+                    or not (ROOT / "artifacts/models/multifault_v2.joblib").is_file(),
+                    reason="needs the core_v2 runs and the v2 model")
+def test_decision_names_every_alerted_fault_when_one_drops_out_of_a_window():
+    """Preset 9, window ending 22.0 s: knock and misfire alerts are both active, but only
+    misfire is detected in that window. The Decision tile must name both, like the alert
+    banners, instead of only this window's detection."""
+    app = AppTest.from_file(str(APP), default_timeout=120).run()
+    widget(app.sidebar.selectbox, "Dataset").set_value("core_v2").run()
+    widget(app.sidebar.selectbox, "Run").set_value("run_00240").run()
+    widget(app.sidebar.slider, "Seek (s)").set_value(22.0).run()
+    widget(app.sidebar.button, "Seek").click().run()
+    assert not app.exception
+    record = app.session_state["records"][-1]
+    assert (record["t_end_s"], record["accepted"]) == (22.0, "misfire")
+    assert record["alerts"] == ["knock_like", "misfire"]
+    banners = [e.value for e in app.error if "ALERT" in e.value]
+    assert len(banners) == 2
+    decision = next(m for m in app.metric if m.label == "Decision")
+    assert decision.value == "Knock-like + Misfire"
+    assert decision.delta == "Knock-like held (not in this window)"
+    assert next(m for m in app.metric if m.label == "Detected this window").value == "1"
 
 
 LOCALIZER = ROOT / "artifacts/models/cylinder_localizer.joblib"

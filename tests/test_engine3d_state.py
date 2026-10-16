@@ -24,22 +24,30 @@ def record(**overrides):
     return base | overrides
 
 
-def state(rec, **kwargs):
-    return engine3d.scene_state(rec, MODEL, t_now=kwargs.pop("t_now", 16.0), playing=True,
+def state(rec, model=MODEL, **kwargs):
+    return engine3d.scene_state(rec, model, t_now=kwargs.pop("t_now", 16.0), playing=True,
                                 rpm=1520.0, firing_order=[1, 3, 4, 2], **kwargs)
+
+
+def pick(entry, *keys):
+    return tuple(entry[k] for k in keys)
 
 
 def test_effect_and_intensity_come_from_the_model():
     s = state(record())
-    assert (s["effect"], s["intensity"], s["alert"]) == ("knock_like", 0.82, "knock_like")
+    assert (s["effect"], s["alert"]) == ("knock_like", "knock_like")
+    assert s["faults"] == [{"fault": "knock_like", "status": "confirmed", "cylinder": None,
+                            "intensity": 0.82, "color": s["edge_color"]}]
     assert s["vibration_ratio"] == pytest.approx(2.0, rel=1e-3)  # 10 ** (1.30103 - 1.0)
     assert "cylinder not identified (no localizer loaded)" in s["status_text"]
-    assert s["model_cylinder"] is None
     held = state(record(accepted="uncertain", probability=0.5))
-    assert (held["effect"], held["intensity"]) == ("knock_like", 0.45)
-    assert "alert held: Knock-like" in held["status_text"]
+    assert held["effect"] == "knock_like"
+    assert pick(held["faults"][0], "status", "intensity") == ("held", 0.45)
+    assert "Knock-like, alert held" in held["status_text"]
+    assert "confidence" not in held["status_text"]  # nothing detected in this window
     normal = state(record(accepted="normal", predicted="normal", alert=None))
-    assert normal["effect"] is None and normal["intensity"] == 0.0
+    assert normal["effect"] is None and normal["faults"] == []
+    assert normal["status_text"] == "Model: Normal"
 
 
 def test_no_cylinder_without_the_truth_overlay():
@@ -53,15 +61,61 @@ def test_model_cylinder_comes_from_the_localizer():
     located = {"knock_like": {"status": "localized", "cylinder": 4, "slot": None,
                               "confidence": 0.93}}
     s = state(record(localization=located), truth=TRUTH)
-    assert s["model_cylinder"] == 4 and s["truth_cylinder"] == 3  # shown side by side
-    assert "cylinder 4 (confidence 0.93)" in s["status_text"]
+    assert s["faults"][0]["cylinder"] == 4 and s["truth_cylinder"] == 3  # side by side
+    assert "Knock-like, confidence 0.82, cylinder 4 (location confidence 0.93)" in s["status_text"]
     locating = state(record(localization={}))
-    assert locating["model_cylinder"] is None and "locating cylinder" in locating["status_text"]
+    assert locating["faults"][0]["cylinder"] is None
+    assert "locating cylinder" in locating["status_text"]
     slot = {"knock_like": {"status": "slot_only", "cylinder": None, "slot": "B",
                            "confidence": 0.9}}
     relative = state(record(localization=slot))
-    assert relative["model_cylinder"] is None
+    assert relative["faults"][0]["cylinder"] is None
     assert "firing slot B (no cam reference" in relative["status_text"]
+
+
+V2 = SimpleNamespace(**vars(MODEL), fault_classes=("misfire", "knock_like",
+                                                   "valve_clearance_like"))
+
+
+def v2_record(**overrides):
+    """Knock (cylinder 1) held by its alert, misfire (cylinder 4) detected this window."""
+    return record(predicted="misfire", accepted="misfire", detected=["misfire"],
+                  probabilities={"misfire": 0.97, "knock_like": 0.4, "valve_clearance_like": 0.1},
+                  alerts=["knock_like", "misfire"], alert="knock_like+misfire",
+                  localization={
+                      "knock_like": {"status": "localized", "cylinder": 1, "slot": None,
+                                     "confidence": 1.0},
+                      "misfire": {"status": "localized", "cylinder": 4, "slot": None,
+                                  "confidence": 0.98}}) | overrides
+
+
+def test_every_reported_fault_is_shown_on_its_own_cylinder():
+    s = state(v2_record(), model=V2)
+    by_fault = {f["fault"]: f for f in s["faults"]}
+    assert list(by_fault) == ["knock_like", "misfire"]  # sorted, like the alert banners
+    assert pick(by_fault["knock_like"], "cylinder", "status", "intensity") == (1, "held", 0.45)
+    assert pick(by_fault["misfire"], "cylinder", "status", "intensity") == (4, "confirmed", 0.97)
+    assert s["effect"] == "knock_like" and s["alert"] == "knock_like+misfire"
+    # Each fault is paired with its own cylinder (misfire was once labelled with knock's).
+    assert s["status_text"] == (
+        "Model: Knock-like, alert held, cylinder 1 (location confidence 1.00); "
+        "Misfire, confidence 0.97, cylinder 4 (location confidence 0.98)")
+    both = state(v2_record(accepted="knock_like+misfire", detected=["knock_like", "misfire"]),
+                 model=V2)
+    assert [f["intensity"] for f in both["faults"]] == [0.4, 0.97]  # each its own probability
+    assert all(f["status"] == "confirmed" for f in both["faults"])
+
+
+def test_engine_keeps_running_after_the_replay_ends_but_not_when_paused():
+    playing = state(record())
+    assert (playing["animate"], playing["finished"]) == (True, False)
+    paused = engine3d.scene_state(record(), MODEL, t_now=12.0, playing=False, rpm=1520.0,
+                                  firing_order=[1, 3, 4, 2])
+    assert (paused["animate"], paused["finished"]) == (False, False)
+    ended = engine3d.scene_state(record(), MODEL, t_now=30.0, playing=False, rpm=1520.0,
+                                 firing_order=[1, 3, 4, 2], finished=True)
+    assert (ended["animate"], ended["finished"], ended["playing"]) == (True, True, False)
+    assert ended["faults"] and ended["effect"] == "knock_like"  # final decision kept
 
 
 def test_quality_failure_and_warm_up():
@@ -92,7 +146,10 @@ def test_exhaust_temperatures_and_independent_cylinders():
 
 
 def test_payload_stays_small():
-    assert len(json.dumps(state(record(), truth=TRUTH))) < 600
+    assert len(json.dumps(state(record(), truth=TRUTH))) < 700
+    # Three faults at once is the most the models report.
+    three = v2_record(alerts=["knock_like", "misfire", "valve_clearance_like"])
+    assert len(json.dumps(state(three, model=V2, truth=TRUTH))) < 1000
     # Per-tooth speed traces stay out of the payload; only four temperatures go in.
     assert len(json.dumps(state(record(**SENSORS), truth=TRUTH))) < 700
 
