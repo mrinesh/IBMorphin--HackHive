@@ -330,6 +330,7 @@ function createView(root) {
       material.opacity = material.userData.base * pulse;
     });
     engine.model.visible = located !== null;
+    stats.modelCylinder = located === null ? null : located + 1; // for browser checks
     if (engine.model.visible) {
       engine.model.position.x = engine.cylinders[located].x;
       engine.model.material.color.copy(sim.edgeColor);
@@ -345,7 +346,8 @@ function createView(root) {
   function ignite(k, effect, intensity) {
     const cyl = engine.cylinders[k];
     if (effect === 'misfire' && Math.random() < 0.35 + 0.5 * intensity) {
-      // Model says misfire (cylinder unknown): firing pulses become weak or missing.
+      // Model says misfire (on the localized cylinder, or every cylinder when the
+      // cylinder is not known): firing pulses become weak or missing.
       // A skipped firing stays dark; a weak one sputters: faint blue flicker, plug arc.
       const weak = Math.random() >= 0.5;
       sim.flash[k] = weak ? 0.25 : 0;

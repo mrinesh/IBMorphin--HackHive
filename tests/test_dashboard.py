@@ -257,3 +257,22 @@ def test_active_alert_names_the_localized_cylinder():
     assert f"Misfire detected in cylinder {where['cylinder']}" in banner
     text = " ".join(m.value for m in app.markdown)
     assert f"**Location:** cylinder **{where['cylinder']}**" in text
+
+
+@pytest.mark.skipif(not LOCALIZER.is_file() or not (ROOT / "data/raw/core_v1").is_dir()
+                    or not (ROOT / "evaluation_truth/core_v1").is_dir(),
+                    reason="needs core_v1 runs (contract 1.1), truth, and train-localizer output")
+@pytest.mark.parametrize(("fault", "cylinder"), [("misfire", 4), ("knock_like", 1)])
+def test_lab_injected_fault_is_localized_to_the_chosen_cylinder(fault, cylinder):
+    app = AppTest.from_file(str(APP), default_timeout=240).run()
+    widget(app.sidebar.radio, "Mode").set_value("Fault-injection lab").run()
+    widget(app.sidebar.selectbox, "Injected fault").set_value(fault)
+    widget(app.sidebar.selectbox, "Affected cylinder").set_value(cylinder)
+    widget(app.sidebar.button, "Apply and replay").click().run()
+    widget(app.sidebar.slider, "Seek (s)").set_value(14.0).run()
+    widget(app.sidebar.button, "Seek").click().run()
+    assert not app.exception
+    record = app.session_state["records"][-1]
+    assert record["alert"] == fault
+    assert record["localization"][fault]["cylinder"] == cylinder
+    assert any(f"in cylinder {cylinder}" in e.value for e in app.error)

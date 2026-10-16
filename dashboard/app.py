@@ -504,9 +504,10 @@ def localization_figure(where: dict, fault: str) -> go.Figure:
     colors = [FAULT_COLORS.get(fault, "#888") if named and k == best else "#b8bec6"
               for k in range(len(values))]
     prefix = "Cylinder" if where.get("phase") == "cam_sync" else "Slot"
-    fig = go.Figure(go.Bar(x=[f"{prefix} {k}" for k in labels], y=values, marker_color=colors,
+    fig = go.Figure(go.Bar(x=[str(k) for k in labels], y=values, marker_color=colors,
                            text=[f"{v:.2f}" for v in values], textposition="outside",
-                           hovertemplate="%{x}: %{y:.2f}<extra></extra>"))
+                           hovertemplate=f"{prefix} %{{x}}: %{{y:.2f}}<extra></extra>"))
+    fig.update_xaxes(title=prefix, type="category", tickangle=0)
     fig.update_yaxes(range=[0, 1.15], title="P(fault here)")
     fig.update_layout(height=200, showlegend=False, margin={"t": 10, "b": 10, "l": 10, "r": 10})
     return fig
@@ -732,15 +733,20 @@ def live_view():
     has_probability = bool(latest and "probability" in latest)
     confirm = getattr(model, "confirm_updates", config["runtime"]["confirm_fault_updates"])
 
+    # Sections whose element count changes during playback (alert banners, lab
+    # response, evidence panels) each live in one fixed container, so elements after
+    # them keep their place in the page and the 3D view is not remounted (which would
+    # rebuild the scene and reset its camera) whenever an alert appears or clears.
     active = active_alerts(latest)
-    if active:
-        for fault in active:
-            n = model.confirm_updates[fault] if multi else confirm
-            st.error(f"ALERT: {label(fault)} detected{location_phrase(latest, fault)} — "
-                     f"confirmed by {n} consistent updates", icon=":material/warning:")
-    else:
-        st.success("No active alert — the engine sounds normal so far",
-                   icon=":material/check_circle:")
+    with st.container(key="alerts"):
+        if active:
+            for fault in active:
+                n = model.confirm_updates[fault] if multi else confirm
+                st.error(f"ALERT: {label(fault)} detected{location_phrase(latest, fault)} — "
+                         f"confirmed by {n} consistent updates", icon=":material/warning:")
+        else:
+            st.success("No active alert — the engine sounds normal so far",
+                       icon=":material/check_circle:")
 
     cols = st.container(key="readout").columns(7)
     cols[0].metric("Replay time", f"{t_now:.1f} s")
@@ -778,15 +784,18 @@ def live_view():
                        help=f"Detected at ≥ {model.thresholds[fault]:.2f}; calibrated on "
                             "separate calibration engines (synthetic).")
 
-    if lab_log:
-        lab_response(records, t_now)
+    with st.container(key="lab_response"):
+        if lab_log:
+            lab_response(records, t_now)
 
     panels = [p for p in (alert_evidence(records, f) for f in active) if p]
-    if panels:
-        st.subheader("Evidence for active alerts")
-        for col, panel in zip(st.columns(len(panels)), panels, strict=True):
-            with col:
-                render_evidence(panel, (latest.get("localization") or {}).get(panel.fault))
+    with st.container(key="evidence"):
+        if panels:
+            st.subheader("Evidence for active alerts")
+            for col, panel in zip(st.columns(len(panels)), panels, strict=True):
+                with col:
+                    render_evidence(panel,
+                                    (latest.get("localization") or {}).get(panel.fault))
 
     cards = telemetry_cards(t_now)
     view_col, diag_col = st.columns([3, 2], gap="medium")
