@@ -18,11 +18,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from engine_diagnostics.diagnosis_context import context_ids
+from engine_diagnostics.diagnosis_context import build_context, context_digest, context_ids
+from engine_diagnostics.diagnosis_fallback import rule_based_diagnosis
+from engine_diagnostics.history import Diagnosis, HistoryStore, Profile
 
 ROOT = Path(__file__).resolve().parents[2]
 SETTINGS_PATH = ROOT / "configs/diagnosis.json"
 API_KEY_ENV = "GEMINI_API_KEY"
+FALLBACK_MODEL = "rule-based (basic)"
 KINDS = ("detected", "suggested")
 CONFIDENCES = ("high", "medium", "low")
 URGENCIES = ("stop_now", "soon", "monitor")
@@ -268,4 +271,48 @@ def validate_output(data: str | dict[str, Any], context: dict[str, Any]) -> dict
 def gemini_diagnosis(context: dict[str, Any], settings: DiagnosisSettings,
                      client=None) -> dict[str, Any]:
     """Validated Gemini diagnosis. Raises DiagnosisError on any failure."""
-    return validate_output(call_gemini(context, settings, client), context)
+    output = validate_output(call_gemini(context, settings, client), context)
+    if output["dropped_causes"] and not output["causes"]:
+        raise DiagnosisError("invalid", "every cause cited evidence that does not exist")
+    return output
+
+
+# -- orchestration ------------------------------------------------------------------------
+@dataclass(frozen=True)
+class DiagnosisOutcome:
+    output: dict[str, Any]
+    model: str
+    fallback: bool
+    reason: str | None  # short user-facing message when the basic version was used
+    inputs_digest: str
+
+
+def diagnose(context: dict[str, Any], settings: DiagnosisSettings | None = None,
+             client=None) -> DiagnosisOutcome:
+    """Gemini diagnosis, or the rule-based one on any failure. Never raises for Gemini."""
+    settings = settings or load_settings()
+    digest = context_digest(context)
+    try:
+        return DiagnosisOutcome(gemini_diagnosis(context, settings, client), settings.model,
+                                False, None, digest)
+    except DiagnosisError as error:
+        reason = error.message
+    except Exception:  # noqa: BLE001 - the demo must never stop on a diagnosis error
+        reason = MESSAGES["invalid"]
+    return DiagnosisOutcome(rule_based_diagnosis(context), FALLBACK_MODEL, True,
+                            f"{reason} Showing the basic rule-based diagnosis.", digest)
+
+
+def run_diagnosis(store: HistoryStore, profile: Profile, config: dict[str, Any] | None = None,
+                  settings: DiagnosisSettings | None = None, client=None) -> Diagnosis:
+    """Build the context, diagnose, and save the result to the engine's history."""
+    settings = settings or load_settings()
+    context = build_context(store, profile, max_runs=settings.max_runs,
+                            max_notes=settings.max_notes, window_s=settings.summary_window_s,
+                            config=config)
+    outcome = diagnose(context, settings, client)
+    latest = context["current_run"]
+    return store.save_diagnosis(
+        profile.id, outcome.output, model=outcome.model, fallback=outcome.fallback,
+        inputs_digest=outcome.inputs_digest, fallback_reason=outcome.reason,
+        latest_run_id=int(latest["id"][1:]) if latest else None)
