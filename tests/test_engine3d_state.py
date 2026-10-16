@@ -33,7 +33,8 @@ def test_effect_and_intensity_come_from_the_model():
     s = state(record())
     assert (s["effect"], s["intensity"], s["alert"]) == ("knock_like", 0.82, "knock_like")
     assert s["vibration_ratio"] == pytest.approx(2.0, rel=1e-3)  # 10 ** (1.30103 - 1.0)
-    assert "cylinder not identified by the model" in s["status_text"]
+    assert "cylinder not identified (no localizer loaded)" in s["status_text"]
+    assert s["model_cylinder"] is None
     held = state(record(accepted="uncertain", probability=0.5))
     assert (held["effect"], held["intensity"]) == ("knock_like", 0.45)
     assert "alert held: Knock-like" in held["status_text"]
@@ -46,6 +47,21 @@ def test_no_cylinder_without_the_truth_overlay():
     assert state(record(), truth=TRUTH)["truth_cylinder"] == 3
     assert state(record(), truth=TRUTH, t_now=5.0)["truth_cylinder"] is None  # before onset
     assert state(record(), truth=TRUTH | {"condition": "normal"})["truth_cylinder"] is None
+
+
+def test_model_cylinder_comes_from_the_localizer():
+    located = {"knock_like": {"status": "localized", "cylinder": 4, "slot": None,
+                              "confidence": 0.93}}
+    s = state(record(localization=located), truth=TRUTH)
+    assert s["model_cylinder"] == 4 and s["truth_cylinder"] == 3  # shown side by side
+    assert "cylinder 4 (confidence 0.93)" in s["status_text"]
+    locating = state(record(localization={}))
+    assert locating["model_cylinder"] is None and "locating cylinder" in locating["status_text"]
+    slot = {"knock_like": {"status": "slot_only", "cylinder": None, "slot": "B",
+                           "confidence": 0.9}}
+    relative = state(record(localization=slot))
+    assert relative["model_cylinder"] is None
+    assert "firing slot B (no cam reference" in relative["status_text"]
 
 
 def test_quality_failure_and_warm_up():

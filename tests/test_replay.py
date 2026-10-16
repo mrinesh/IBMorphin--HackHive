@@ -92,3 +92,44 @@ def test_alert_follows_persistence_and_reset_clears(config):
     engine.reset()
     assert engine.alerts.active is None and engine.next_decision == 0
     assert all(buffer.size == 0 for buffer in engine.buffers.values())
+
+
+def cam_bundle(config, misfire_cylinder=None):
+    """make_bundle with an engine-like vibration signal and a cam phase reference."""
+    from test_cylinders import engine_signal  # same synthetic engine as the unit tests
+
+    bundle = make_bundle(config)
+    x, pulses = engine_signal(seconds=DURATION_S, misfire=misfire_cylinder)
+    bundle.vibration = x.astype(np.float32)
+    bundle.cam_sync_s = pulses[(pulses >= 0) & (pulses < DURATION_S)]
+    bundle.metadata["streams"]["cam_sync"] = {"unit": "s", "clock": "vibration"}
+    bundle.telemetry.loc[bundle.telemetry["signal"] == "rpm", "value"] = 1800.0
+    return bundle
+
+
+def test_replay_cylinder_signatures_equal_offline(config):
+    from engine_diagnostics.pipeline.cylinders import by_cylinder, cylinder_columns
+
+    bundle = cam_bundle(config, misfire_cylinder=3)
+    offline = extract_run(bundle, config)
+    records = replay_run(bundle, StubModel(), config)
+    assert set(offline["cyl_phase"]) == {"cam_sync"}
+    for record, (_, row) in zip(records, offline.iterrows(), strict=True):
+        values = by_cylinder(record["cylinders"], config["engine"])
+        np.testing.assert_allclose([values[c] for c in cylinder_columns(config["engine"])],
+                                   row[cylinder_columns(config["engine"])].to_numpy(float))
+
+
+def test_replay_localizes_the_alerted_cylinder(config):
+    from test_cylinders import fake_localizer
+
+    class MisfireModel(StubModel):
+        def predict(self, x):
+            return [{"predicted": "misfire", "margin": 1.0, "anomaly_score": 0.0,
+                     "anomalous": True, "accepted": "misfire"}]
+
+    records = replay_run(cam_bundle(config, misfire_cylinder=3), MisfireModel(), config,
+                         localizer=fake_localizer())
+    assert records[-1]["alert"] == "misfire"
+    assert records[-1]["localization"]["misfire"]["cylinder"] == 3
+    assert "localization" not in replay_run(cam_bundle(config), StubModel(), config)[-1]

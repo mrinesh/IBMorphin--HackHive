@@ -102,6 +102,38 @@
   half of its single-fault signature effect (weakest: valve-clearance in the
   triple, 52%).
 
+## 2026-10-16: cylinder localization (data contract 1.1)
+
+- Problem: one microphone and one accelerometer hear every cylinder through the
+  same path (identical gains, delays, and modes per cylinder in the generator),
+  the crank phase at t = 0 is random per run, and 50 Hz RPM carries speed, not
+  angle. A one-cylinder fault was therefore observable only as "one of four
+  firing slots", with no way to name the cylinder.
+- Decision: add a cam position (phase) reference, as every engine controller
+  has: `cam_sync_s`, one pulse per 720 degrees at `engine.cam_sync_angle_deg`
+  after cylinder 1's firing TDC, on the vibration clock. Data contract 1.1;
+  generator draws no random numbers for it, so all other streams regenerate
+  bit-identically and the frozen v1/v2 detectors and their reports stay valid.
+- Attribution is by crank angle: each detected stroke onset is placed between
+  the window's cam pulses and assigned the nearest firing-order TDC. Missing
+  pulses count as skipped cycles; a window whose stream lost every pulse is not
+  localized (evidence held), rather than guessed.
+- Localizer: one rotation-equivariant conditional-logit scorer per fault on
+  per-cylinder log energy contrasts (combustion, mid, high bands x six sectors),
+  rotated so the candidate is first. This lets valve faults be placed even
+  though their impacts land while other cylinders fire (exhaust closing two
+  positions later, intake three). Partitions by role as in v1/v2; temperature on
+  calibration, min_confidence on tuning for 95% accepted accuracy.
+- Runtime: evidence per fault is an exponential moving average over windows
+  where that fault is detected; a cylinder is named after at least two windows
+  at min_confidence, and cleared with the alert. Kept outside the alert state
+  machine so localization never raises, holds, or clears an alert.
+- Without the reference (contract 1.0 data), slots are aligned across
+  overlapping windows by matching stroke onsets and reported as slots A-D,
+  never as cylinder numbers.
+- Signature columns are kept out of `all_feature_names()`: the detector feature
+  versions are frozen and their models must not change silently.
+
 ## Open decisions
 
 - Assign team owners and record the actual hackathon deadline.

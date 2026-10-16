@@ -25,13 +25,14 @@ Requires Signal Processing Toolbox (`butter`, `pwelch`, `hann`).
 |---|---|
 | `load_project_config.m` | Read `mvp.json` and check sampling limits |
 | `generate_integration_batch.m` | Entry point: loop scenarios, generate, export |
-| `export_run.m` | Write `waveforms.mat` (`-v7`), `telemetry.csv`, `metadata.json`, private truth |
+| `export_run.m` | Write `waveforms.mat` (`-v7`, with `cam_sync_s`), `telemetry.csv`, `metadata.json`, private truth |
 | `validate_run_matlab.m` | Lengths, dtype, clipping, firing rate vs RPM, intended fault signature |
 | `plot_run_overview.m` | Review figure (spectrograms, zooms, RPM) using evaluation truth |
 | `sim/make_streams.m` | Independent `mrg32k3a` substreams per run and purpose |
 | `sim/operating_profile.m` | RPM, load, throttle at 1 kHz control rate |
 | `sim/integrate_crank.m`, `sim/crank_event_times.m` | Crank angle from RPM and its inverse |
 | `sim/combustion_schedule.m` | Combustion and valve-closing events in firing order |
+| `sim/cam_sync_times.m` | Cam phase reference: one pulse per cycle at `cam_sync_angle_deg` after cylinder 1 firing TDC (contract 1.1) |
 | `sim/apply_fault.m` | Misfire, knock-like, valve-clearance-like modifications |
 | `sim/render_sensor.m` | Audio or vibration channel from events, orders, resonance, noise |
 | `sim/render_telemetry.m` | Long-form telemetry at configured rates |

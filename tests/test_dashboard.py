@@ -232,3 +232,28 @@ def test_core_v2_shows_one_probability_and_alert_row_per_fault():
     assert {m.label for m in app.metric} >= {"P(misfire)", "P(knock_like)",
                                              "P(valve_clearance_like)", "Faults detected"}
     assert len([e for e in app.error if "ALERT" in e.value]) == len(record["alerts"])
+
+
+LOCALIZER = ROOT / "artifacts/models/cylinder_localizer.joblib"
+
+
+@pytest.mark.skipif(not LOCALIZER.is_file() or not (ROOT / "data/raw/core_v1").is_dir()
+                    or not (ROOT / "evaluation_truth/core_v1").is_dir(),
+                    reason="needs core_v1 runs (contract 1.1), truth, and train-localizer output")
+def test_active_alert_names_the_localized_cylinder():
+    import json
+
+    truth = json.loads((ROOT / "evaluation_truth/core_v1/run_00228_events.json").read_text(
+        encoding="utf-8"))
+    app = AppTest.from_file(str(APP), default_timeout=120).run()
+    widget(app.sidebar.selectbox, "Dataset").set_value("core_v1").run()
+    widget(app.sidebar.selectbox, "Run").set_value("run_00228").run()  # misfire preset
+    widget(app.sidebar.slider, "Seek (s)").set_value(19.0).run()
+    widget(app.sidebar.button, "Seek").click().run()
+    assert not app.exception
+    where = app.session_state["records"][-1]["localization"]["misfire"]
+    assert where["cylinder"] == truth["affected_cylinder"]
+    banner = " ".join(e.value for e in app.error)
+    assert f"Misfire detected in cylinder {where['cylinder']}" in banner
+    text = " ".join(m.value for m in app.markdown)
+    assert f"**Location:** cylinder **{where['cylinder']}**" in text

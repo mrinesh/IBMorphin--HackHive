@@ -61,6 +61,9 @@ DATASETS = {
                        "model": ROOT / "artifacts/models/temporary.joblib",
                        "splits": ROOT / "configs/integration_batch.json"},
 }
+# Cylinder localizer (train-localizer): names the affected cylinder of each active alert
+# from the vibration signature and the cam phase reference. Optional.
+LOCALIZER_PATH = ROOT / "artifacts/models/cylinder_localizer.joblib"
 PRESETS_PATH = ROOT / "configs/demo_presets.json"
 HOLDOUT_DATASET = "integration_v1"
 FEATURES_PATH = ROOT / "data/processed/integration_v1_features.parquet"
@@ -215,9 +218,11 @@ def start_run(dataset: str, run_id: str, held_out: str | None = None,
         bundle, lab_log, run_packets = lab_bundle(lab)
     else:
         (bundle, _, run_packets), lab_log = load_bundle(str(DATASETS[dataset]["raw"]), run_id), None
+    localizer = load_model(str(LOCALIZER_PATH))
     st.session_state.update(dataset=dataset, run_id=run_id, held_out=held_out, model=model,
                             lab=lab, lab_log=lab_log, bundle=bundle, packets=run_packets,
-                            engine=ReplayEngine(model, config, bundle.metadata),
+                            engine=ReplayEngine(model, config, bundle.metadata,
+                                                localizer=localizer),
                             next_packet=0, records=[], stream_t=0.0, playing=False)
 
 
@@ -478,11 +483,60 @@ def evidence_figure(panel: EvidencePanel) -> go.Figure:
     return fig
 
 
-def render_evidence(panel: EvidencePanel) -> None:
+def location_phrase(record, fault: str) -> str:
+    """' in cylinder 3', ' in firing slot B', or a locating note, for an alert banner."""
+    if record is None or "localization" not in record:
+        return ""
+    where = record["localization"].get(fault)
+    if where and where.get("cylinder") is not None:
+        return f" in cylinder {where['cylinder']}"
+    if where and where.get("slot") is not None:
+        return f" in firing slot {where['slot']} (no cam reference)"
+    return " (locating cylinder…)"
+
+
+def localization_figure(where: dict, fault: str) -> go.Figure:
+    """Accumulated P(cylinder) for one alert, cylinders in block order."""
+    labels = sorted(where["probabilities"], key=str)
+    values = [where["probabilities"][k] for k in labels]
+    named = where.get("cylinder") is not None or where.get("slot") is not None
+    best = max(range(len(values)), key=values.__getitem__)
+    colors = [FAULT_COLORS.get(fault, "#888") if named and k == best else "#b8bec6"
+              for k in range(len(values))]
+    prefix = "Cylinder" if where.get("phase") == "cam_sync" else "Slot"
+    fig = go.Figure(go.Bar(x=[f"{prefix} {k}" for k in labels], y=values, marker_color=colors,
+                           text=[f"{v:.2f}" for v in values], textposition="outside",
+                           hovertemplate="%{x}: %{y:.2f}<extra></extra>"))
+    fig.update_yaxes(range=[0, 1.15], title="P(fault here)")
+    fig.update_layout(height=200, showlegend=False, margin={"t": 10, "b": 10, "l": 10, "r": 10})
+    return fig
+
+
+def render_localization(where: dict | None, fault: str) -> None:
+    if where is None:
+        return
+    if where.get("cylinder") is not None:
+        st.markdown(f"**Location:** cylinder **{where['cylinder']}** — confidence "
+                    f"{where['confidence']:.2f} over {where['windows']} decision windows")
+    elif where.get("slot") is not None:
+        st.markdown(f"**Location:** firing slot **{where['slot']}** — no cam phase reference "
+                    "in this recording, so the cylinder number cannot be named")
+    else:
+        st.markdown("**Location:** still accumulating evidence for a cylinder")
+    if where.get("probabilities"):
+        st.plotly_chart(localization_figure(where, fault), width="stretch",
+                        key=f"localization_{fault}")
+    st.caption("Strokes are attributed to cylinders by crank angle from the cam phase "
+               "pulse; the localizer compares each cylinder's stroke signature with the "
+               "others. It is trained on synthetic engines.")
+
+
+def render_evidence(panel: EvidencePanel, where: dict | None = None) -> None:
     color = FAULT_COLORS.get(panel.fault, "#888")
     with st.container(border=True):
         st.markdown(f"<h4 style='margin:0;color:{color}'>{panel.headline}</h4>",
                     unsafe_allow_html=True)
+        render_localization(where, panel.fault)
         st.caption(f"Window {panel.t_end_s - config['analysis']['window_s']:.1f}-"
                    f"{panel.t_end_s:.1f} s. Shaded segments below and on the waveform and RPM "
                    "charts match each signal's color.")
@@ -682,8 +736,8 @@ def live_view():
     if active:
         for fault in active:
             n = model.confirm_updates[fault] if multi else confirm
-            st.error(f"ALERT: {label(fault)} detected — confirmed by {n} consistent updates",
-                     icon=":material/warning:")
+            st.error(f"ALERT: {label(fault)} detected{location_phrase(latest, fault)} — "
+                     f"confirmed by {n} consistent updates", icon=":material/warning:")
     else:
         st.success("No active alert — the engine sounds normal so far",
                    icon=":material/check_circle:")
@@ -732,7 +786,7 @@ def live_view():
         st.subheader("Evidence for active alerts")
         for col, panel in zip(st.columns(len(panels)), panels, strict=True):
             with col:
-                render_evidence(panel)
+                render_evidence(panel, (latest.get("localization") or {}).get(panel.fault))
 
     cards = telemetry_cards(t_now)
     view_col, diag_col = st.columns([3, 2], gap="medium")

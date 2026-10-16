@@ -58,6 +58,19 @@ def fault_intervals(truth: dict[str, Any]) -> dict[str, list[tuple[float, float]
     return {f["condition"]: _as_intervals(f.get("active_intervals")) for f in faults}
 
 
+def fault_cylinders(truth: dict[str, Any]) -> dict[str, int]:
+    """Affected cylinder per fault (localization labels); older truth has one fault."""
+    faults = truth.get("faults")
+    if faults is None:
+        if truth["condition"] == "normal" or truth.get("affected_cylinder") is None:
+            return {}
+        return {truth["condition"]: int(truth["affected_cylinder"])}
+    if isinstance(faults, dict):
+        faults = [faults]
+    return {f["condition"]: int(f["affected_cylinder"]) for f in faults
+            if f.get("affected_cylinder") is not None}
+
+
 def duration_s(truth: dict[str, Any]) -> float:
     segments = truth["label_timeline"]
     if isinstance(segments, dict):

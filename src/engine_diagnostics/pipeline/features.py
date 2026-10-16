@@ -11,6 +11,11 @@ Two named sets are produced for every window:
   all_feature_names()   base set plus stroke-synchronous vibration features,
                         SYNC_FEATURE_VERSION 0.3.0 (v2 multi-fault model)
 Models record the names they use; replay selects those columns by name.
+
+Each window also carries a per-cylinder signature (pipeline.cylinders,
+CYLINDER_FEATURE_VERSION) for fault localization. It is kept outside the
+detector vector so the frozen detector feature versions are unchanged; the
+feature table stores it as cyl<N>_* columns plus cyl_phase.
 """
 
 from dataclasses import dataclass
@@ -20,6 +25,18 @@ import numpy as np
 import pandas as pd
 from scipy.signal import find_peaks, hilbert, welch
 from scipy.stats import kurtosis
+
+from engine_diagnostics.pipeline.cylinders import (
+    COMBUSTION_HZ,
+    PHASE_CAM,
+    PHASE_NONE,
+    SIGNATURE_BANDS_HZ,
+    CylinderSignature,
+    by_cylinder,
+    cylinder_columns,
+    cylinder_signature,
+    window_pulses,
+)
 
 FEATURE_VERSION = "0.1.0"
 SYNC_FEATURE_VERSION = "0.3.0"  # 0.2.0 was a rejected v1 candidate set
@@ -46,8 +63,8 @@ CONTEXT_MAX_AGE_KEYS = {
 # every four for the same cylinder, so a one-cylinder fault shows up as excess
 # energy in one of the four stroke groups; the angle sector and band of that
 # excess separate knock (5-9 kHz just after combustion) from valve impacts.
-SYNC_REFERENCE_HZ = (300, 1000)
-SYNC_BANDS_HZ = {"mid": (2000, 5000), "high": (5000, 9000)}
+SYNC_REFERENCE_HZ = COMBUSTION_HZ  # (300, 1000)
+SYNC_BANDS_HZ = {band: SIGNATURE_BANDS_HZ[band] for band in ("mid", "high")}
 SYNC_SECTORS_DEG = ((0, 15), (15, 30), (30, 45), (45, 90), (90, 150), (150, 180))
 SYNC_BINS = 90  # 2 crank degrees per bin
 SYNC_MIN_STROKES = 8
@@ -74,6 +91,7 @@ class WindowResult:
     t_end_s: float
     features: np.ndarray
     quality: str  # "ok", "clipped", "missing_waveform", or "stale_telemetry"
+    cylinders: CylinderSignature | None = None  # per-cylinder signature for localization
 
 
 def window_ends(duration_s: float, config: dict[str, Any]) -> np.ndarray:
@@ -111,12 +129,20 @@ def telemetry_context(telemetry: pd.DataFrame, t_end_s: float,
 
 def extract_window(waves: dict[str, np.ndarray], rates: dict[str, float],
                    context: dict[str, float], context_fresh: bool,
-                   full_scales: dict[str, float], t_end_s: float, config: dict) -> WindowResult:
-    """Features for one decision window; `waves` hold exactly the window samples."""
+                   full_scales: dict[str, float], t_end_s: float, config: dict, *,
+                   cam_sync_s: np.ndarray | None = None,
+                   vibration_start_s: float | None = None) -> WindowResult:
+    """Features for one decision window; `waves` hold exactly the window samples.
+
+    cam_sync_s are the cam pulses inside the window (None: the run has no
+    reference stream) and vibration_start_s the time of the first vibration
+    sample (default t_end - window_s); both only affect the cylinder signature.
+    """
     analysis, runtime = config["analysis"], config["runtime"]
     quality = "ok" if context_fresh else "stale_telemetry"
     parts = []
     sync = np.full(len(sync_feature_names()), np.nan)
+    signature = None
     for name in MODALITIES:
         x = np.asarray(waves[name], dtype=np.float64)
         expected = round(analysis["window_s"] * rates[name])
@@ -132,9 +158,22 @@ def extract_window(waves: dict[str, np.ndarray], rates: dict[str, float],
         firing_hz = _firing_rate_hz(context["rpm"], config["engine"])
         parts.append(_modality_features(x, rates[name], low, analysis, firing_hz))
         if name == "vibration":
-            sync = _stroke_sync_features(x, rates[name], context["rpm"])
+            fs = rates[name]
+            envelopes = {band: _band_envelope(x, fs, edges)
+                         for band, edges in SIGNATURE_BANDS_HZ.items()}
+            found = _stroke_references(x, fs, context["rpm"], envelopes["comb"])
+            sync = _sync_from_strokes(envelopes, fs, found)
+            if found is not None:
+                refs = found[0]
+                start = t_end_s - analysis["window_s"] if vibration_start_s is None \
+                    else vibration_start_s
+                energy = {band: _stroke_matrix(env, fs, refs) ** 2
+                          for band, env in envelopes.items()}
+                signature = cylinder_signature(energy, refs[:-1], start, cam_sync_s,
+                                               context["rpm"], config["engine"])
     features = np.concatenate(parts + [np.array([context[c] for c in CONTEXT]), sync])
-    return WindowResult(t_end_s=float(t_end_s), features=features, quality=quality)
+    return WindowResult(t_end_s=float(t_end_s), features=features, quality=quality,
+                        cylinders=signature)
 
 
 def extract_run(bundle, config: dict) -> pd.DataFrame:
@@ -143,14 +182,24 @@ def extract_run(bundle, config: dict) -> pd.DataFrame:
     rates = {m: getattr(bundle, f"{m}_fs_hz") for m in MODALITIES}
     starts = {m: getattr(bundle, f"{m}_t0_s") for m in MODALITIES}
     scales = {m: bundle.metadata["streams"][m]["full_scale"] for m in MODALITIES}
+    window_s = config["analysis"]["window_s"]
+    empty = dict.fromkeys(cylinder_columns(config["engine"]), np.nan)
     rows = []
     for t in window_ends(duration, config):
-        waves = {m: getattr(bundle, m)[window_slice(t, rates[m], starts[m], config)]
-                 for m in MODALITIES}
+        slices = {m: window_slice(t, rates[m], starts[m], config) for m in MODALITIES}
+        waves = {m: getattr(bundle, m)[slices[m]] for m in MODALITIES}
         context, fresh = telemetry_context(bundle.telemetry, t, config)
-        result = extract_window(waves, rates, context, fresh, scales, t, config)
+        result = extract_window(
+            waves, rates, context, fresh, scales, t, config,
+            cam_sync_s=window_pulses(bundle.cam_sync_s, t - window_s, t),
+            vibration_start_s=starts["vibration"] + slices["vibration"].start
+            / rates["vibration"])
+        signature = result.cylinders
+        cam = signature is not None and signature.phase == PHASE_CAM
         rows.append({"t_end_s": result.t_end_s, "quality": result.quality,
-                     **dict(zip(all_feature_names(), result.features, strict=True))})
+                     **dict(zip(all_feature_names(), result.features, strict=True)),
+                     "cyl_phase": signature.phase if signature is not None else PHASE_NONE,
+                     **(by_cylinder(signature, config["engine"]) if cam else empty)})
     return pd.DataFrame(rows)
 
 
@@ -202,12 +251,17 @@ def _firing_peak_cv(envelope: np.ndarray, fs: float, firing_hz: float) -> float:
     return _cv(smooth[peaks]) if peaks.size >= 3 else float("nan")
 
 
-def _stroke_references(x: np.ndarray, fs: float, rpm: float) -> tuple[np.ndarray, float] | None:
-    """Combustion onset times: half-peak rising edge of the low-band envelope."""
+def _stroke_references(x: np.ndarray, fs: float, rpm: float,
+                       envelope: np.ndarray | None = None) -> tuple[np.ndarray, float] | None:
+    """Combustion onset times: half-peak rising edge of the low-band envelope.
+
+    `envelope` may pass the window's precomputed SYNC_REFERENCE_HZ envelope.
+    """
     if not np.isfinite(rpm) or rpm <= 0:
         return None
     period = 30.0 / rpm  # four cylinders: one firing per 180 crank degrees
-    envelope = _band_envelope(x, fs, SYNC_REFERENCE_HZ)
+    if envelope is None:
+        envelope = _band_envelope(x, fs, SYNC_REFERENCE_HZ)
     peaks, _ = find_peaks(envelope, distance=max(1, round(0.7 * period * fs)))
     if peaks.size < SYNC_MIN_STROKES:
         return None
@@ -226,6 +280,14 @@ def _stroke_references(x: np.ndarray, fs: float, rpm: float) -> tuple[np.ndarray
     return np.array(filled), period
 
 
+def _stroke_matrix(envelope: np.ndarray, fs: float, refs: np.ndarray) -> np.ndarray:
+    """Envelope over each firing interval [refs[i], refs[i+1]), at SYNC_BINS angle bins."""
+    grid = np.arange(envelope.size)
+    return np.array([np.interp(np.linspace(a * fs, b * fs, SYNC_BINS, endpoint=False),
+                               grid, envelope)
+                     for a, b in zip(refs[:-1], refs[1:], strict=True)])
+
+
 def _stroke_sync_features(x: np.ndarray, fs: float, rpm: float) -> np.ndarray:
     """Per-cylinder excess energy by crank-angle sector, plus reference jitter.
 
@@ -233,8 +295,14 @@ def _stroke_sync_features(x: np.ndarray, fs: float, rpm: float) -> np.ndarray:
     the window's mean stroke energy per degree. Zero when strokes cannot be
     referenced (no detectable firing pattern), which is the no-excess value.
     """
+    envelopes = {band: _band_envelope(x, fs, edges) for band, edges in SYNC_BANDS_HZ.items()}
+    return _sync_from_strokes(envelopes, fs, _stroke_references(x, fs, rpm))
+
+
+def _sync_from_strokes(envelopes: dict[str, np.ndarray], fs: float,
+                       found: tuple[np.ndarray, float] | None) -> np.ndarray:
+    """_stroke_sync_features from precomputed band envelopes and stroke references."""
     out = np.zeros(len(sync_feature_names()))
-    found = _stroke_references(x, fs, rpm)
     if found is None:
         return out
     refs, period = found
@@ -243,14 +311,9 @@ def _stroke_sync_features(x: np.ndarray, fs: float, rpm: float) -> np.ndarray:
         return out
     refs = refs[:usable + 1]
     degrees = np.arange(SYNC_BINS) * 180 / SYNC_BINS
-    grid = np.arange(x.size)
     k = 0
-    for band in SYNC_BANDS_HZ.values():
-        envelope = _band_envelope(x, fs, band)
-        strokes = np.array([np.interp(np.linspace(a * fs, b * fs, SYNC_BINS, endpoint=False),
-                                      grid, envelope)
-                            for a, b in zip(refs[:-1], refs[1:], strict=True)])
-        energy = strokes ** 2
+    for band in SYNC_BANDS_HZ:
+        energy = _stroke_matrix(envelopes[band], fs, refs) ** 2
         total = energy.mean() + 1e-20
         for a, b in SYNC_SECTORS_DEG:
             sector = energy[:, (degrees >= a) & (degrees < b)].sum(axis=1)

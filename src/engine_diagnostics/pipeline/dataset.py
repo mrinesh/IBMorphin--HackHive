@@ -2,7 +2,8 @@
 
 Bookkeeping columns (run_id, engine_id, split, subset, t_end_s, label, quality,
 and the per-fault labels y_<fault>) sit beside the feature columns; models must
-select `feature_names()` only. `subset` is "challenge" for reserved-condition
+select `feature_names()` only. The cylinder signature (cyl_phase, cyl<N>_*) is
+localizer input only, never a detector input. `subset` is "challenge" for reserved-condition
 test runs, otherwise "core".
 """
 
@@ -13,6 +14,7 @@ from typing import Any
 import pandas as pd
 
 from engine_diagnostics.data.run_io import find_runs, load_run, validate_run
+from engine_diagnostics.pipeline.cylinders import CYLINDER_FEATURE_VERSION
 from engine_diagnostics.pipeline.features import SYNC_FEATURE_VERSION, extract_run
 from engine_diagnostics.pipeline.labels import (
     FAULT_COLUMNS,
@@ -67,4 +69,5 @@ def build_feature_table(raw_dir: Path, truth_dir: Path, batch_config_path: Path,
         raise ValueError(f"no runs found in {raw_dir}")
     table = pd.concat(frames, ignore_index=True)
     table.attrs["feature_version"] = SYNC_FEATURE_VERSION  # all_feature_names()
+    table.attrs["cylinder_feature_version"] = CYLINDER_FEATURE_VERSION  # cyl_phase, cyl<N>_*
     return table

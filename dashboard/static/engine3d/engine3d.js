@@ -10,9 +10,12 @@
 //   effect         fault effect to show: the alert class, or an accepted fault class
 //   intensity      model confidence for that class (or evidence level / 3)
 //   vibration_ratio  current vibration RMS / normal-reference RMS (real sensor data)
+//   model_cylinder cylinder the localizer names for the alert (sensor data + cam
+//                  phase reference); the effect is then confined to that cylinder
+//                  and marked with a ring in the state color. Without it, effects
+//                  are engine-wide.
 //   truth_cylinder only when the evaluation-truth overlay is on (marked as truth)
-// The model does not localize faults, so effects are engine-wide; nothing here
-// picks a cylinder from model output.
+// Nothing here picks a cylinder on its own.
 
 import * as THREE from '../vendor/three/three.module.min.js';
 
@@ -214,10 +217,14 @@ function createView(root) {
     stats.crank = theta;
     const cycle = mod(theta, 4 * Math.PI);
 
+    // A localized fault shows only on its cylinder; otherwise on every cylinder.
+    const located = Number.isInteger(t.model_cylinder) ? t.model_cylinder - 1 : null;
+    const effectOn = (k) => (located === null || located === k ? effect : null);
+
     // Combustion events at each cylinder's compression TDC (plus a small offset).
     engine.tdc.forEach((tdc, k) => {
       const fire = mod(tdc + (8 * Math.PI) / 180, 4 * Math.PI);
-      if (crossed(sim.lastCycle, cycle, fire) && t.playing) ignite(k, effect, intensity);
+      if (crossed(sim.lastCycle, cycle, fire) && t.playing) ignite(k, effectOn(k), intensity);
     });
     sim.lastCycle = cycle;
 
@@ -237,8 +244,8 @@ function createView(root) {
       const a = mod(cycle - engine.tdc[k], 4 * Math.PI);
       const exhaust = lift(a, 0.85 * Math.PI, 2.08 * Math.PI);
       const intake = lift(a, 1.92 * Math.PI, 3.15 * Math.PI);
-      if (exhaust === 0 && cyl.exhaustOpen && t.playing) seatImpact(k, effect, intensity);
-      if (intake === 0 && cyl.intakeOpen && t.playing) seatImpact(k, effect, intensity);
+      if (exhaust === 0 && cyl.exhaustOpen && t.playing) seatImpact(k, effectOn(k), intensity);
+      if (intake === 0 && cyl.intakeOpen && t.playing) seatImpact(k, effectOn(k), intensity);
       cyl.exhaustOpen = exhaust > 0;
       cyl.intakeOpen = intake > 0;
       cyl.exhaust.position.y = cyl.valveY - 0.13 * exhaust;
@@ -247,11 +254,12 @@ function createView(root) {
       if (still) {
         // Reduced motion: no firing animation, so show the model state as a steady glow
         // (same colors as the animated effects) instead of hiding it.
-        const steady = STEADY[effect] || STEADY.normal;
-        sim.flash[k] = t.playing || effect ? steady.flash * (effect ? 0.5 + 0.5 * intensity : 1) : 0;
+        const own = effectOn(k);
+        const steady = STEADY[own] || STEADY.normal;
+        sim.flash[k] = t.playing || own ? steady.flash * (own ? 0.5 + 0.5 * intensity : 1) : 0;
         cyl.flameColor.set(steady.color);
-        sim.sparks[k] = effect === 'knock_like' ? 0.7 : 0;
-        sim.ticks[k] = effect === 'valve_clearance_like' ? 0.7 : 0;
+        sim.sparks[k] = own === 'knock_like' ? 0.7 : 0;
+        sim.ticks[k] = own === 'valve_clearance_like' ? 0.7 : 0;
       } else {
         // Effects decay.
         sim.flash[k] = Math.max(0, sim.flash[k] - dt * 3.2);
@@ -289,6 +297,12 @@ function createView(root) {
       material.color.copy(sim.edgeColor);
       material.opacity = material.userData.base * pulse;
     });
+    engine.model.visible = located !== null;
+    if (engine.model.visible) {
+      engine.model.position.x = engine.cylinders[located].x;
+      engine.model.material.color.copy(sim.edgeColor);
+      engine.model.material.opacity = 0.95 * pulse;
+    }
     engine.truth.visible = Number.isInteger(t.truth_cylinder);
     if (engine.truth.visible) {
       engine.truth.position.x = engine.cylinders[t.truth_cylinder - 1].x;
@@ -617,10 +631,20 @@ function buildEngine() {
   truth.visible = false;
   shaker.add(truth);
 
+  // Model localization marker: the cylinder the localizer names, in the state color.
+  const model = new THREE.Mesh(
+    new THREE.TorusGeometry(0.46, 0.03, 8, 64),
+    new THREE.MeshBasicMaterial({ color: COLORS.amber, transparent: true, opacity: 0.95 }),
+  );
+  model.rotation.x = Math.PI / 2;
+  model.position.y = DECK_Y + 0.95;
+  model.visible = false;
+  shaker.add(model);
+
   const pins = [0, Math.PI, Math.PI, 0];
   const tdc = [0, 3 * Math.PI, Math.PI, 2 * Math.PI];
   const engine = {
-    group, shaker, crankshaft, camshafts, cylinders, chamberLight, truth, edgeMaterials,
+    group, shaker, crankshaft, camshafts, cylinders, chamberLight, truth, model, edgeMaterials,
     pins, tdc,
     setFiringOrder(order) {
       // Compression TDC of the i-th cylinder in the firing order is at i * 180 deg of

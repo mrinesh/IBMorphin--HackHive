@@ -132,7 +132,8 @@ def build_lab_bundle(bundle: RunBundle, truth: dict, settings: LabSettings,
                     vibration=waves["vibration"].astype(np.float32),
                     audio_fs_hz=bundle.audio_fs_hz, vibration_fs_hz=bundle.vibration_fs_hz,
                     audio_t0_s=bundle.audio_t0_s, vibration_t0_s=bundle.vibration_t0_s,
-                    telemetry=telemetry, metadata=metadata)
+                    telemetry=telemetry, metadata=metadata,
+                    cam_sync_s=None if bundle.cam_sync_s is None else bundle.cam_sync_s.copy())
     return lab, log
 
 

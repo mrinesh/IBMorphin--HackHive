@@ -92,6 +92,9 @@ command-line batch generation from a path containing an apostrophe, launch
 | `engine-diagnostics evaluate` | One-time test-engine scoring |
 | `engine-diagnostics replay <run> --raw-dir data/raw/core_v1 --model artifacts/models/diagnostic_v1.joblib --truth-dir evaluation_truth/core_v1 --speed 1 --with-truth` | Terminal replay with prediction log |
 | `engine-diagnostics train-temporary` | Temporary model for the integration batch |
+| `engine-diagnostics train-localizer` | Cylinder localizer (core_v2 features with the cam reference) |
+| `engine-diagnostics evaluate-localization` | One-time test-engine scoring of cylinder localization |
+| `engine-diagnostics replay <run> ... --localizer artifacts/models/cylinder_localizer.joblib` | Replay that also names the affected cylinder of each alert |
 
 Prefix each with `uv run --all-extras`.
 

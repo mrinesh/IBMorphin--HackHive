@@ -27,15 +27,17 @@ def scene_state(record: dict[str, Any] | None, model, *, t_now: float, playing: 
     Its intensity is the model's calibrated confidence for that class (v1), or the
     evidence level / 3 for the temporary model, or 0.45 while an alert is only held.
     `vibration_ratio` is this window's vibration RMS over the normal-reference RMS.
-    `truth` (evaluation truth) is only passed when the overlay is on, and only its
-    affected cylinder during an active fault interval reaches the browser.
+    `model_cylinder` is the cylinder the localizer names for the effect's alert (from
+    sensor data and the cam phase reference only); the view then confines the effect
+    to that cylinder. `truth` (evaluation truth) is only passed when the overlay is on,
+    and only its affected cylinder during an active fault interval reaches the browser.
     """
     state: dict[str, Any] = {"t": round(t_now, 2), "playing": playing,
                              "rpm": None if rpm is None else round(rpm, 1),
                              "firing_order": list(firing_order), "effect": None,
                              "intensity": 0.0, "vibration_ratio": 1.0, "alert": None,
                              "edge_color": TOKENS["cyan"], "status_text": "Model: warming up",
-                             "truth_cylinder": None}
+                             "truth_cylinder": None, "model_cylinder": None}
     if record is not None:
         quality, accepted, alert = record["quality"], record["accepted"], record.get("alert")
         if "+" in (alert or ""):  # v2 fault set: animate the first fault
@@ -63,8 +65,11 @@ def scene_state(record: dict[str, Any] | None, model, *, t_now: float, playing: 
             status = f"Model: {class_meta(accepted)['label']}"
         if alert and alert != accepted:
             status += f" · alert held: {CLASS_META.get(alert, {'label': alert})['label']}"
+        where = (record.get("localization") or {}).get(effect) if effect else None
         if effect:
-            status += " · cylinder not identified by the model"
+            status += location_text(where, "localization" in record)
+        if where and where.get("cylinder") is not None:
+            state["model_cylinder"] = int(where["cylinder"])
         state.update(effect=effect, intensity=round(float(intensity), 3), alert=alert,
                      edge_color=meta["color"], status_text=status,
                      vibration_ratio=_vibration_ratio(record, model))
@@ -77,6 +82,19 @@ def scene_state(record: dict[str, Any] | None, model, *, t_now: float, playing: 
         if active and truth.get("condition") in FAULTS and isinstance(cylinder, int):
             state["truth_cylinder"] = cylinder
     return state
+
+
+def location_text(where: dict[str, Any] | None, localizing: bool) -> str:
+    """Status suffix describing where the model places the alerted fault."""
+    if not localizing:
+        return " · cylinder not identified (no localizer loaded)"
+    if not where:
+        return " · locating cylinder…"
+    if where.get("cylinder") is not None:
+        return f" · cylinder {where['cylinder']} (confidence {where['confidence']:.2f})"
+    if where.get("slot") is not None:
+        return f" · firing slot {where['slot']} (no cam reference: cylinder unknown)"
+    return " · locating cylinder…"
 
 
 def _vibration_ratio(record: dict[str, Any], model) -> float:

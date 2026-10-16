@@ -1,6 +1,6 @@
 function paths = export_run(run, outputRoot, truthRoot, options)
 %EXPORT_RUN Write one run bundle following docs/DATA_CONTRACT.md.
-%   <outputRoot>/<run_id>/waveforms.mat   (-v7, single column vectors)
+%   <outputRoot>/<run_id>/waveforms.mat   (-v7, single column vectors, cam_sync_s)
 %   <outputRoot>/<run_id>/telemetry.csv
 %   <outputRoot>/<run_id>/metadata.json
 %   <truthRoot>/<run_id>_events.json      (evaluation only)
@@ -31,10 +31,11 @@ function paths = export_run(run, outputRoot, truthRoot, options)
     vibration_fs_hz = double(run.vibration_fs_hz);
     audio_t0_s = double(run.metadata.streams.audio.t0_s);
     vibration_t0_s = double(run.metadata.streams.vibration.t0_s);
+    cam_sync_s = double(run.cam_sync_s(:));  % 0x1 when no pulse falls inside the run
     paths = struct();
     paths.waveforms = fullfile(runDir, 'waveforms.mat');
     save(paths.waveforms, 'audio', 'vibration', 'audio_fs_hz', 'vibration_fs_hz', ...
-        'audio_t0_s', 'vibration_t0_s', '-v7');
+        'audio_t0_s', 'vibration_t0_s', 'cam_sync_s', '-v7');
 
     paths.telemetry = fullfile(runDir, 'telemetry.csv');
     write_telemetry_csv(run.telemetry, paths.telemetry);
