@@ -466,6 +466,25 @@ def alert_evidence(records, fault: str) -> EvidencePanel | None:
                           rpm["value"].to_numpy(), firing_hz, feature_z(record))
 
 
+def add_bands(fig: go.Figure, bands: list[tuple[float, float, str, float, int, int]]) -> None:
+    """Shaded x-spans (x0, x1, color, opacity, row, col) added in one layout update.
+
+    fig.add_vrect re-validates every existing shape on each call, which made a refresh
+    with dozens of highlighted segments take ~0.5 s; one update keeps it a few ms.
+    """
+    if not bands:
+        return
+    shapes = list(fig.layout.shapes)
+    for x0, x1, color, opacity, row, col in bands:
+        subplot = fig.get_subplot(row, col)
+        xref = subplot.xaxis.plotly_name.replace("axis", "")
+        yref = subplot.yaxis.plotly_name.replace("axis", "")
+        shapes.append({"type": "rect", "x0": x0, "x1": x1, "xref": xref, "y0": 0, "y1": 1,
+                       "yref": f"{yref} domain", "fillcolor": color, "opacity": opacity,
+                       "line": {"width": 0}, "layer": "below"})
+    fig.update_layout(shapes=shapes)
+
+
 def evidence_figure(panel: EvidencePanel) -> go.Figure:
     window_s = config["analysis"]["window_s"]
     fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.08,
@@ -474,9 +493,9 @@ def evidence_figure(panel: EvidencePanel) -> go.Figure:
     for row, ind in enumerate(panel.indicators, start=1):
         fig.add_trace(go.Scattergl(x=ind.trace_t, y=ind.trace_y, name=ind.trace_label,
                                    line={"width": 1, "color": "#555"}), row=row, col=1)
-        for a, b in ind.segments:
-            fig.add_vrect(x0=a, x1=b, fillcolor=SIGNAL_COLORS[ind.signal], opacity=0.3,
-                          line_width=0, row=row, col=1)
+    add_bands(fig, [(a, b, SIGNAL_COLORS[ind.signal], 0.3, row, 1)
+                    for row, ind in enumerate(panel.indicators, start=1)
+                    for a, b in ind.segments])
     fig.update_xaxes(range=[panel.t_end_s - window_s, panel.t_end_s])
     fig.update_xaxes(title="s", row=3, col=1)
     fig.update_layout(height=420, showlegend=False, margin={"t": 40, "b": 20})
@@ -842,12 +861,10 @@ def live_view():
                                              line={"width": 1,
                                                    "color": theme.MODALITY_COLORS["envelope"]}),
                                 row=3, col=1)
-    for panel in panels:  # link: same segments and colors as the evidence panels
-        for ind in panel.indicators:
-            for row in WAVE_ROWS.get(ind.signal, []):
-                for a, b in ind.segments:
-                    waves.add_vrect(x0=a, x1=b, fillcolor=SIGNAL_COLORS[ind.signal],
-                                    opacity=0.2, line_width=0, row=row, col=1)
+    # Link: same segments and colors as the evidence panels.
+    add_bands(waves, [(a, b, SIGNAL_COLORS[ind.signal], 0.2, row, 1)
+                      for panel in panels for ind in panel.indicators
+                      for row in WAVE_ROWS.get(ind.signal, []) for a, b in ind.segments])
     waves.update_layout(height=470, showlegend=False, margin={"t": 40, "b": 20})
     waves.update_xaxes(title_text="stream time (s)", row=3, col=1)
     psd.update_layout(height=380, title="Frequency content now (FFT power, dB)",
@@ -886,10 +903,8 @@ def live_view():
         tele.add_trace(go.Scatter(x=rows["t_s"], y=rows["value"], name=signal,
                                   line={"width": 1.5, "color": theme.TOKENS["cyan"]}),
                        row=k // 3 + 1, col=k % 3 + 1)
-    for panel in panels:
-        for a, b in next(i for i in panel.indicators if i.signal == "rpm").segments:
-            tele.add_vrect(x0=a, x1=b, fillcolor=SIGNAL_COLORS["rpm"], opacity=0.3,
-                           line_width=0, row=1, col=1)
+    add_bands(tele, [(a, b, SIGNAL_COLORS["rpm"], 0.3, 1, 1) for panel in panels
+                     for a, b in next(i for i in panel.indicators if i.signal == "rpm").segments])
     tele.update_xaxes(range=[0, duration])
     tele.update_layout(height=400, showlegend=False, margin={"t": 50, "b": 20})
     telemetry_tab.plotly_chart(tele, width="stretch")
