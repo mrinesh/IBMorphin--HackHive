@@ -65,6 +65,18 @@ Choose a demo preset in the sidebar and press Play. Optionally create an
 engine's history in `data/engine_history/`; see
 [dashboard/README.md](dashboard/README.md#engine-profiles-and-history).
 
+With a profile selected, **Diagnose** ranks possible causes and next steps from
+that engine's history, and **Report** shows a report you can export as PDF
+([details](dashboard/README.md#possible-causes-diagnose-and-the-engine-report)).
+Diagnose uses Google Gemini's free tier when a key is set and a basic rule-based
+version otherwise. To set up a free key:
+
+1. Sign in at <https://aistudio.google.com/apikey> and choose **Create API key**
+   (no billing needed).
+2. Copy `.env.example` to `.env` at the repository root (git-ignored) and set
+   `GEMINI_API_KEY=<your key>`, or set `GEMINI_API_KEY` in the environment.
+   Never commit the key.
+
 **Full reproduction.** Generate the core dataset in MATLAB (about 40 minutes in
 one process, or split `Runs` across several processes), then run the Python
 pipeline:

@@ -190,6 +190,9 @@ Execution tracker. Checked items have been completed; unchecked items remain fut
 - [x] Decimate display traces while preserving full-rate analytical processing.
 - [x] Measure inference and display latency on the declared demo machine.
 - [x] Optional engine profiles with per-engine history: make/model/serial with catalog or hand-entered specs (validated; warning for engines that are not 4-cylinder 4-stroke), saved runs, results, notes, and raw data pruned beyond the newest 10 runs. Off by default; see `docs/DATA_CONTRACT.md`, "Engine history".
+- [x] Diagnose (possible causes) from an engine's history: compact citable context (runs, notes, trends, local crank/EGT/CHT/fuel-trim/spectrum summaries; no raw waveforms or lab settings) sent to Gemini `gemini-3.8-flash` (free tier, `GEMINI_API_KEY`) with structured JSON output; causes citing nonexistent evidence dropped or flagged; basic rule-based fallback without a key, offline, on timeout, 429 or invalid output; each diagnosis saved to history and reopenable. Only with a profile selected.
+- [x] Engine report: dashboard preview and PDF export (fpdf2 + matplotlib) from one data structure: profile/specs, latest run with health timeline and likelihoods, latest saved diagnosis (no Gemini call), run history and trends, timestamp and disclaimer.
+- [ ] Run Diagnose once with a real Gemini key in the dashboard and read the causes against the run (verified so far with mocked Gemini and one live model call).
 - [ ] Rehearse normal → RPM/load change → fault onset → signature change → alert → evidence.
 
 **Artifacts:** integrated local dashboard, demo presets, prediction logs, performance report.

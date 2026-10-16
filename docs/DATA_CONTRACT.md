@@ -357,7 +357,7 @@ overrides it):
 
 ```text
 data/engine_history/
-  history.sqlite                       profiles, runs, decisions, notes
+  history.sqlite                       profiles, runs, decisions, notes, diagnoses
   raw/profile_<id>/run_<id>/
     telemetry.csv                      t_s,signal,value,unit,valid (as received)
     signals.npz                        audio, vibration (float32), audio_fs_hz,
@@ -374,6 +374,7 @@ integers, separate from the recording's `run_id`.
 | `runs` | `id`, `profile_id`, `created_utc`, `source_json`, `specs_json` (the profile's specs when saved), `summary_json`, `feature_names_json`, `complete` (1 = replay reached the end), `analyzed_s`, `duration_s`, `raw_path` (null once pruned), `raw_pruned_utc` |
 | `decisions` | `run_id`, `idx`, `t_end_s`, `quality`, `predicted`, `accepted`, `alert`, `anomaly_score`, `margin`, `probabilities_json`, `health_stage`, `localization`, `context_json`, `features_json` (ordered as `feature_names_json`) |
 | `notes` | `id`, `profile_id`, `run_id` (null for a note about the engine), `created_utc`, `text` |
+| `diagnoses` | `id`, `profile_id`, `latest_run_id` (newest run in the inputs; null with no runs), `created_utc`, `model` (Gemini model name, or `rule-based (basic)`), `fallback` (1 = basic rule-based version), `fallback_reason` (short message shown to the user), `inputs_digest` (sha256 of the canonical JSON context sent), `output_json` |
 
 `source_json`: `mode` (`recorded` or `lab`), `dataset`, `recording_run_id`,
 `held_out_engine`, `config`, `model_version`, `feature_version`, and
@@ -386,7 +387,27 @@ recorded replays). `summary_json`: `predicted_fault` (alerted faults joined with
 `health_summary`, `warning_leads_s`, `localization`, `model_version`,
 `feature_version`. NaN is stored as null.
 
-**Retention.** Results (`runs`, `decisions`) and notes are permanent. Raw folders
+`output_json` (a diagnosis): `summary` (2-3 sentences); `causes`, ranked most
+to least likely, each with `title`, `kind` (`detected` = matches a model fault
+class, `suggested` = a more specific mechanical cause), `confidence` (`high`,
+`medium`, `low`), `reasoning`, `confidence_notes`, `evidence_ids` (IDs that
+exist in the context), and `unverified_ids` when some cited IDs did not exist;
+`actions` with `step`, `urgency` (`stop_now`, `soon`, `monitor`) and `addresses`
+(cause titles); `data_gaps`; and `dropped_causes` (`title`, `reason`,
+`evidence_ids`) for causes removed because none of their evidence existed or
+they were malformed. Context IDs: `SPEC` (profile and specs), `R<id>` (history
+run), `N<id>` (note), `S<id>-crank|thermal|fuel|spectrum` (signal summary of
+run `<id>`), `T-<fault>|anomaly|health` (trend across runs). The `diagnoses`
+table was added in place (history version 1.0 files gain it on first open);
+other tables are unchanged.
+
+**Diagnosis context.** Built from history only (`diagnosis_context.py`): the
+profile, the newest saved runs (default 8), notes (default 20), cross-run
+trends, and summaries computed locally from kept raw data. It never contains
+raw waveforms, `evaluation_truth/`, `lab_injection`, or the recording id, and
+is the only data sent to the Gemini API.
+
+**Retention.** Results (`runs`, `decisions`), notes, and diagnoses are permanent. Raw folders
 are kept for the newest N runs of each engine (default 10,
 `ENGINE_HISTORY_RAW_KEEP`); older ones are deleted when a run is saved, setting
 `raw_path` to null and `raw_pruned_utc`.
