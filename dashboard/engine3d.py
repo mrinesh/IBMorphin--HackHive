@@ -16,6 +16,7 @@ from dashboard import explain
 from dashboard.theme import CLASS_META, TOKENS, class_meta
 
 FAULTS = ("misfire", "knock_like", "valve_clearance_like")
+EGT_RANGE_C = (250.0, 850.0)  # exhaust runner color scale (cold dark -> hot white)
 
 
 def scene_state(record: dict[str, Any] | None, model, *, t_now: float, playing: bool,
@@ -31,13 +32,19 @@ def scene_state(record: dict[str, Any] | None, model, *, t_now: float, playing: 
     sensor data and the cam phase reference only); the view then confines the effect
     to that cylinder. `truth` (evaluation truth) is only passed when the overlay is on,
     and only its affected cylinder during an active fault interval reaches the browser.
+    With data contract 1.2 sensors, `egt` (each runner's exhaust gas temperature
+    scaled to EGT_RANGE_C, 0-1) colors the exhaust runners and `egt_c` labels them;
+    `crank_cylinder` and `thermal_cylinder` are the cylinders the independent crank
+    and thermal paths name (sensor data only).
     """
     state: dict[str, Any] = {"t": round(t_now, 2), "playing": playing,
                              "rpm": None if rpm is None else round(rpm, 1),
                              "firing_order": list(firing_order), "effect": None,
                              "intensity": 0.0, "vibration_ratio": 1.0, "alert": None,
                              "edge_color": TOKENS["cyan"], "status_text": "Model: warming up",
-                             "truth_cylinder": None, "model_cylinder": None}
+                             "truth_cylinder": None, "model_cylinder": None,
+                             "egt": None, "egt_c": None, "crank_cylinder": None,
+                             "thermal_cylinder": None}
     if record is not None:
         quality, accepted, alert = record["quality"], record["accepted"], record.get("alert")
         if "+" in (alert or ""):  # v2 fault set: animate the first fault
@@ -73,6 +80,7 @@ def scene_state(record: dict[str, Any] | None, model, *, t_now: float, playing: 
         state.update(effect=effect, intensity=round(float(intensity), 3), alert=alert,
                      edge_color=meta["color"], status_text=status,
                      vibration_ratio=_vibration_ratio(record, model))
+        state.update(sensor_state(record))
     if truth is not None:
         intervals = truth.get("active_intervals") or []
         if intervals and not isinstance(intervals[0], list):
@@ -82,6 +90,25 @@ def scene_state(record: dict[str, Any] | None, model, *, t_now: float, playing: 
         if active and truth.get("condition") in FAULTS and isinstance(cylinder, int):
             state["truth_cylinder"] = cylinder
     return state
+
+
+def sensor_state(record: dict[str, Any]) -> dict[str, Any]:
+    """Exhaust temperatures and the crank/thermal paths' cylinders for the view."""
+    out: dict[str, Any] = {}
+    thermal = record.get("thermal") or {}
+    egt = thermal.get("egt_c")
+    if egt and all(v is not None for v in egt):
+        lo, hi = EGT_RANGE_C
+        out["egt"] = [round(min(max((v - lo) / (hi - lo), 0.0), 1.0), 2) for v in egt]
+        out["egt_c"] = [round(v) for v in egt]
+    named = [p.get("cylinder") for p in (thermal.get("patterns") or {}).values()
+             if p.get("alert") and p.get("cylinder")]
+    if named:
+        out["thermal_cylinder"] = int(named[0])
+    crank = record.get("crank") or {}
+    if crank.get("alert") and crank.get("cylinder"):
+        out["crank_cylinder"] = int(crank["cylinder"])
+    return out
 
 
 def location_text(where: dict[str, Any] | None, localizing: bool) -> str:

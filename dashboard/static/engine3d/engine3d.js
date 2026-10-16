@@ -15,6 +15,12 @@
 //                  and marked with a ring in the state color. Without it, effects
 //                  are engine-wide.
 //   truth_cylinder only when the evaluation-truth overlay is on (marked as truth)
+//   egt            per-cylinder exhaust gas temperature scaled 0..1 (data contract 1.2
+//                  sensors); colors each exhaust runner on the inferno scale, the
+//                  same scale as the dashboard's thermal-camera panel. null: grey.
+//   egt_c          the same temperatures in degC, for the HUD
+//   crank_cylinder, thermal_cylinder  cylinders named by the independent crank-speed
+//                  and EGT/CHT paths (HUD text only)
 // Nothing here picks a cylinder on its own.
 
 import * as THREE from '../vendor/three/three.module.min.js';
@@ -159,6 +165,7 @@ function createView(root) {
     embers: [0, 0, 0, 0], // ember life 0..1
     ticks: [0, 0, 0, 0],
     alarm: [0, 0, 0, 0], // red highlight on the localized cylinder's piston, 0..1
+    egt: [null, null, null, null], // eased exhaust runner temperature 0..1 (null: no sensor)
     jolt: 0,
     edgeColor: new THREE.Color(COLORS.cyan),
     stutter: 0,
@@ -353,6 +360,23 @@ function createView(root) {
       engine.model.material.color.copy(sim.edgeColor);
       engine.model.material.opacity = 0.95 * pulse;
     }
+    // Exhaust runners glow with their measured exhaust gas temperature.
+    const egt = Array.isArray(t.egt) && t.egt.length === 4 ? t.egt : null;
+    engine.cylinders.forEach((cyl, k) => {
+      const goal = egt ? Number(egt[k]) : null;
+      if (goal === null || !Number.isFinite(goal)) {
+        sim.egt[k] = null;
+        cyl.runner.material.color.set(COLORS.steelLight);
+        cyl.runner.material.emissiveIntensity = 0;
+        return;
+      }
+      const now = sim.egt[k] === null ? goal : sim.egt[k];
+      sim.egt[k] = now + (goal - now) * Math.min(1, dt * (still ? 60 : 2));
+      inferno(sim.egt[k], cyl.runner.material.color);
+      cyl.runner.material.emissive.copy(cyl.runner.material.color);
+      cyl.runner.material.emissiveIntensity = 0.15 + 0.85 * sim.egt[k];
+    });
+    stats.egt = sim.egt.map((v) => (v === null ? null : Math.round(v * 100) / 100));
     engine.truth.visible = Number.isInteger(t.truth_cylinder);
     if (engine.truth.visible) {
       engine.truth.position.x = engine.cylinders[t.truth_cylinder - 1].x;
@@ -476,10 +500,29 @@ function renderHud(hud, data) {
     line(`Inline-4 engine · firing order ${order} · ${rpm} · ${speed}`),
     line(data.status_text || '', data.edge_color),
   );
+  if (Array.isArray(data.egt_c)) hud.append(line(egtText(data)));
   if (Number.isInteger(data.truth_cylinder)) {
     hud.append(line(`Evaluation truth overlay: fault in cylinder ${data.truth_cylinder} ` +
                     '(not used by the model)', '#fbbf24'));
   }
+}
+
+function egtText(data) {
+  const values = data.egt_c.map((v, k) => `${k + 1}: ${v}`).join(' · ');
+  const named = [];
+  if (Number.isInteger(data.crank_cylinder)) named.push(`crank speed → cyl ${data.crank_cylinder}`);
+  if (Number.isInteger(data.thermal_cylinder)) named.push(`EGT/CHT → cyl ${data.thermal_cylinder}`);
+  return `Exhaust gas °C ${values}${named.length ? ` · ${named.join(' · ')}` : ''}`;
+}
+
+// Inferno colormap (matplotlib/Plotly), sampled at 9 stops; t in 0..1.
+const INFERNO = [0x000004, 0x1b0c41, 0x4a0c6b, 0x781c6d, 0xa52c60, 0xcf4446, 0xed6925,
+                 0xfb9b06, 0xfcffa4];
+const infernoStops = INFERNO.map((hex) => new THREE.Color(hex));
+function inferno(t, target) {
+  const x = Math.min(Math.max(t, 0), 1) * (infernoStops.length - 1);
+  const k = Math.min(Math.floor(x), infernoStops.length - 2);
+  return target.copy(infernoStops[k]).lerp(infernoStops[k + 1], x - k);
 }
 
 // Accessible name of the view tracks the model state shown in it.
@@ -519,7 +562,10 @@ function fallbackView(root) {
     el('text', { x: x + 25, y: 205, 'text-anchor': 'middle', fill: '#94a3b8',
                  'font-size': 12, 'font-family': 'Inter, sans-serif' }, svg)
       .textContent = `Cylinder ${k + 1}`;
-    return { glow: el('rect', { x, y: 40, width: 50, height: 16, opacity: 0 }, svg),
+    // Exhaust port above each cylinder, colored by its exhaust gas temperature.
+    const port = el('rect', { x: x + 10, y: 14, width: 30, height: 10, rx: 3,
+                              fill: 'rgba(148,163,184,0.25)' }, svg);
+    return { port, glow: el('rect', { x, y: 40, width: 50, height: 16, opacity: 0 }, svg),
              piston: el('rect', { x: x + 3, y: 80, width: 44, height: 26, rx: 3,
                                   fill: '#9fb3c8' }, svg) };
   });
@@ -554,11 +600,17 @@ function fallbackView(root) {
       root.setAttribute('aria-label', `Engine schematic (2D). ${data.status_text || ''}.`);
       const color = data.edge_color || '#00e5e5';
       block.setAttribute('stroke', color);
-      pistons.forEach(({ glow }) => glow.setAttribute('fill', color));
+      pistons.forEach(({ glow, port }, k) => {
+        glow.setAttribute('fill', color);
+        const egt = Array.isArray(data.egt) ? Number(data.egt[k]) : NaN;
+        port.setAttribute('fill', Number.isFinite(egt)
+          ? `#${inferno(egt, new THREE.Color()).getHexString()}` : 'rgba(148,163,184,0.25)');
+      });
       status.replaceChildren(
         line('WebGL is unavailable, so a 2D schematic replaces the 3D view.'),
         line(data.status_text || '', color),
       );
+      if (Array.isArray(data.egt_c)) status.append(line(egtText(data)));
       if (Number.isInteger(data.truth_cylinder)) {
         status.append(line(`Evaluation truth overlay: fault in cylinder ${data.truth_cylinder} ` +
                            '(not used by the model)', '#fbbf24'));
@@ -717,13 +769,37 @@ function buildEngine() {
     tick.position.set(x, DECK_Y + 0.12, 0);
     tick.scale.set(0.9, 0.45, 1);
 
-    shaker.add(bore, piston, rod, intake, exhaust, flame, core, plug, embers, sparks, tick);
+    // Exhaust runner: from the port on the exhaust side of the head, out and down to
+    // a collector below the block. Own material, colored by this cylinder's EGT.
+    const runnerPath = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(x, DECK_Y + 0.14, -0.62),
+      new THREE.Vector3(x, DECK_Y + 0.1, -1.0),
+      new THREE.Vector3(x * 0.75, DECK_Y - 0.4, -1.22),
+      new THREE.Vector3(x * 0.3, DECK_Y - 1.0, -1.3),
+      new THREE.Vector3(x * 0.08, DECK_Y - 1.45, -1.3),
+    ]);
+    const runner = new THREE.Mesh(
+      new THREE.TubeGeometry(runnerPath, 40, 0.085, 14, false),
+      new THREE.MeshStandardMaterial({ color: COLORS.steelLight, metalness: 0.35,
+                                       roughness: 0.45, emissive: new THREE.Color(0x000000),
+                                       emissiveIntensity: 0 }),
+    );
+
+    shaker.add(bore, piston, rod, intake, exhaust, flame, core, plug, embers, sparks, tick,
+               runner);
     cylinders.push({ x, piston, alarm, rod, intake, exhaust, valveY, flame, core, plug, embers,
+                     runner,
                      emberVel: new Float32Array(EMBERS * 3), burning: false, sparks, tick,
                      crankPin,
                      flameColor: new THREE.Color(COLORS.flame), intakeOpen: false,
                      exhaustOpen: false });
   }
+
+  // Exhaust collector below the runners.
+  const collector = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.11, 1.1, 18),
+                                   metal(COLORS.steelLight, 0.45));
+  collector.position.set(0, DECK_Y - 1.95, -1.3);
+  shaker.add(collector);
 
   // Overhead camshafts (turn at half crank speed) with one lobe per valve.
   const camshafts = [0.2, -0.2].map((z) => {

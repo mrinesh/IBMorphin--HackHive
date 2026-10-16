@@ -94,6 +94,14 @@ def icon(name: str, size: int = 18) -> str:
             f"--hud-icon:url('{_svg_uri(svg)}')\"></span>")
 
 
+# Plotly's Inferno with its first stop nudged off #000004: Streamlit's chart frontend
+# uses #000004 as a theme placeholder and swaps it for an accent color, which painted
+# the coldest (lowest) values orange or violet. The nudge is invisible.
+INFERNO = [[k / 8, c] for k, c in enumerate(
+    ("#03020c", "#1b0c41", "#4a0c6b", "#781c6d", "#a52c60", "#cf4446", "#ed6925", "#fb9b06",
+     "#fcffa4"))]
+
+
 def class_meta(accepted: str | None, quality: str | None = None) -> dict:
     if quality not in (None, "ok"):
         return CLASS_META["no_decision"]

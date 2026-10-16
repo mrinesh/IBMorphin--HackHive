@@ -35,7 +35,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:  # `dashboard` package (theme, explain) for `streamlit run`
     sys.path.insert(0, str(ROOT))
 
-from dashboard import engine3d, explain, theme  # noqa: E402
+from dashboard import engine3d, explain, sensors, theme  # noqa: E402
 from engine_diagnostics.config import load_config  # noqa: E402
 from engine_diagnostics.data.run_io import find_runs, load_run, validate_run  # noqa: E402
 from engine_diagnostics.history import (  # noqa: E402
@@ -50,6 +50,7 @@ from engine_diagnostics.lab import (  # noqa: E402
     base_runs,
     build_lab_bundle,
 )
+from engine_diagnostics.models.obd_misfire import CrankCalibration  # noqa: E402
 from engine_diagnostics.models.temporary import fit_holdout_model  # noqa: E402
 from engine_diagnostics.pipeline.features import (  # noqa: E402
     HIGH_ENVELOPE_HZ,
@@ -68,6 +69,7 @@ from engine_diagnostics.profiles import (  # noqa: E402
 from engine_diagnostics.runtime.evidence import EvidencePanel, build_evidence  # noqa: E402
 from engine_diagnostics.runtime.health import STAGES, HealthTimeline, health_timeline  # noqa: E402
 from engine_diagnostics.runtime.replay import ReplayEngine, packets, replay_run  # noqa: E402
+from engine_diagnostics.runtime.thermal import ThermalCalibration  # noqa: E402
 
 DATASETS = {
     "core_v1": {"raw": ROOT / "data/raw/core_v1", "truth": ROOT / "evaluation_truth/core_v1",
@@ -76,6 +78,11 @@ DATASETS = {
     "core_v2": {"raw": ROOT / "data/raw/core_v2", "truth": ROOT / "evaluation_truth/core_v2",
                 "model": ROOT / "artifacts/models/multifault_v2.joblib",
                 "splits": ROOT / "configs/core_v2.json"},
+    # core_v2's recordings plus the 60-2 crank wheel and cylinder temperatures (contract
+    # 1.2); its audio and vibration are bit-identical to core_v2, so the v2 model applies.
+    "core_v3": {"raw": ROOT / "data/raw/core_v3", "truth": ROOT / "evaluation_truth/core_v3",
+                "model": ROOT / "artifacts/models/multifault_v2.joblib",
+                "splits": ROOT / "configs/core_v3.json"},
     "integration_v1": {"raw": ROOT / "data/raw", "truth": ROOT / "evaluation_truth",
                        "model": ROOT / "artifacts/models/temporary.joblib",
                        "splits": ROOT / "configs/integration_batch.json"},
@@ -83,6 +90,9 @@ DATASETS = {
 # Cylinder localizer (train-localizer): names the affected cylinder of each active alert
 # from the vibration signature and the cam phase reference. Optional.
 LOCALIZER_PATH = ROOT / "artifacts/models/cylinder_localizer.joblib"
+# Independent cross-checks for runs with contract 1.2 sensors (calibrate-crosscheck).
+CRANK_PATH = ROOT / "artifacts/models/crank_monitor.json"
+THERMAL_PATH = ROOT / "artifacts/models/thermal_monitor.json"
 PRESETS_PATH = ROOT / "configs/demo_presets.json"
 HOLDOUT_DATASET = "integration_v1"
 FEATURES_PATH = ROOT / "data/processed/integration_v1_features.parquet"
@@ -147,6 +157,13 @@ def load_config_cached():
 @st.cache_resource
 def load_model(path: str):
     return joblib.load(path) if Path(path).is_file() else None
+
+
+@st.cache_resource
+def load_crosschecks() -> tuple[CrankCalibration | None, ThermalCalibration | None]:
+    crank = CrankCalibration.load(CRANK_PATH) if CRANK_PATH.is_file() else None
+    thermal = ThermalCalibration.load(THERMAL_PATH) if THERMAL_PATH.is_file() else None
+    return crank, thermal
 
 
 @st.cache_resource
@@ -246,10 +263,12 @@ def start_run(dataset: str, run_id: str, held_out: str | None = None,
     else:
         (bundle, _, run_packets), lab_log = load_bundle(str(DATASETS[dataset]["raw"]), run_id), None
     localizer = load_model(str(LOCALIZER_PATH))
+    crank, thermal = load_crosschecks()
     st.session_state.update(dataset=dataset, run_id=run_id, held_out=held_out, model=model,
                             lab=lab, lab_log=lab_log, bundle=bundle, packets=run_packets,
                             engine=ReplayEngine(model, config, bundle.metadata,
-                                                localizer=localizer),
+                                                localizer=localizer, crank=crank,
+                                                thermal=thermal),
                             next_packet=0, records=[], stream_t=0.0, playing=False,
                             saved_history_run=None)
 
@@ -726,6 +745,69 @@ def render_evidence(panel: EvidencePanel, where: dict | None = None) -> None:
                    "operating range. They show what changed; they do not prove a cause.")
 
 
+def crank_panel(records, latest, t_now: float) -> None:
+    """Independent crank-speed misfire path and the simulated ECU monitor."""
+    crank = (latest or {}).get("crank")
+    if crank is None:
+        st.info("This recording has no crank trigger wheel (data contract 1.2, core_v3), or "
+                "the crank calibration is missing (`engine-diagnostics calibrate-crosscheck`).")
+        return
+    if crank.get("status") == "unavailable":
+        st.info("Crank wheel signal unavailable in this window.")
+        return
+    summary = sensors.obd_summary(records, crank)
+    left, right = st.columns([3, 2], gap="medium")
+    with left:
+        st.plotly_chart(sensors.crank_speed_figure(crank), width="stretch", key="crank_speed")
+    with right:
+        st.plotly_chart(sensors.roughness_figure(crank), width="stretch", key="crank_rough")
+        if crank.get("alert"):
+            st.error(f"Crank speed: misfire on cylinder {crank['cylinder']} "
+                     "(independent of the sound/vibration model)", icon=":material/speed:")
+        elif crank.get("phase") != "cam_sync":
+            st.warning("No cam phase in this window: the wheel alone cannot name cylinders.")
+        else:
+            st.success("Crank speed: every cylinder pulls its weight", icon=":material/speed:")
+    with st.container(border=True):
+        st.markdown("**Benchmark: the ECU's own misfire monitor (simulated OBD-II)**")
+        st.markdown(sensors.comparison_text(summary, t_now))
+        st.dataframe(sensors.obd_table(summary), hide_index=True)
+        st.caption(
+            "A production ECU counts misfiring strokes from crankshaft speed in 200-revolution "
+            "blocks (type A, catalyst damage: here 5 % of strokes) and 1000-revolution blocks "
+            "(type B, emissions: 1.5 %) and sets P030N for one cylinder. It cannot see knock or "
+            "valve faults. Thresholds were calibrated on healthy training engines; the 5 % type "
+            "A rate is at the strict end of real calibrations, which favours the ECU. "
+            "Synthetic data.")
+
+
+def thermal_panel(latest, t_now: float) -> None:
+    """Per-cylinder EGT/CHT: thermal-camera view, trends, and the thermal cross-check."""
+    thermal = (latest or {}).get("thermal")
+    if thermal is None:
+        st.info("This recording has no per-cylinder exhaust gas / head temperatures (data "
+                "contract 1.2, core_v3), or the thermal calibration is missing.")
+        return
+    left, right = st.columns([3, 2], gap="medium")
+    with left:
+        # theme=None keeps the inferno scale (Streamlit's theme would replace it), so
+        # the colors match the 3D view's exhaust runners.
+        st.plotly_chart(sensors.thermal_camera_figure(
+            thermal, f"Head and exhaust temperatures at {t_now:.1f} s"),
+            width="stretch", key="thermal_camera", theme=None)
+        st.caption("Drawn from the eight thermocouple readings on an engine outline (top "
+                   "view: exhaust ports above, head below), not a camera image.")
+    with right:
+        st.markdown("**Thermal cross-check**")
+        for text in sensors.thermal_lines(thermal):
+            st.markdown(f"- {text}")
+        st.caption("Each cylinder is compared with the others (operating-point changes cancel) "
+                   "and with its own level in the first seconds of the recording. Slow "
+                   "(seconds), but independent of the sound/vibration path.")
+    st.plotly_chart(sensors.thermal_trend_figure(bundle.telemetry, t_now, duration),
+                    width="stretch", key="thermal_trend")
+
+
 def lab_response(records, t_now: float) -> None:
     """How predictions responded to the lab changes, beside the unmodified recording."""
     settings: LabSettings = st.session_state.lab
@@ -955,7 +1037,9 @@ def live_view():
             for fault in active:
                 n = model.confirm_updates[fault] if multi else confirm
                 st.error(f"ALERT: {label(fault)} detected{location_phrase(latest, fault)} — "
-                         f"confirmed by {n} consistent updates", icon=":material/warning:")
+                         f"confirmed by {n} consistent updates"
+                         f"{sensors.confirmation_text(latest, fault)}",
+                         icon=":material/warning:")
         else:
             st.success("No active alert — the engine sounds normal so far",
                        icon=":material/check_circle:")
@@ -1022,9 +1106,14 @@ def live_view():
 
     st.html(theme.telemetry_cards_html(cards))
 
-    signals_tab, frequency_tab, telemetry_tab, timeline_tab = st.tabs([
+    signals_tab, frequency_tab, telemetry_tab, crank_tab, thermal_tab, timeline_tab = st.tabs([
         ":material/graphic_eq: Sound & vibration", ":material/equalizer: Frequencies (FFT / STFT)",
-        ":material/speed: Engine data", ":material/timeline: History & evidence"])
+        ":material/speed: Engine data", ":material/settings_backup_restore: Crank speed",
+        ":material/thermostat: Exhaust temperatures", ":material/timeline: History & evidence"])
+    with crank_tab:
+        crank_panel(records, latest, t_now)
+    with thermal_tab:
+        thermal_panel(latest, t_now)
 
     engine = state.engine
     window_s = config["analysis"]["window_s"]
@@ -1076,7 +1165,7 @@ def live_view():
                                  nperseg=seg, noverlap=seg - config["analysis"]["stft_hop_samples"])
         offset = t_now - received.size / fs
         spec = go.Figure(go.Heatmap(x=ts + offset, y=f / 1000, z=10 * np.log10(sxx + 1e-20),
-                                    colorscale="Inferno", colorbar={"title": "dB"}))
+                                    colorscale=theme.INFERNO, colorbar={"title": "dB"}))
         spec.update_layout(height=380,
                            title=f"Vibration frequencies over the last {SPECTROGRAM_S:g} s (STFT)",
                            xaxis_title="s", yaxis_title="kHz", margin={"t": 50, "b": 20})

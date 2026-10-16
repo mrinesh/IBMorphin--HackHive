@@ -75,5 +75,26 @@
     "run_id": "run_00251",
     "start_s": 9,
     "note": "Held-out engine_058. Limitation. Knock-like from 10.8 s and a severe valve-clearance-like fault from 14.1 s, both on cylinder 4. Knock alerts at 12.5 s. The valve alert fires at 14.0 s, before the valve fault exists, so it was triggered by the knock on the same cylinder; scoring counts it as a false alert and the real valve fault as not separately detected. Valve is v2's weakest detector (window recall 0.62 on test engines)."
+  },
+  {
+    "name": "11. Misfire vs the ECU's own monitor (crank wheel, EGT)",
+    "dataset": "core_v3",
+    "run_id": "run_00246",
+    "start_s": 8,
+    "note": "Held-out engine_058. Evaluation truth: mild misfire (severity 0.27) on cylinder 3 from 11.2 s. Acoustic alert at 12.0 s; the EGT/CHT path sees cylinder 3 running cold at 13.5 s; the independent crank-speed path names cylinder 3 at 15.0 s; the simulated ECU monitor sets P0303 only at 17.1 s (end of a 200-revolution block), 5.1 s after the acoustic alert. See the Crank speed and Exhaust temperatures tabs."
+  },
+  {
+    "name": "12. Knock confirmed by a hot cylinder head",
+    "dataset": "core_v3",
+    "run_id": "run_00265",
+    "start_s": 7,
+    "note": "Held-out engine_060. Evaluation truth: knock-like bursts on cylinder 1 from 10.6 s. Acoustic knock alert at 12.0 s; cylinder 1's head temperature rises while its exhaust does not, confirming knock on cylinder 1 at 14.5 s. The crank-speed ECU monitor has no knock capability."
+  },
+  {
+    "name": "13. Three faults, three independent views",
+    "dataset": "core_v3",
+    "run_id": "run_00243",
+    "start_s": 6,
+    "note": "Held-out engine_057. Evaluation truth: misfire on cylinder 1 from 8.9 s, valve-clearance-like on cylinder 2 from 17.5 s, knock-like on cylinder 2 from 21.5 s. Misfire: acoustic 10.0 s, crank 10.5 s, cylinder 1 cold 11.5 s, ECU P0301 11.2 s. Valve: cylinder 2's exhaust runs hot at 20.5 s, acoustic valve alert 21.0 s. Knock: acoustic 22.5 s."
   }
 ]

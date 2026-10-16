@@ -9,6 +9,9 @@ every decision time on the same causal window as the acoustic features:
              median over cylinders (its excess). A cylinder whose excess
              passes the calibrated threshold is a misfire candidate; the
              candidate is confirmed and cleared like any alert (AlertState).
+             An excess between half the threshold and the threshold holds
+             the current state (hysteresis), so an intermittent misfire near
+             the threshold does not flicker on and off.
              The cylinder is named from crank angle alone, independently of
              the acoustic localizer.
   ECU        every stroke is passed once, in time order, to the simulated
@@ -88,8 +91,11 @@ class CrankPath:
         candidate = None
         if quality == "ok":
             candidate = int(np.argmax(excess)) + 1
-            if excess[candidate - 1] > self.calibration.cylinder_threshold:
+            threshold = self.calibration.cylinder_threshold
+            if excess[candidate - 1] > threshold:
                 decision = MISFIRE
+            elif excess[candidate - 1] > threshold / 2:
+                decision = "uncertain"  # holds the state: neither confirms nor clears
         active = self.alert.update(decision, quality)
         if active and decision == MISFIRE:
             self.cylinder = candidate
@@ -105,7 +111,9 @@ class CrankPath:
                    & (strokes.drop > self.calibration.stroke_threshold(strokes.rpm))
                    & (strokes.cylinder > 0))
         return {
-            "status": "alert" if active else ("candidate" if decision == MISFIRE else "normal"),
+            "status": "alert" if active else (
+                "candidate" if decision == MISFIRE else
+                "elevated" if decision == "uncertain" else "normal"),
             "quality": quality,
             "phase": strokes.phase,
             "alert": active == MISFIRE,
@@ -126,8 +134,9 @@ class CrankPath:
 
 def stroke_marks(strokes: StrokeSpeeds, t: float, flagged: np.ndarray,
                  seconds: float = 0.5) -> dict[str, list]:
-    """TDC times and cylinders over the speed trace span, for display."""
+    """TDC times, cylinders and 90-degree segment speeds over the trace span, for display."""
     recent = strokes.time_s >= t - seconds
     return {"t_s": strokes.time_s[recent].round(5).tolist(),
             "cylinder": strokes.cylinder[recent].tolist(),
+            "rpm": strokes.rpm[recent].round(1).tolist(),
             "flagged": flagged[recent].tolist()}

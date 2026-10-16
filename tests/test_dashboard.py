@@ -76,8 +76,36 @@ def test_every_demo_preset_renders_with_its_model_panels():
         assert not app.exception, preset["name"]
         records = app.session_state["records"]
         assert records and "probability" in records[-1]
-        expected = "P(misfire)" if preset["dataset"] == "core_v2" else "Calibrated confidence"
+        multi = preset["dataset"] in ("core_v2", "core_v3")
+        expected = "P(misfire)" if multi else "Calibrated confidence"
         assert any(m.label == expected for m in app.metric), preset["name"]
+        if preset["dataset"] == "core_v3" and (ROOT / "artifacts/models/crank_monitor.json"
+                                               ).is_file():
+            # Contract 1.2 sensors: crank path, ECU monitor and thermal path ride along.
+            assert records[-1]["crank"]["phase"] == "cam_sync", preset["name"]
+            assert records[-1]["thermal"]["status"] in ("normal", "alert"), preset["name"]
+            assert any("ECU's own misfire monitor" in m.value for m in app.markdown)
+
+
+@pytest.mark.skipif(not (ROOT / "data/raw/core_v3/run_00246").is_dir()
+                    or not (ROOT / "artifacts/models/crank_monitor.json").is_file()
+                    or not (ROOT / "artifacts/models/thermal_monitor.json").is_file(),
+                    reason="needs core_v3 runs and calibrate-crosscheck outputs")
+def test_crank_and_thermal_tabs_show_the_misfire_and_the_ecu_benchmark():
+    app = AppTest.from_file(str(APP), default_timeout=120).run()
+    widget(app.sidebar.selectbox, "Dataset").set_value("core_v3").run()
+    widget(app.sidebar.selectbox, "Run").set_value("run_00246").run()
+    widget(app.sidebar.slider, "Seek (s)").set_value(18.0).run()
+    widget(app.sidebar.button, "Seek").click().run()
+    assert not app.exception
+    latest = app.session_state["records"][-1]
+    assert latest["crank"]["alert"] and latest["crank"]["cylinder"] == 3
+    assert latest["thermal"]["patterns"]["cold"]["cylinder"] == 3
+    text = " ".join(m.value for m in app.markdown)
+    assert "ECU type A code **P0303**" in text and "earlier" in text
+    assert "**Cylinder 3** runs cold" in text
+    banner = " ".join(e.value for e in app.error)
+    assert "confirmed independently by crank speed (cylinder 3) and EGT/CHT (cylinder 3)" in banner
 
 
 @pytest.mark.skipif(not V1_MODEL.is_file() or not (ROOT / "data/raw/core_v1/run_00228").is_dir(),

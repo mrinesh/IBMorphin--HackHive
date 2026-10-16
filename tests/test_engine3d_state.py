@@ -71,8 +71,30 @@ def test_quality_failure_and_warm_up():
     assert state(None)["status_text"] == "Model: warming up"
 
 
+SENSORS = {
+    "thermal": {"egt_c": [712.4, 705.0, 452.3, 698.9], "cht_c": [180.0, 179.0, 150.0, 181.0],
+                "patterns": {"cold": {"alert": True, "cylinder": 3},
+                             "head_hot": {"alert": False, "cylinder": None}}},
+    "crank": {"alert": True, "cylinder": 3, "speed_trace": {"t_s": [0.1] * 200,
+                                                           "rpm": [1500.0] * 200}},
+}
+
+
+def test_exhaust_temperatures_and_independent_cylinders():
+    s = state(record(**SENSORS))
+    assert s["egt_c"] == [712, 705, 452, 699]
+    assert s["egt"][2] < 0.4 < 0.7 < s["egt"][0] <= 1.0
+    assert (s["crank_cylinder"], s["thermal_cylinder"]) == (3, 3)
+    plain = state(record())
+    assert plain["egt"] is None and plain["crank_cylinder"] is None
+    stale = state(record(thermal={"egt_c": [700.0, None, 690.0, 680.0]}))
+    assert stale["egt"] is None
+
+
 def test_payload_stays_small():
     assert len(json.dumps(state(record(), truth=TRUTH))) < 600
+    # Per-tooth speed traces stay out of the payload; only four temperatures go in.
+    assert len(json.dumps(state(record(**SENSORS), truth=TRUTH))) < 700
 
 
 def test_view_controls_are_labelled_buttons():
