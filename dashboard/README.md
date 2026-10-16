@@ -64,10 +64,19 @@ from evaluation truth:
   scale.
 
 For `core_v2` the v2 model reports each fault separately: one calibrated
-probability per fault, a "Faults detected" count, one alert banner per active
-fault (each confirmed and cleared on its own), and a per-fault decision
+probability per fault, a "Detected this window" count, one alert banner per
+active fault (each confirmed and cleared on its own), and a per-fault decision
 timeline (dot detected, x uncertain, square active alert). The truth overlay
 shades each fault's own active intervals.
+
+The **Decision** tile, the diagnosis card title and the 3D view all name the
+same faults as the alert banners: every confirmed alert plus every fault
+detected in the current window (`explain.reported_faults`). Alerts are
+debounced (confirmed over several updates, held through brief dropouts), so a
+fault can stay alerted while it is missing from one 2 s window, or be detected
+before its alert is confirmed; a grey note under the tile says which ("Knock-like
+held (not in this window)", "Misfire awaiting confirmation"). "Best guess" and
+"Detected this window" stay per window.
 
 
 - Permanent "SYNTHETIC DATA — RECORDED REPLAY" banner; model/feature versions
@@ -75,16 +84,33 @@ shades each fault's own active intervals.
   when playback starts or an alert is raised (Car / Engine / Reset view buttons,
   drag or arrow keys to orbit). Pistons, rods, crankshaft, camshafts and valves
   follow slider-crank kinematics at the run's RPM, shown slowed by 1/25, firing
-  in the configured order. Effects follow the model only: the alert class or
-  accepted fault, scaled by the model's confidence; shake follows the window's
-  vibration RMS relative to the normal reference. When the cylinder localizer
-  (`artifacts/models/cylinder_localizer.joblib`) names the alert's cylinder, the
-  effect is confined to that cylinder and marked with a ring in the state color;
-  until then (or without the localizer) effects are engine-wide. The evaluation
-  truth cylinder appears only with the truth overlay, as a separate amber ring
-  labelled as truth. The scene is created once and
-  updated with a small state dict on each rerun. Reduced motion shows a steady
-  state glow; without WebGL a 2D schematic replaces it
+  in the configured order. Effects follow the model only: every reported fault
+  (alerts and this window's detections), each scaled by the model's confidence
+  for it; shake follows the window's vibration RMS relative to the normal
+  reference. When the cylinder localizer
+  (`artifacts/models/cylinder_localizer.joblib`) names a fault's cylinder, that
+  fault's effect is confined to it, its piston glows red and a ring in the
+  fault's color marks it, so two faults on two cylinders show side by side;
+  a fault without a cylinder (or without the localizer) shows engine-wide.
+  Faults on one cylinder compose (misfire weakens or skips the firing, knock
+  adds sparks, valve-train impacts add seat ticks). The HUD names each fault
+  with its own confidence, status and cylinder. The evaluation truth cylinder
+  appears only with the truth overlay, as a separate amber ring labelled as
+  truth. The scene is created once and updated with a small state dict on each
+  rerun. Pause freezes the engine; when the replay reaches its end the engine
+  keeps running on the final decision (labelled as such in the HUD) so the
+  results can be studied with the animation on; this runs in the browser only,
+  with no server reruns. Reduced motion shows a steady state glow; without WebGL
+  a 2D schematic replaces it
+- WebGL budget: browsers keep only a few live WebGL contexts per page and drop
+  the oldest when more are created. Plotly's WebGL traces (`Scattergl`) each
+  open several and were re-created on every 0.5 s update, so the long-lived 3D
+  view was the one dropped ("3D view paused…"). All charts are therefore SVG
+  (`go.Scatter`; traces thinned to 2,000 points by keeping each bin's min and
+  max, so short knock and impact spikes survive), and a test fails if a WebGL
+  trace returns. If the 3D context is still lost (GPU reset), the view waits for
+  the browser to restore it, then rebuilds its renderer with the same scene,
+  showing a notice only if the loss lasts
 - Diagnosis card: decision with icon and text, why a window is uncertain,
   calibrated confidence or margin and anomaly score against their thresholds,
   evidence strength (how many of the model's own criteria hold; not a fault
@@ -95,7 +121,7 @@ shades each fault's own active intervals.
 - Accepted decision, classifier class, calibrated confidence (v1) or decision
   margin (temporary), anomaly score vs threshold, quality, processing and
   server-side render time, alert status
-- Last 2 s of audio and vibration (display decimated 8×) and the 5-10 kHz
+- Last 2 s of audio and vibration (min/max-thinned to 2,000 points) and the 5-10 kHz
   vibration impulse envelope; Welch PSD of the current window
 - Vibration spectrogram of the last 10 s received (STFT 2,048/512 from config)
 - RPM, load, throttle, coolant, and fuel trims with freshness status
@@ -266,7 +292,11 @@ with matplotlib charts, so it needs no browser or system install.
 
 ## Checking the 3D view
 
-With the dashboard running, `node scripts/check_engine3d.mjs` (Node 22+, Google
-Chrome) plays the knock scenario in headless Chrome and checks that the scene was
-created once and never disposed across reruns, kept receiving updates, moved into
-the engine view, and animated.
+With the dashboard running, `node scripts/check_engine3d.mjs [url]` (Node 22+,
+Google Chrome) drives headless Chrome through two passes. The knock scenario
+checks that the scene was created once and never disposed across reruns, kept
+receiving updates, moved into the engine view, and animated. Multi-fault preset 9,
+played to the end, checks that the Decision tile names both faults whenever two
+alerts show, that the 3D view marks both localized cylinders, and that the engine
+keeps running after the replay ends. Throughout, no WebGL context may be lost or
+evicted and charts may create none.
