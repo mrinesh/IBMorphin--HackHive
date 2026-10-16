@@ -34,13 +34,34 @@ the first preset tagged with that `scenario`. Abnormal vibration is represented
 by the valve-train impact class the model was trained on; there is no general
 abnormal-vibration classifier. The full list stays under "Demo preset".
 
-`configs/demo_presets.json` holds seven presets on held-out test engines. Each
+`configs/demo_presets.json` holds thirteen presets on held-out test engines. Each
 selects a run, replays it to its start time, and shows a presenter note taken
-from evaluation truth: normal with a load step; knock then a load change;
-misfire; misfire with recovery; accelerated valve degradation; a waveform gap;
-and a missed mild-knock challenge run (a stated limitation).
+from evaluation truth:
+
+- 1-7 (core_v1): normal with a load step; knock then a load change; misfire;
+  misfire with recovery; accelerated valve degradation; a waveform gap; and a
+  missed mild-knock challenge run (a stated limitation).
+- 8-10 (core_v2): simultaneous faults.
+- 11-13 (core_v3, crank wheel and cylinder temperatures): misfire against the
+  ECU's own monitor; knock confirmed by a hot cylinder head; three faults seen
+  three independent ways.
 
 ## Panels
+
+**Crank speed** and **Exhaust temperatures** tabs (core_v3, after
+`engine-diagnostics calibrate-crosscheck`):
+
+- Crank speed tab:
+  - Crank speed per tooth and per 90° stroke, with the misfire strokes marked.
+  - Per-cylinder roughness against the crank detector's threshold.
+  - The simulated OBD-II monitor: type A/B block progress, per-cylinder counts
+    and codes, next to this replay's acoustic alert time.
+- Exhaust temperatures tab: a thermal-camera-style view of the eight EGT/CHT
+  readings on an engine outline (not a camera image), and their trends.
+- Alert banners add "confirmed independently by crank speed / EGT/CHT" when
+  those paths agree.
+- The 3D engine's exhaust runners glow with measured EGT on the same inferno
+  scale.
 
 For `core_v2` the v2 model reports each fault separately: one calibrated
 probability per fault, a "Faults detected" count, one alert banner per active

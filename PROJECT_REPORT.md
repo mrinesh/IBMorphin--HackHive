@@ -360,6 +360,56 @@ Every sustained fault was alerted in 12 of 12 one-fault runs, 10 of 12 two-fault
 
 Every core episode was localized at the decision that raised the alert. Answers are judged only while the fault is active; a first scoring that also judged detector false alerts raised before onset gave challenge 0.58/0.60/0.50 (the report keeps both). Processing stays at 39 ms p95 per decision. The weak cases are interacting faults: a faint knock with a valve fault on another cylinder (whose impacts land in a third cylinder's firing interval) and mild valve faults under 2× noise.
 
+### 11.9 Crankshaft speed, the ECU misfire monitor, and cylinder temperatures (data contract 1.2)
+
+**Why.** Every production engine has a crank trigger wheel, and the ECU's own misfire monitor uses it: a cylinder that does not fire lets the crank slow through its expansion stroke. Aircraft piston engines also monitor exhaust gas temperature (EGT) and cylinder head temperature (CHT) on every cylinder. Both are physically independent of the microphone and accelerometer, so they can confirm an acoustic alert and name the cylinder a second way.
+
+**Data (`core_v3`).** The generator adds two streams, each from its own random substreams. `core_v3` is `core_v2`'s 286 scenarios with the same seed: all 286 runs have audio, vibration, cam pulses and the six original telemetry signals bit-identical to `core_v2`, so the v2 detector and localizer apply unchanged.
+
+- **60-2 wheel** (`render_crank_teeth.m`). This gives falling-edge times for 58 teeth per revolution. The crank speed combines:
+  - the 1 kHz profile;
+  - a stroke-resolved gas-torque ripple scaled by each stroke's combustion energy and load, and inversely with speed;
+  - a misfire deficit that builds through the misfiring stroke and recovers;
+  - a second-order inertia term.
+
+  The tooth signal also has per-engine tooth-spacing errors and 1 µs timer jitter. The misfire recovery is sized so the wheel stays phase-locked to the acoustic events: the phase difference is 0.1° without misfire and about 2° p95 during dense misfire.
+- **EGT and CHT per cylinder** (`render_thermal.m`). These follow a first-order lag (1.5 s and 8 s) toward a target set by each stroke's energy:
+  - A misfiring cylinder runs cold: the EGT drop is 69–165 °C (minimum to median over 132 misfire runs).
+  - Knock heats the head, not the exhaust. Severe detonation raises head heat flux while EGT stays flat or drops slightly.
+  - A valve fault adds a small EGT rise (15 °C × severity, an assumption).
+
+**Independent paths (no learned weights).** Thresholds are calibrated only on training-engine runs without the relevant fault.
+
+- **Crank path.** It decodes the gap and cam phase, then measures 90° segment speeds centred on each firing TDC, where the inertia ripple cancels. The per-stroke metric is the kinetic-energy drop across each expansion stroke, detrended over 5 strokes. A cylinder whose mean roughness exceeds the others by a calibrated margin is alerted, with hysteresis. It names the cylinder from crank angle alone.
+- **Simulated OBD-II monitor.** Per-stroke thresholds come from a speed table. Misfires are counted in 200-revolution blocks (type A, 5 % of strokes) and 1000-revolution blocks (type B, 1.5 %), and the monitor sets P030N or P0300. It has no knock or valve capability. Real catalyst-damage rates are often higher than 5 %, so this choice favours the ECU.
+- **Thermal path.** Each cylinder is compared with the cross-cylinder median and with its own level in the first 5 s, and scaled by a healthy spread. The patterns are:
+  - *cold* (EGT and CHT low) → misfire
+  - *head hot, exhaust not* → knock
+  - *exhaust hot, head not* → valve
+
+**Results on the held-out test engines** (`evaluate-crosscheck`; v2 detector and localizer frozen; 36 core runs, 25 misfire intervals):
+
+| Misfire intervals | Acoustic (v2) | Crank path | ECU type A | ECU type B |
+|---|---:|---:|---:|---:|
+| Detected before the run ended | 0.96 | 0.84 | 0.68 | 0.40 |
+| Latency after onset, p50 | 1.4 s | 1.6 s | 5.9 s | 9.9 s |
+| Cylinder correct when named | 1.00 | 1.00 | 1.00 | — |
+
+- The acoustic alert came a median 4.5 s before the ECU's type A code (16 intervals where both fired). In 8 more intervals the ECU had set no code by the end of the run, although the acoustic alert had fired.
+- The acoustic localizer and the crank path named the same cylinder in every interval where both named one.
+- There were no crank alerts and no ECU codes in 10 minutes of runs without misfire.
+- The ECU monitor covers none of the 20 knock and 16 valve intervals; the acoustic detector caught 20/20 and 15/16 of them.
+- The thermal path detected misfire in 0.64 and knock in 0.65 of intervals, naming the right cylinder each time, with no false episodes on fault-free runs. It detected valve in only 0.06, because the assumed EGT rise is small against the normal cylinder spread.
+- **Fused knock experiment** (acoustic knock AND thermal head-hot): false alerts per knock-free minute fell from 0.30 to 0.00, against 0.30 for the acoustic detector alone, which misses the 0.2 goal. The cost was sustained recall 1.00 → 0.80 and median latency 1.3 → 3.9 s.
+- **Challenge runs (16).** These mild faults are hard for every path: misfire detected acoustic 0.47, crank 0.60, ECU type A 0.47.
+- **Disclosure.** Hysteresis was added to the crank detector after the first test run; core results are unchanged.
+
+The dashboard shows each of these:
+- the crank speed per tooth and per stroke, the per-cylinder roughness, and the ECU monitor's blocks and codes beside the acoustic alert time ("5.1 s earlier");
+- a thermal-camera-style view of the eight temperatures, with the trends;
+- exhaust runners on the 3D engine colored by EGT;
+- alert banners that say which independent paths agree.
+
 ## 12. Limitations and risks
 
 - **Synthetic only.** The generator is not a validated digital twin; audio and vibration units are nominal. High scores here do not transfer to a real engine without real measurements.
@@ -368,7 +418,7 @@ Every core episode was localized at the decision that raised the alert. Answers 
 - **Simultaneous faults (v2).** Valve detection is the weak link (window recall 0.62), knock false alerts exceed the goal on the test engines (0.30 per fault-free minute, 4 episodes), and a fault on the same cylinder as another can trigger the wrong detector. Only one fault interaction (misfire suppresses knock) is modeled.
 - **Small test set.** Four test engines and 7.8 normal minutes; the zero-false-alert result has a small denominator. Windows are correlated and are not independent trials.
 - **Cylinder localization depends on the reference.** It assumes a healthy cam sensor at a known mounting angle and consistent sensor delays; cam faults are only unit-tested, and a wrong `cam_sync_angle_deg` shifts every answer by whole cylinders.
-- **Low-rate RPM.** 50 Hz RPM supports context and firing-period estimates, not crankshaft-acceleration misfire diagnosis. Cylinder identification relies on the cam phase reference (§11.8); recordings without it (contract 1.0) can only place a fault in a relative firing slot.
+- **Crank and temperature physics are simplified.** With contract 1.2 data (`core_v3`, §11.9), the 60-2 wheel supports crankshaft-speed misfire diagnosis. The simulated crank omits torsional and flywheel resonances, driveline oscillation, and rough-road excitation, which make real misfire monitors harder; the ECU benchmark measures detection timing on this simplified crank. The EGT/CHT mappings, including the valve EGT rise and the shortened CHT time constant, are assumptions. 50 Hz RPM on older data still supports only context. Cylinder identification needs the cam phase reference (§11.8).
 - **Not implemented:** clock offset/drift handling in replay, a separate unsupported-operation state, engine-resampled confidence intervals.
 - **Wear.** The degradation indicator follows an accelerated simulated ramp; it is not a wear measurement or remaining-life estimate.
 
@@ -377,7 +427,8 @@ Every core episode was localized at the decision that raised the alert. Answers 
 | Item | Benefit | Prerequisite |
 |---|---|---|
 | Real recordings | Measure the synthetic-to-real gap | Licensed data with operating and fault labels |
-| Stronger valve and mild-fault signatures | Better recall on subtle faults | Stroke-synchronous features now exist (v2); a high-rate speed signal would give exact crank angle |
+| Stronger valve and mild-fault signatures | Better recall on subtle faults | The crank wheel now gives exact crank angle (§11.9); retraining the stroke-synchronous and valve-timing features on it (core_v3) is the next experiment |
+| Crank and thermal realism | Credible ECU benchmark | Torsional/flywheel dynamics, rough-road disturbance, and EGT/CHT data from a real engine |
 | Robustness training | Challenge-condition generalization | Wider training distributions for noise and RPM |
 | Clock drift and three-axis vibration | Realistic acquisition | Replay support for offsets; new rendering |
 | CNN comparison | Learned representations | Frozen SVM baseline (available) |
@@ -408,6 +459,12 @@ uv run --all-extras --group quality pytest
 scripts/run_pipeline_v2.sh            # validate, build features, train-multi, train-localizer
 uv run --all-extras engine-diagnostics evaluate-multi          # scores the test engines once
 uv run --all-extras engine-diagnostics evaluate-localization   # cylinder localization, once
+
+# Crank wheel and cylinder temperatures (data contract 1.2)
+#   MATLAB: addpath('matlab'); generate_dataset(Config="configs/core_v3.json");   % ~16 min, 4 workers
+uv run --all-extras engine-diagnostics validate-runs data/raw/core_v3
+uv run --all-extras engine-diagnostics calibrate-crosscheck     # training runs only
+uv run --all-extras engine-diagnostics evaluate-crosscheck      # acoustic vs crank vs ECU, thermal
 ```
 
 Generated data, models, and reports are excluded from Git and are reproduced by these commands; the manifest and model hashes above identify the exact versions reported.

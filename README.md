@@ -26,6 +26,18 @@ alerts every sustained fault in 10 of 12 two-fault and 4 of 4 three-fault runs;
 valve recall (0.62) and knock false alerts (0.30 per fault-free minute) remain
 weak. See PROJECT_REPORT §11.7.
 
+**Crank wheel, ECU benchmark, cylinder temperatures.** The `core_v3` dataset
+(data contract 1.2) adds two signal families to the same recordings: a 60-2
+crank trigger wheel and per-cylinder exhaust gas and head temperatures. They
+feed independent paths that confirm the acoustic alerts and name the cylinder:
+crank-speed misfire detection and an EGT/CHT cross-check. A simulated OBD-II
+misfire monitor serves as the benchmark. On held-out engines the acoustic
+misfire alert came a median 4.5 s before the ECU's type A code, and in 8 of 25
+misfire intervals the ECU had set no code by the end of the run. The ECU
+monitor cannot see knock or valve faults. Requiring the head-temperature
+confirmation cut knock false alerts from 0.30 to 0 per minute, at some cost in
+recall. See PROJECT_REPORT §11.9.
+
 ## Quick start
 
 Results and design: [PROJECT_REPORT.md](PROJECT_REPORT.md). Demo walkthrough:
@@ -99,13 +111,15 @@ command-line batch generation from a path containing an apostrophe, launch
 | `engine-diagnostics train-localizer` | Cylinder localizer (core_v2 features with the cam reference) |
 | `engine-diagnostics evaluate-localization` | One-time test-engine scoring of cylinder localization |
 | `engine-diagnostics replay <run> ... --localizer artifacts/models/cylinder_localizer.joblib` | Replay that also names the affected cylinder of each alert |
+| `engine-diagnostics calibrate-crosscheck` | Crank-speed, OBD monitor and EGT/CHT thresholds from core_v3 training runs |
+| `engine-diagnostics evaluate-crosscheck` | Acoustic vs crank vs simulated ECU misfire timing, thermal detection, fused knock experiment on test engines |
 
 Prefix each with `uv run --all-extras`.
 
 ## Structure
 
 ```text
-configs/                   mvp.json (shared settings), core_v1.json, integration_batch.json, demo_presets.json, engine_catalog.json
+configs/                   mvp.json (shared settings), core_v1/v2/v3.json, integration_batch.json, demo_presets.json, engine_catalog.json
 schemas/                   Configuration schema
 matlab/                    Generator entry points, export, validation, review plots
 matlab/sim/                Scenario sampling, crank/event model, faults, sensor and telemetry rendering

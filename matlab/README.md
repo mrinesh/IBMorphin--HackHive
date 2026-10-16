@@ -25,7 +25,7 @@ Requires Signal Processing Toolbox (`butter`, `pwelch`, `hann`).
 |---|---|
 | `load_project_config.m` | Read `mvp.json` and check sampling limits |
 | `generate_integration_batch.m` | Entry point: loop scenarios, generate, export |
-| `export_run.m` | Write `waveforms.mat` (`-v7`, with `cam_sync_s`), `telemetry.csv`, `metadata.json`, private truth |
+| `export_run.m` | Write `waveforms.mat` (`-v7`, with `cam_sync_s` and, from contract 1.2, `crank_tooth_s`), `telemetry.csv`, `metadata.json`, private truth |
 | `validate_run_matlab.m` | Lengths, dtype, clipping, firing rate vs RPM, intended fault signature |
 | `plot_run_overview.m` | Review figure (spectrograms, zooms, RPM) using evaluation truth |
 | `sim/make_streams.m` | Independent `mrg32k3a` substreams per run and purpose |
@@ -36,6 +36,8 @@ Requires Signal Processing Toolbox (`butter`, `pwelch`, `hann`).
 | `sim/apply_fault.m` | Misfire, knock-like, valve-clearance-like modifications |
 | `sim/render_sensor.m` | Audio or vibration channel from events, orders, resonance, noise |
 | `sim/render_telemetry.m` | Long-form telemetry at configured rates |
+| `sim/render_crank_teeth.m` | 60-2 crank wheel edge times: stroke-resolved torque ripple, misfire deficit, inertia, tooth error, jitter (contract 1.2) |
+| `sim/render_thermal.m` | Per-cylinder EGT/CHT from per-stroke energy, knock and valve effects, first-order lags (contract 1.2) |
 | `sim/generate_run.m` | One complete run, metadata, and truth |
 
 Events are keyed by crank angle and converted to time through the integrated
