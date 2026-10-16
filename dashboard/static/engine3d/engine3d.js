@@ -34,12 +34,12 @@ export function render(root, data) {
 }
 
 const COLORS = {
-  cyan: 0x22d3ee,
+  cyan: 0x00e5e5,
   magenta: 0xf472b6,
   violet: 0xa78bfa,
-  amber: 0xfbbf24,
-  rose: 0xfb7185,
-  green: 0x4ade80,
+  amber: 0xf59e0b,
+  rose: 0xf05252,
+  green: 0x22c55e,
   slate: 0x8b9bb4,
   steel: 0x1b2a3f,
   steelLight: 0x3a5272,
@@ -282,7 +282,7 @@ function createView(root) {
                                (Math.random() - 0.5) * amp);
 
     // Block outline color follows the model state; an active alert pulses gently.
-    tmpColor.set(t.edge_color || '#22d3ee');
+    tmpColor.set(t.edge_color || '#00e5e5');
     sim.edgeColor.lerp(tmpColor, Math.min(1, dt * 4));
     const pulse = t.alert && !still ? 0.75 + 0.25 * Math.sin(timer.getElapsed() * 4) : 0.85;
     engine.edgeMaterials.forEach((material) => {
@@ -411,7 +411,7 @@ function fallbackView(root) {
     el('rect', { x, y: 40, width: 50, height: 120, fill: 'rgba(148,163,184,0.06)',
                  stroke: 'rgba(148,163,184,0.35)' }, svg);
     el('text', { x: x + 25, y: 205, 'text-anchor': 'middle', fill: '#94a3b8',
-                 'font-size': 12, 'font-family': 'DM Sans, sans-serif' }, svg)
+                 'font-size': 12, 'font-family': 'Inter, sans-serif' }, svg)
       .textContent = `Cylinder ${k + 1}`;
     return { glow: el('rect', { x, y: 40, width: 50, height: 16, opacity: 0 }, svg),
              piston: el('rect', { x: x + 3, y: 80, width: 44, height: 26, rx: 3,
@@ -446,7 +446,7 @@ function fallbackView(root) {
     update(data) {
       target = data;
       root.setAttribute('aria-label', `Engine schematic (2D). ${data.status_text || ''}.`);
-      const color = data.edge_color || '#22d3ee';
+      const color = data.edge_color || '#00e5e5';
       block.setAttribute('stroke', color);
       pistons.forEach(({ glow }) => glow.setAttribute('fill', color));
       status.replaceChildren(
@@ -639,7 +639,7 @@ function buildEngine() {
 }
 
 function buildFloorGrid() {
-  const grid = new THREE.GridHelper(24, 48, COLORS.cyan, 0x12324a);
+  const grid = new THREE.GridHelper(24, 48, COLORS.cyan, 0x1d3a40);
   grid.material.transparent = true;
   grid.material.opacity = 0.22;
   return grid;

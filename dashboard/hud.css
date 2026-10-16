@@ -1,134 +1,192 @@
-/* Soft-UI styles for the replay dashboard. Color variables (--hud-*) are generated
-   from TOKENS in theme.py. Fonts: Sora (headings, decision title), DM Sans (all text
-   and numbers, tabular figures). */
+/* DRIVEX styles for the EngineSense replay dashboard, tuned for long viewing:
+   charcoal surfaces (not pure black), off-white text, clear surface steps, no text
+   below ~12px. Color variables (--hud-*) are generated from TOKENS in theme.py.
+   Fonts: Space Grotesk (brand, headings), Inter (UI text), JetBrains Mono (telemetry
+   and technical values, tabular figures). Cyan marks active states and key values. */
 
-/* Background: deep navy with two soft glows, no grid lines. */
-.stApp {
-  background:
-    radial-gradient(1100px 620px at 88% -12%, rgba(34, 211, 238, 0.11), transparent 62%),
-    radial-gradient(900px 560px at -12% 108%, rgba(244, 114, 182, 0.09), transparent 62%),
-    linear-gradient(180deg, #0a1020 0%, var(--hud-bg) 55%);
+:root {
+  --hud-radius: 12px;
+  --hud-mono: "JetBrains Mono", ui-monospace, monospace;
+  --hud-display: "Space Grotesk", Inter, sans-serif;
+  --hud-ease: 160ms ease;
 }
+
+.stApp { background: var(--hud-bg); line-height: 1.55; }
 [data-testid="stHeader"] { background: transparent; }
-.block-container { padding-top: 2rem; max-width: 1560px; }
+.block-container { padding-top: 3rem; max-width: 1560px; }
 
 h1, h2, h3, h4 { letter-spacing: -0.01em; }
+h3 { font-size: 1.1rem !important; font-weight: 600 !important; }
 [data-testid="stHeadingWithActionElements"] a { display: none; }
+[data-testid="stCaptionContainer"] { color: var(--hud-muted); font-size: 0.85rem; }
 
-/* Synthetic-data banner (permanent; softened, still prominent). */
-.synthetic-banner {
-  display: flex; align-items: center; gap: 0.5rem 0.75rem; flex-wrap: wrap;
-  padding: 0.55rem 1rem; border-radius: 12px;
-  background: rgba(127, 29, 29, 0.42); border: 1px solid rgba(248, 113, 113, 0.45);
-  color: #fee2e2; font-weight: 700; font-size: 0.84rem; letter-spacing: 0.04em;
+/* DRIVEX wordmark: bold, uppercase, widely spaced; DRIVE off-white, final X cyan. */
+.drivex {
+  display: inline-block; font-family: var(--hud-display); font-weight: 700;
+  font-size: 1.6rem; letter-spacing: 0.3em; line-height: 1; color: var(--hud-text);
+  margin-right: -0.3em; /* cancel the trailing letter spacing */
 }
-.synthetic-banner small { font-weight: 400; letter-spacing: 0; color: #fecaca; font-size: 0.84rem; }
+.drivex .x { color: var(--hud-cyan); }
+.drivex.small { font-size: 1.2rem; letter-spacing: 0.26em; margin-right: -0.26em; }
+.sidebar-brand { padding: 0.2rem 0 1rem; border-bottom: 1px solid var(--hud-line); margin-bottom: 0.5rem; }
+.sidebar-brand .sub { display: block; margin-top: 0.5rem; font-size: 0.8rem; color: var(--hud-dim); }
 
-/* Brand header */
-.hud-brand { display: flex; align-items: baseline; gap: 0.4rem 1rem; flex-wrap: wrap; margin: 0.6rem 0 0.8rem; }
+/* Header: wordmark | EngineSense product name and descriptor. */
+.hud-brand {
+  display: flex; align-items: center; gap: 0.6rem 1.2rem; flex-wrap: wrap;
+  margin: 0.6rem 0 1.1rem; padding-bottom: 1.1rem; border-bottom: 1px solid var(--hud-line);
+}
+.hud-brand .divider { width: 1px; height: 2.3rem; background: var(--hud-line); }
 .hud-brand h1.name {
-  margin: 0; padding: 0; line-height: 1.15;
-  font-family: Sora, sans-serif; font-weight: 700; font-size: 1.7rem; letter-spacing: -0.02em;
-  color: var(--hud-text);
+  margin: 0; padding: 0; line-height: 1.25; font-family: var(--hud-display);
+  font-weight: 600; font-size: 1.25rem; letter-spacing: 0; color: var(--hud-text);
 }
-.hud-brand h1.name .accent { color: var(--hud-cyan); }
-.hud-brand .tag { color: var(--hud-muted); font-size: 0.95rem; }
+.hud-brand .tag { color: var(--hud-muted); font-size: 0.9rem; }
 
-/* Soft cards: metrics, charts, viewport and every card built in theme.py. */
-.hud-card, [data-testid="stMetric"], [data-testid="stPlotlyChart"] {
-  background: linear-gradient(180deg, rgba(22, 32, 52, 0.86), rgba(13, 20, 36, 0.86));
-  border: 1px solid rgba(148, 163, 184, 0.13); border-radius: 16px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 14px 34px -20px rgba(0, 0, 0, 0.75);
+/* Synthetic-data notice: calm but always visible. */
+.synthetic-banner {
+  display: flex; align-items: center; gap: 0.35rem 0.75rem; flex-wrap: wrap;
+  padding: 0.6rem 1rem; border-radius: var(--hud-radius);
+  background: var(--hud-surface); border: 1px solid var(--hud-line);
+  border-left: 3px solid var(--hud-amber);
+  color: var(--hud-text); font-weight: 600; font-size: 0.82rem; letter-spacing: 0.04em;
 }
-[data-testid="stMetric"] { padding: 0.7rem 0.9rem; }
+.synthetic-banner small { font-weight: 400; letter-spacing: 0; color: var(--hud-muted); font-size: 0.85rem; }
+
+/* Surfaces: metrics, charts and every card built in theme.py. */
+.hud-card, [data-testid="stMetric"], [data-testid="stPlotlyChart"] {
+  background: var(--hud-surface); border: 1px solid var(--hud-line);
+  border-radius: var(--hud-radius); transition: border-color var(--hud-ease);
+}
+[data-testid="stMetric"]:hover, .hud-card.tele:hover { border-color: #3a4452; }
+[data-testid="stMetric"] { padding: 0.8rem 1rem; }
 [data-testid="stMetricLabel"] p {
-  font-size: 0.8rem; font-weight: 500; color: var(--hud-muted); white-space: normal;
-  line-height: 1.3;
+  font-size: 0.82rem; font-weight: 500; color: var(--hud-muted); white-space: normal;
+  line-height: 1.35;
 }
 [data-testid="stMetricValue"] {
-  font-weight: 600; font-variant-numeric: tabular-nums; font-size: 1.1rem; color: var(--hud-text);
+  font-weight: 600; font-variant-numeric: tabular-nums;  /* Inter: fits narrow cards */
+  font-size: 1.15rem; color: var(--hud-text);
 }
-[data-testid="stMetricValue"] > div { overflow-wrap: anywhere; white-space: normal; }
-[data-testid="stPlotlyChart"] { padding: 0.4rem; }
+[data-testid="stMetricValue"] > div, [data-testid="stMetricValue"] > div * {
+  overflow: visible !important; text-overflow: clip !important; white-space: normal !important;
+  overflow-wrap: anywhere;
+}
+[data-testid="stPlotlyChart"] { padding: 0.5rem; }
 
-/* Alerts: keep Streamlit semantics (role=alert); rounded, soft emphasis. */
-[data-testid="stAlert"] > div { border-radius: 14px; }
-[data-testid="stAlertContentError"] { font-weight: 600; }
+/* Status banners: surface color, colored left rule and readable tinted text. */
+[data-testid="stAlert"] > div {
+  border-radius: var(--hud-radius); background: var(--hud-surface) !important;
+  border: 1px solid var(--hud-line); border-left-width: 3px;
+  transition: border-color var(--hud-ease);
+}
 [data-testid="stAlert"]:has([data-testid="stAlertContentError"]) > div {
-  border: 1px solid rgba(248, 113, 113, 0.55);
-  box-shadow: 0 10px 30px -14px rgba(248, 113, 113, 0.55);
-  animation: hud-alert-in 420ms ease-out 1;
+  border-left-color: var(--hud-rose); background: #22181b !important;
+  animation: hud-alert-in 360ms ease-out 1;
 }
-@keyframes hud-alert-in {
-  from { box-shadow: 0 10px 46px -6px rgba(248, 113, 113, 0.75); }
-}
+[data-testid="stAlert"]:has([data-testid="stAlertContentSuccess"]) > div { border-left-color: var(--hud-green); }
+[data-testid="stAlert"]:has([data-testid="stAlertContentWarning"]) > div { border-left-color: var(--hud-amber); }
+[data-testid="stAlert"]:has([data-testid="stAlertContentInfo"]) > div { border-left-color: var(--hud-cyan); }
+[data-testid="stAlertContentError"] { font-weight: 600; color: #fecaca; }
+[data-testid="stAlertContentSuccess"] { color: #bbf7d0; }
+[data-testid="stAlertContentWarning"] { color: #fde68a; }
+[data-testid="stAlertContentInfo"] { color: var(--hud-text); }
+@keyframes hud-alert-in { from { border-color: var(--hud-rose); } }
 
-/* Tabs as pills */
-[data-testid="stTabs"] [role="tablist"] { gap: 0.4rem; border-bottom: none; }
-[data-testid="stTabs"] [data-baseweb="tab-highlight"],
+/* Tabs: readable inactive labels, cyan underline on the active tab. */
+[data-testid="stTabs"] [role="tablist"] { gap: 0.25rem; border-bottom: 1px solid var(--hud-line); }
 [data-testid="stTabs"] [data-baseweb="tab-border"] { display: none; }
+[data-testid="stTabs"] [data-baseweb="tab-highlight"] { background: var(--hud-cyan); height: 2px; }
 [data-testid="stTabs"] [role="tab"] {
-  min-height: 40px; padding: 0 1rem; border-radius: 999px; font-weight: 600;
-  border: 1px solid rgba(148, 163, 184, 0.16); background: rgba(17, 26, 44, 0.7);
+  min-height: 44px; padding: 0 1rem; font-weight: 500; color: var(--hud-muted);
+  background: transparent; transition: color var(--hud-ease);
 }
-[data-testid="stTabs"] [role="tab"][aria-selected="true"] {
-  background: rgba(34, 211, 238, 0.14); border-color: rgba(34, 211, 238, 0.55);
-  color: var(--hud-cyan);
+[data-testid="stTabs"] [role="tab"] p { font-size: 0.92rem; }
+[data-testid="stTabs"] [role="tab"]:hover { color: var(--hud-text); }
+[data-testid="stTabs"] [role="tab"][aria-selected="true"] { color: var(--hud-cyan-soft); }
+[data-testid="stTabs"] [role="tabpanel"] { animation: hud-fade 180ms ease-out; }
+@keyframes hud-fade { from { opacity: 0; transform: translateY(3px); } }
+
+/* Buttons and form controls: 1px borders, cyan hover and focus. */
+.stButton > button, .stFormSubmitButton > button {
+  border-radius: 8px; border: 1px solid var(--hud-line); background: var(--hud-elevated);
+  color: var(--hud-text); font-weight: 500; min-height: 42px;
+  transition: border-color var(--hud-ease), color var(--hud-ease), background var(--hud-ease);
 }
+.stButton > button:hover, .stFormSubmitButton > button:hover {
+  border-color: var(--hud-cyan); color: var(--hud-cyan-hover);
+}
+.stButton > button[kind="primary"], .stFormSubmitButton > button[kind="primary"] {
+  background: var(--hud-cyan); border-color: var(--hud-cyan); color: #06171a; font-weight: 600;
+}
+.stButton > button[kind="primary"]:hover, .stFormSubmitButton > button[kind="primary"]:hover {
+  background: var(--hud-cyan-hover); border-color: var(--hud-cyan-hover); color: #06171a;
+}
+[data-baseweb="select"] > div, [data-baseweb="input"] > div, [data-testid="stNumberInputContainer"] {
+  background: var(--hud-surface); border-color: var(--hud-line);
+}
+[data-baseweb="popover"] [role="listbox"] { background: var(--hud-elevated); }
+[data-testid="stSidebar"] { border-right: 1px solid var(--hud-line); }
+[data-testid="stSidebar"] h2 { font-size: 1rem; font-weight: 600; padding: 1rem 0 0.25rem; }
+[data-testid="stSidebar"] h3 { font-size: 0.95rem !important; }
+[data-testid="stExpander"] details { border-color: var(--hud-line); border-radius: var(--hud-radius); }
+[data-testid="stTooltipContent"] { background: var(--hud-elevated); border: 1px solid var(--hud-line); }
 
 /* Shared pieces */
-.hud-card { padding: 1rem 1.1rem; }
+.hud-card { padding: 1.05rem 1.2rem; }
 .hud-icon {
   display: inline-block; flex-shrink: 0; vertical-align: -3px; background: currentColor;
   -webkit-mask: var(--hud-icon) center / contain no-repeat;
   mask: var(--hud-icon) center / contain no-repeat;
 }
-.hud-label { font-size: 0.8rem; font-weight: 500; color: var(--hud-muted); }
-.hud-num { font-variant-numeric: tabular-nums; font-weight: 600; }
+.hud-label { font-size: 0.82rem; font-weight: 500; color: var(--hud-muted); }
+.hud-num { font-family: var(--hud-mono); font-variant-numeric: tabular-nums; font-weight: 500; }
 
 /* Diagnosis card */
-.status { display: grid; gap: 0.85rem; }
-.status-head { display: flex; align-items: center; gap: 0.85rem; }
+.status { display: grid; gap: 0.95rem; }
+.status-head { display: flex; align-items: center; gap: 0.9rem; }
 .status-badge {
-  display: grid; place-items: center; width: 48px; height: 48px; border-radius: 14px;
-  background: color-mix(in srgb, currentColor 16%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 35%, transparent);
+  display: grid; place-items: center; width: 48px; height: 48px; border-radius: 12px;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  border: 1px solid color-mix(in srgb, currentColor 40%, transparent);
+  transition: color var(--hud-ease);
 }
 .status-title {
-  font-family: Sora, sans-serif; font-weight: 700; font-size: 1.4rem; letter-spacing: -0.01em;
-  line-height: 1.15;
+  font-family: var(--hud-display); font-weight: 700; font-size: 1.55rem; letter-spacing: -0.01em;
+  line-height: 1.2; transition: color var(--hud-ease);
 }
-.status-sub { color: var(--hud-muted); font-size: 0.9rem; }
-.status-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.7rem 1rem; }
+.status-sub { color: var(--hud-muted); font-size: 0.92rem; }
+.status-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.8rem 1.1rem; }
 .status-grid .hud-num { font-size: 1.1rem; color: var(--hud-text); }
 .bar {
-  height: 6px; border-radius: 999px; background: rgba(148, 163, 184, 0.16); overflow: hidden;
-  margin-top: 6px; position: relative;
+  height: 5px; border-radius: 999px; background: var(--hud-line); overflow: hidden;
+  margin-top: 7px; position: relative;
 }
-.bar > i { display: block; height: 100%; border-radius: 999px; background: var(--hud-cyan); }
+.bar > i { display: block; height: 100%; border-radius: 999px; background: var(--hud-cyan); transition: width 300ms ease; }
 .bar > b {
-  position: absolute; top: -2px; width: 2px; height: 10px; border-radius: 1px;
-  background: var(--hud-text); opacity: 0.75;
+  position: absolute; top: -2px; width: 2px; height: 9px; border-radius: 1px;
+  background: var(--hud-text); opacity: 0.85;
 }
 .pill {
-  display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.25rem 0.7rem;
-  border-radius: 999px; font-size: 0.82rem; font-weight: 600;
-  background: color-mix(in srgb, currentColor 13%, transparent);
+  display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.28rem 0.7rem;
+  border-radius: 8px; font-size: 0.84rem; font-weight: 600;
+  border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+  background: color-mix(in srgb, currentColor 10%, transparent);
 }
 .status-note {
-  color: var(--hud-muted); font-size: 0.8rem; border-top: 1px solid rgba(148, 163, 184, 0.12);
-  padding-top: 0.7rem;
+  color: var(--hud-dim); font-size: 0.82rem; border-top: 1px solid var(--hud-line);
+  padding-top: 0.75rem; line-height: 1.5;
 }
 
 /* Evidence strength, why and background sections */
-.strength { display: grid; gap: 0.45rem; }
+.strength { display: grid; gap: 0.5rem; }
 .strength-head { display: flex; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; }
-.strength-label { font-size: 0.82rem; font-weight: 700; color: var(--strength); }
+.strength-label { font-size: 0.84rem; font-weight: 600; color: var(--strength); }
 .segments { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
-.segments i { height: 8px; border-radius: 999px; background: rgba(148, 163, 184, 0.16); }
+.segments i { height: 6px; border-radius: 999px; background: var(--hud-line); }
 .segments i.on { background: var(--strength); }
-.strength ul, .why ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 0.3rem; }
-.strength li { display: flex; align-items: center; gap: 0.45rem; font-size: 0.86rem; }
+.strength ul, .why ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 0.35rem; }
+.strength li { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; }
 .strength li.met { color: var(--hud-text); }
 .strength li.met .hud-icon { color: var(--hud-green); }
 .strength li.unmet { color: var(--hud-muted); }
@@ -138,49 +196,52 @@ h1, h2, h3, h4 { letter-spacing: -0.01em; }
 }
 .why ol { counter-reset: why; }
 .why li {
-  counter-increment: why; font-size: 0.88rem; line-height: 1.45; padding-left: 1.7rem;
+  counter-increment: why; font-size: 0.9rem; line-height: 1.55; padding-left: 1.8rem;
   position: relative;
 }
 .why li::before {
-  content: counter(why); position: absolute; left: 0; top: 0.1rem; width: 1.2rem; height: 1.2rem;
-  border-radius: 999px; font-size: 0.72rem; font-weight: 700; line-height: 1.2rem;
-  text-align: center; color: var(--hud-cyan); background: rgba(34, 211, 238, 0.14);
+  content: counter(why); position: absolute; left: 0; top: 0.12rem; width: 1.3rem; height: 1.3rem;
+  border-radius: 6px; font-family: var(--hud-mono); font-size: 0.75rem; font-weight: 600;
+  line-height: 1.3rem; text-align: center; color: var(--hud-cyan-soft);
+  background: var(--hud-elevated); border: 1px solid var(--hud-line);
 }
-.why .z { color: var(--hud-muted); font-size: 0.8rem; white-space: nowrap; }
-.about p { margin: 0.25rem 0 0; font-size: 0.88rem; line-height: 1.5; }
-.about .checks { margin-top: 0.35rem; font-size: 0.84rem; color: var(--hud-muted); }
+.why .z { font-family: var(--hud-mono); color: var(--hud-dim); font-size: 0.8rem; white-space: nowrap; }
+.about p { margin: 0.3rem 0 0; font-size: 0.9rem; line-height: 1.6; color: var(--hud-muted); }
+.about .checks { margin-top: 0.4rem; font-size: 0.86rem; color: var(--hud-muted); line-height: 1.55; }
 .about .checks b { color: var(--hud-text); font-weight: 600; }
 
 /* Telemetry cards */
-.tele-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.75rem; }
-.tele { padding: 0.75rem 0.9rem 0.6rem; min-width: 0; }
+.tele-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.7rem; margin: 0.5rem 0 0.7rem; }
+.tele { padding: 0.8rem 0.95rem 0.6rem; min-width: 0; }
 .tele .row { display: flex; align-items: center; justify-content: space-between; gap: 0.4rem; }
 .tele .val {
-  font-variant-numeric: tabular-nums; font-weight: 600; font-size: 1.3rem; color: var(--hud-text);
-  white-space: nowrap;
+  font-family: var(--hud-mono); font-variant-numeric: tabular-nums; font-weight: 500;
+  font-size: 1.4rem; color: var(--hud-text); white-space: nowrap; margin-top: 0.2rem;
 }
-.tele .unit { color: var(--hud-muted); font-size: 0.8rem; font-weight: 500; margin-left: 0.2rem; }
+.tele .unit { font-family: Inter, sans-serif; color: var(--hud-dim); font-size: 0.8rem; font-weight: 500; margin-left: 0.25rem; }
 .tele .spark {
-  display: block; width: 100%; height: 28px; margin-top: 0.3rem;
+  display: block; width: 100%; height: 28px; margin-top: 0.35rem;
   background: no-repeat center / 100% 100%;
 }
 .fresh {
-  display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.74rem; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.76rem; font-weight: 500;
   white-space: nowrap;
 }
 .fresh::before { content: ""; width: 7px; height: 7px; border-radius: 999px; background: currentColor; }
-.fresh.ok { color: var(--hud-green); }
-.fresh.stale { color: var(--hud-amber); }
-.fresh.none { color: var(--hud-muted); }
-
-/* Sidebar section headings are h2 (page h1 is the brand); keep them compact. */
-[data-testid="stSidebar"] h2 { font-size: 1.1rem; padding: 0.5rem 0 0.25rem; }
+.fresh.ok { color: #4ade80; }
+.fresh.stale { color: #fbbf24; }
+.fresh.none { color: var(--hud-dim); }
 
 @media (max-width: 1100px) { .tele-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 640px) {
   .tele-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .hud-brand h1.name { font-size: 1.35rem; }
+  .drivex { font-size: 1.3rem; letter-spacing: 0.24em; margin-right: -0.24em; }
+  .hud-brand { gap: 0.4rem 0.8rem; }
+  .hud-brand .divider { display: none; }
+  .hud-brand .product { flex-basis: 100%; }
   .block-container { padding-left: 1rem; padding-right: 1rem; }
+  [data-testid="stTabs"] [role="tablist"] { overflow-x: auto; scrollbar-width: none; }
+  [data-testid="stTabs"] [role="tab"] { padding: 0 0.7rem; white-space: nowrap; }
   /* Readout metrics: two per row on phones instead of seven stacked rows. */
   .st-key-readout [data-testid="stHorizontalBlock"] {
     flex-direction: row !important; flex-wrap: wrap; gap: 0.5rem;

@@ -104,7 +104,7 @@ LAB_SENSORS = {"audio": "Microphone (audio)", "vibration": "Accelerometer (vibra
                "rpm": "RPM telemetry"}
 STAGE_COLORS = dict(zip(STAGES, ("#2ca02c", "#ff9f1c", "#d62728", "#bbbbbb"), strict=True))
 
-st.set_page_config(page_title="ENGINE//SENSE · replay", layout="wide",
+st.set_page_config(page_title="DRIVEX · EngineSense", layout="wide",
                    initial_sidebar_state="auto")
 theme.register_plotly_template()
 
@@ -316,6 +316,8 @@ def lab_controls() -> None:
 
 
 with st.sidebar:
+    st.html(f'<div class="sidebar-brand">{theme.wordmark_html("small")}'
+            '<span class="sub">EngineSense · diagnostics</span></div>')
     modes = ["Recorded replay"] + (["Fault-injection lab"] if lab_available() else [])
     mode = st.radio("Mode", modes, horizontal=True)
     lab_mode = mode == "Fault-injection lab"
@@ -665,7 +667,7 @@ def telemetry_cards(t_now: float) -> list[dict]:
 
 def label(class_name: str | None) -> str:
     """Readable class name (e.g. knock_like -> Knock-like) for display only."""
-    return theme.CLASS_META.get(class_name, {}).get("label", class_name or "-")
+    return explain.names(class_name)
 
 
 @st.fragment(run_every=TICK_S)
@@ -724,7 +726,7 @@ def live_view():
     if multi:
         fault_cols = st.columns(len(model.fault_classes))
         for col, fault in zip(fault_cols, model.fault_classes, strict=True):
-            col.metric(f"P({label(fault)})",
+            col.metric(f"P({fault})",
                        f"{latest['probabilities'][fault]:.2f}" if has_probability else "-",
                        help=f"Detected at ≥ {model.thresholds[fault]:.2f}; calibrated on "
                             "separate calibration engines (synthetic).")

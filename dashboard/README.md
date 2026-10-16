@@ -6,7 +6,7 @@ uv run --all-extras streamlit run dashboard/app.py
 
 `.streamlit/config.toml` keeps the server on `localhost`, disables usage
 statistics, sets the dark soft-UI theme, and turns on static serving for
-`dashboard/static` (bundled DM Sans and Sora fonts, OFL; and
+`dashboard/static` (bundled Space Grotesk, Inter and JetBrains Mono fonts, OFL; and
 Three.js 0.185.1, MIT), so the dashboard needs no internet connection. Restart
 the server after editing `theme.py`, `explain.py` or `engine3d.py`: a running
 server keeps the modules it already imported. The app lists every dataset whose

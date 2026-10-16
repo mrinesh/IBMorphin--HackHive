@@ -92,10 +92,24 @@ def evidence_sentence(row: dict) -> str:
             f"(z = {row['z']:+.1f})")
 
 
+def names(classes: str | None) -> str:
+    """Readable name for a class or a v2 '+'-joined fault set (misfire+knock_like)."""
+    if not classes:
+        return "-"
+    return " + ".join(CLASS_META.get(c, {"label": c})["label"] for c in classes.split("+"))
+
+
 def uncertain_reason(record: dict[str, Any], model) -> str:
     """Why the accepted decision is 'uncertain', from the same rules the model applies."""
     predicted = record.get("predicted")
     anomalous = bool(record.get("anomalous"))
+    if hasattr(model, "fault_classes"):  # v2: one detector and threshold per fault
+        if record.get("uncertain_faults"):
+            return ("probability is close to the detection threshold for "
+                    + names("+".join(record["uncertain_faults"])))
+        if anomalous:
+            return "no fault detector fired, but the anomaly score is above its threshold"
+        return "decision not accepted"
     if "probability" in record:
         if record["probability"] < model.probability_min:
             return (f"classifier confidence {record['probability']:.2f} is below the "
@@ -126,8 +140,17 @@ def evidence_strength(record: dict[str, Any], model) -> dict[str, Any] | None:
     if record["quality"] != "ok" or not record.get("predicted"):
         return None
     predicted = record["predicted"]
-    name = CLASS_META.get(predicted, {"label": predicted})["label"]
-    if "probability" in record:
+    name = names(predicted)
+    if hasattr(model, "fault_classes"):  # v2: every detected fault must clear its own threshold
+        faults = record["detected"] or list(model.fault_classes)
+        probs = record["probabilities"]
+        if record["detected"]:
+            confident = all(probs[f] >= model.thresholds[f] for f in faults)
+            first = "Each detected fault's probability ≥ its threshold"
+        else:
+            confident = all(probs[f] < model.thresholds[f] for f in faults)
+            first = "Every fault probability below its threshold"
+    elif "probability" in record:
         confident = record["probability"] >= model.probability_min
         first = (f"Confidence {record['probability']:.2f} "
                  f"{'≥' if confident else '<'} {model.probability_min:.2f}")
@@ -143,7 +166,9 @@ def evidence_strength(record: dict[str, Any], model) -> dict[str, Any] | None:
     else:
         criteria = [(first, confident),
                     ("Anomaly score above its threshold", anomalous),
-                    (f"Alert confirmed for {name}", record.get("alert") == predicted)]
+                    (f"Alert confirmed for {name}",
+                     set(predicted.split("+"))
+                     <= set(record.get("alerts") or [record.get("alert")]))]
     level = sum(ok for _, ok in criteria)
     return {"for": name, "level": level, "label": STRENGTH_LABELS[level],
             "criteria": criteria}
@@ -161,15 +186,23 @@ def diagnose(record: dict[str, Any] | None, model, confirm_updates: int) -> dict
     quality = record["quality"]
     accepted = record["accepted"]
     meta = class_meta(accepted, quality)
+    if quality == "ok" and "+" in accepted:  # v2 fault set: first fault's style, full name
+        meta = class_meta(accepted.split("+")[0]) | {"label": names(accepted)}
     if quality != "ok":
         subtitle = f"No prediction: {_quality_text(quality)}. Alert state is held."
     elif accepted == "uncertain":
         subtitle = f"Not accepted: {uncertain_reason(record, model)}."
     else:
-        subtitle = f"Classifier: {CLASS_META.get(record['predicted'], meta)['label']}"
+        subtitle = f"Classifier: {names(record['predicted'])}"
 
     metrics = []
-    if "probability" in record and quality == "ok":
+    if hasattr(model, "fault_classes") and quality == "ok":
+        for fault, p in record["probabilities"].items():
+            threshold = model.thresholds[fault]
+            metrics.append({"label": f"P({names(fault)})", "value": f"{p:.2f}",
+                            "fraction": p, "marker": threshold,
+                            "color": TOKENS["cyan"] if p >= threshold else TOKENS["slate"]})
+    elif "probability" in record and quality == "ok":
         p_min = model.probability_min
         metrics.append({"label": "Calibrated confidence", "value": f"{record['probability']:.2f}",
                         "fraction": record["probability"], "marker": p_min,
@@ -206,8 +239,10 @@ def diagnose(record: dict[str, Any] | None, model, confirm_updates: int) -> dict
                  "checks": CLASS_TEXT[topic][1]}
 
     alert = record.get("alert")
+    if isinstance(confirm_updates, dict):  # v2: per-fault confirmation counts
+        confirm_updates = max(confirm_updates[f] for f in alert.split("+")) if alert else 0
     return {"meta": meta, "subtitle": subtitle, "metrics": metrics,
-            "alert": (f"{CLASS_META.get(alert, {'label': alert})['label']} "
+            "alert": (f"{names(alert)} "
                       f"(confirmed by {confirm_updates} consistent updates)") if alert else None,
             "model_version": version, "note": MODEL_NOTE,
             "strength": evidence_strength(record, model), "why": why, "why_ref": why_ref,
