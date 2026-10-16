@@ -44,3 +44,6 @@ reports/generated/*
 
 # Graphify knowledge-graph output (regenerate locally with /graphify)
 graphify-out/
+
+# Per-engine history saved by the dashboard (engine profiles; see docs/DATA_CONTRACT.md)
+data/engine_history/
