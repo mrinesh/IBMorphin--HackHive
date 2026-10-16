@@ -13,6 +13,15 @@ Approximation, stated in the dashboard: per-engine sensor gain and resonance
 variation are not reproduced, and a misfire's RPM dip does not re-time later
 events. Valve-clearance injection is not offered because its signature (impact
 timing and shape changes) needs the full generator.
+
+Base runs with data contract 1.2 streams (crank wheel, cylinder temperatures)
+and generator_params with crank/thermal blocks are changed consistently: an
+injected misfire slows the crank through its stroke and recovers as in
+matlab/sim/render_crank_teeth.m (slow drift removed, so the wheel stays
+phase-locked to the unchanged acoustic event times), and the affected
+cylinder's EGT/CHT relax toward its lower combustion energy; knock raises CHT
+and lowers EGT slightly (matlab/sim/render_thermal.m). The crank and thermal
+sensors can also fail.
 """
 
 import copy
@@ -27,7 +36,9 @@ from scipy.signal import butter, lfilter
 from engine_diagnostics.data.run_io import RunBundle
 
 LAB_FAULTS = ("none", "misfire", "knock_like")
-SENSORS = ("audio", "vibration", "rpm")
+SENSORS = ("audio", "vibration", "rpm", "crank", "thermal")
+SHAPE_PEAK = 0.10549  # peak of the normalized stroke energy shape (render_crank_teeth.m)
+THERMAL_GRID_HZ = 100.0
 CYLINDERS = (1, 2, 3, 4)
 
 
@@ -87,12 +98,17 @@ def build_lab_bundle(bundle: RunBundle, truth: dict, settings: LabSettings,
     log = InjectionLog(lines=[f"Base recording {bundle.run_id} ({truth['engine_id']}), healthy"])
     sensors = generator["sensors"]
 
+    teeth = None if bundle.crank_tooth_s is None else bundle.crank_tooth_s.copy()
     if settings.fault != "none":
         transients, rpm_dips, times = _fault_events(truth, settings, generator, telemetry, rng)
         for m in waves:
             delta = _render(transients, sensors[m], generator, rates[m], starts[m],
                             waves[m].size, m)
             waves[m] += delta
+        if teeth is not None and rpm_dips and "crank" in generator:
+            teeth = _retime_teeth(teeth, transients, telemetry, generator, duration)
+        if "thermal" in generator and "egt_cyl1" in set(telemetry["signal"]):
+            telemetry = _shift_temperatures(telemetry, transients, settings, generator)
         if rpm_dips:
             telemetry = _apply_rpm_dips(telemetry, rpm_dips, generator)
         log.fault_interval = (settings.onset_s, duration)
@@ -116,6 +132,13 @@ def build_lab_bundle(bundle: RunBundle, truth: dict, settings: LabSettings,
         if sensor == "rpm":
             gone = (telemetry["signal"] == "rpm") & (telemetry["t_s"] >= settings.fail_s)
             telemetry = telemetry.loc[~gone].reset_index(drop=True)
+        elif sensor == "crank":
+            if teeth is not None:
+                teeth = teeth[teeth < settings.fail_s]
+        elif sensor == "thermal":
+            gone = (telemetry["signal"].str.match(r"^(egt|cht)_cyl")
+                    & (telemetry["t_s"] >= settings.fail_s))
+            telemetry = telemetry.loc[~gone].reset_index(drop=True)
         else:
             first = max(0, round((settings.fail_s - starts[sensor]) * rates[sensor]))
             waves[sensor][first:] = np.nan
@@ -133,7 +156,8 @@ def build_lab_bundle(bundle: RunBundle, truth: dict, settings: LabSettings,
                     audio_fs_hz=bundle.audio_fs_hz, vibration_fs_hz=bundle.vibration_fs_hz,
                     audio_t0_s=bundle.audio_t0_s, vibration_t0_s=bundle.vibration_t0_s,
                     telemetry=telemetry, metadata=metadata,
-                    cam_sync_s=None if bundle.cam_sync_s is None else bundle.cam_sync_s.copy())
+                    cam_sync_s=None if bundle.cam_sync_s is None else bundle.cam_sync_s.copy(),
+                    crank_tooth_s=teeth)
     return lab, log
 
 
@@ -174,6 +198,93 @@ def _fault_events(truth, settings, generator, telemetry, rng):
             transients.append(("knock_burst", e["time_s"] + delay_s, intensity, freq, tau))
             times.append(e["time_s"] + delay_s)
     return transients, dips, times
+
+
+def _retime_teeth(edges, transients, telemetry, generator, duration) -> np.ndarray:
+    """Slow the crank through each injected misfire's stroke, then let it recover.
+
+    Same deficit as render_crank_teeth.m: the stroke loses depth / SHAPE_PEAK
+    times the firing ripple, ramping over the stroke and recovering with the
+    time constant that makes the lost angle equal the generator's smooth RPM
+    dip. Edge times shift by the integral of (speed deficit / speed); the slow
+    part of that shift is removed so later teeth stay in phase with the
+    recorded acoustic events (as the generator removes its residual drift).
+    """
+    c, dip = generator["crank"], generator["faults"]["misfire"]
+    rpm_at, load_at = _interp_signal(telemetry, "rpm"), _interp_signal(telemetry, "load")
+    t = np.arange(0.0, duration + 0.01, 1e-4)
+    deficit = np.zeros(t.size)
+    for item in transients:
+        if item[0] != "combustion":
+            continue
+        _, start, scale, _ = item
+        depth = -scale  # (residual - 1) x recorded intensity, about -(1 - residual)
+        rpm = max(rpm_at(start), 1.0)
+        gain = (c["gas_ripple_rpm_ref"] * c["reference_rpm"] / rpm
+                * (0.5 + load_at(start)) / (0.5 + c["reference_load"]))
+        drop = gain * depth / SHAPE_PEAK
+        stroke_s = 30.0 / rpm
+        area = dip["rpm_dip_rpm"] * depth * dip["rpm_dip_sigma_s"] * np.sqrt(2 * np.pi)
+        tau = max(area / drop - stroke_s / 2, c["min_recovery_s"])
+        rel = t - start
+        ramp = (rel >= 0) & (rel < stroke_s)
+        deficit[ramp] += drop * (1 - np.cos(np.pi * rel[ramp] / stroke_s)) / 2
+        after = (rel >= stroke_s) & (rel < stroke_s + 10 * tau)
+        deficit[after] += drop * np.exp(-(rel[after] - stroke_s) / tau)
+    speed = np.array([max(rpm_at(x), 1.0) for x in t[::100]])
+    speed = np.interp(t, t[::100], speed)
+    lag = np.cumsum(deficit / speed) * 1e-4  # extra time to turn the same angle
+    window = max(3, int(round(c["drift_window_s"] / 1e-4)))
+    kernel = np.ones(window) / window
+    padded = np.pad(lag, window // 2, mode="edge")
+    lag = lag - np.convolve(padded, kernel, mode="same")[window // 2:window // 2 + lag.size]
+    shifted = edges + np.interp(edges, t, lag)
+    resolution = 1e-6
+    shifted = np.round(shifted / resolution) * resolution
+    return np.sort(shifted[(shifted >= 0) & (shifted < duration)])
+
+
+def _shift_temperatures(telemetry, transients, settings, generator) -> pd.DataFrame:
+    """Change the injected cylinder's EGT/CHT as render_thermal.m would.
+
+    The generator's target is linear in each stroke's energy, so the change is
+    a lagged, held per-stroke term applied to the recorded readings: a misfired
+    stroke removes depth x (reading - dead temperature); a knocked stroke adds
+    knock_cht_rise_c x intensity to CHT and removes knock_egt_drop_c x
+    intensity from EGT.
+    """
+    p = generator["thermal"]
+    cyl = settings.cylinder
+    t = np.arange(0.0, telemetry["t_s"].max() + 1.0, 1 / THERMAL_GRID_HZ)
+    misfire, knock = np.zeros(t.size), np.zeros(t.size)
+    strokes = sorted({round(item[1], 6) for item in transients})
+    for item in transients:
+        values = misfire if item[0] == "combustion" else knock
+        amount = -item[2] if item[0] == "combustion" else item[2]
+        start = item[1]
+        later = [s for s in strokes if s > start + 1e-3]
+        # Held until the cylinder's next stroke (two crank revolutions later).
+        period = 120.0 / max(_interp_signal(telemetry, "rpm")(start), 1.0)
+        end = min(later[0], start + period) if later else start + period
+        values[(t >= start) & (t < end)] = amount
+    telemetry = telemetry.copy()
+    for kind, tau, dead in (("egt", p["egt_tau_s"], p["egt_dead_c"]),
+                            ("cht", p["cht_tau_s"], p["cht_dead_c"])):
+        rows = (telemetry["signal"] == f"{kind}_cyl{cyl}") & (telemetry["valid"] == 1)
+        if not rows.any():
+            continue
+        a = 1 - np.exp(-1 / (THERMAL_GRID_HZ * tau))
+        held_misfire = lfilter([a], [1, a - 1], misfire)
+        held_knock = lfilter([a], [1, a - 1], knock)
+        times = telemetry.loc[rows, "t_s"].to_numpy()
+        values = telemetry.loc[rows, "value"].to_numpy(dtype=float)
+        change = -(values - dead) * np.interp(times, t, held_misfire)
+        if kind == "egt":
+            change -= p["knock_egt_drop_c"] * np.interp(times, t, held_knock)
+        else:
+            change += p["knock_cht_rise_c"] * np.interp(times, t, held_knock)
+        telemetry.loc[rows, "value"] = (values + change).round(1)
+    return telemetry
 
 
 def _render(transients, sensor, generator, fs, t0, n, modality) -> np.ndarray:

@@ -15,6 +15,8 @@ OPTIONAL_DEPENDENCIES = (
     "numpy", "scipy", "pandas", "pyarrow", "scikit-learn", "streamlit", "plotly"
 )
 LOCALIZER_PATH = Path("artifacts/models/cylinder_localizer.joblib")
+CRANK_PATH = Path("artifacts/models/crank_monitor.json")
+THERMAL_PATH = Path("artifacts/models/thermal_monitor.json")
 WORKSPACE_DIRECTORIES = (
     "matlab", "configs", "schemas", "data/raw", "data/processed", "evaluation_truth",
     "artifacts/models", "artifacts/logs", "reports/generated", "dashboard", "docs", "tests",
@@ -398,6 +400,92 @@ def _evaluate_multi(args, config: dict) -> int:
     return 0
 
 
+def _calibrate_crosscheck(args, config: dict) -> int:
+    try:
+        from engine_diagnostics.crosscheck_evaluation import calibrate_crank, calibrate_thermal
+    except ImportError as error:
+        print(f"calibrate-crosscheck needs the analysis extra ({error.name} missing)",
+              file=sys.stderr)
+        return 1
+    try:
+        crank = calibrate_crank(args.raw_dir, args.truth_dir, config)
+        thermal = calibrate_thermal(args.raw_dir, args.truth_dir, config)
+    except ValueError as error:
+        print(f"Calibration failed: {error}", file=sys.stderr)
+        return 1
+    crank.save(args.crank)
+    thermal.save(args.thermal)
+    notes = crank.training
+    print(f"{crank.model_version}: {len(notes['runs'])} training runs without misfire, "
+          f"{notes['healthy_strokes']} strokes, {notes['healthy_windows']} windows")
+    for lo, hi, value, n in zip(crank.rpm_bin_edges[:-1], crank.rpm_bin_edges[1:],
+                                crank.stroke_thresholds, notes["strokes_per_bin"], strict=True):
+        print(f"  OBD stroke threshold {lo:5.0f}-{hi:5.0f} rpm: {value:9.1f} rad^2/s^2 "
+              f"({n} strokes)")
+    print(f"  crank detector cylinder threshold {crank.cylinder_threshold}")
+    print(f"{thermal.model_version}: {len(thermal.training['runs'])} fault-free training runs | "
+          f"healthy spread {thermal.spread_c} degC | z thresholds {thermal.thresholds}")
+    print(f"models -> {args.crank}, {args.thermal}")
+    return 0
+
+
+def _evaluate_crosscheck(args, config: dict) -> int:
+    try:
+        import joblib
+
+        from engine_diagnostics.crosscheck_evaluation import crosscheck_benchmark
+        from engine_diagnostics.models.obd_misfire import CrankCalibration
+        from engine_diagnostics.runtime.thermal import ThermalCalibration
+    except ImportError as error:
+        print(f"evaluate-crosscheck needs the analysis extra ({error.name} missing)",
+              file=sys.stderr)
+        return 1
+    for path in (args.model, args.crank, args.thermal):
+        if not path.is_file():
+            print(f"{path} not found", file=sys.stderr)
+            return 1
+    localizer = joblib.load(args.localizer) if args.localizer.is_file() else None
+    report = crosscheck_benchmark(joblib.load(args.model), args.raw_dir, args.truth_dir, config,
+                                  CrankCalibration.load(args.crank),
+                                  ThermalCalibration.load(args.thermal), localizer)
+    args.report.parent.mkdir(parents=True, exist_ok=True)
+    args.report.write_text(json.dumps(report, indent=2, default=str) + "\n", encoding="utf-8")
+    print(report["status"])
+    for subset in ("core", "challenge"):
+        if subset not in report:
+            continue
+        part = report[subset]
+        obd, heat, confirm = part["obd"], part["thermal"], part["confirmation"]
+        det, lat = obd["detected"], obd["latency_s"]
+        lead = obd["acoustic_lead_over_ecu_type_a_s"]
+        print(f"[{subset}] {part['runs']} runs, {obd['misfire_intervals']} misfire intervals")
+        print(f"  misfire detected within run: acoustic {det['acoustic']}, crank {det['crank']}, "
+              f"ECU type A {det['ecu_type_a']}, type B {det['ecu_type_b']}")
+        print(f"  latency p50: acoustic {lat['acoustic']['p50']} s, crank {lat['crank']['p50']} s,"
+              f" ECU A {lat['ecu_type_a']['p50']} s, ECU B {lat['ecu_type_b']['p50']} s")
+        print(f"  acoustic lead over ECU type A: p50 {lead['p50']} s (n={lead['n']}); ECU still "
+              f"silent at run end after {obd['acoustic_alerted_ecu_type_a_silent']} "
+              "acoustic alerts")
+        print(f"  misfire cylinder correct: {obd['cylinder_correct']}; acoustic and crank "
+              f"agree {obd['independent_paths_agree']}")
+        print(f"  false alarms without misfire: {obd['false_alarms_on_runs_without_misfire']}")
+        for fault, other in obd["other_faults"].items():
+            print(f"  {fault:21s} acoustic {other['acoustic_detected']}/{other['intervals']} "
+                  f"| ECU {other['ecu_capability']}")
+        for fault in ("misfire", "knock_like", "valve_clearance_like"):
+            h = heat[fault]
+            print(f"  thermal {fault:21s} detected {h['detected']} of {h['intervals']}, "
+                  f"latency p50 {h['latency_s']['p50']} s, cylinder correct "
+                  f"{h['cylinder_correct']}, false episodes on fault-free runs "
+                  f"{h['false_alert_episodes_on_fault_free_runs']}")
+        for name, v in confirm["knock_fusion_experiment"].items():
+            print(f"  knock {name:22s} sustained recall {v['sustained_recall']}, latency p50 "
+                  f"{v['latency_s']['p50']} s, false alerts/knock-free min "
+                  f"{v['false_alerts_per_knock_free_minute']}")
+    print(f"report -> {args.report}")
+    return 0
+
+
 def _train_localizer(args, config: dict) -> int:
     try:
         import joblib
@@ -580,7 +668,26 @@ def main(argv: list[str] | None = None) -> int:
     final_local.add_argument("--report", type=Path,
                              default=Path("reports/generated/final_localization.json"))
     final_local.add_argument("--force", action="store_true")
-    for sub in (fit, final, fit_multi, final_multi, fit_local, final_local):
+    crank_fit = commands.add_parser(
+        "calibrate-crosscheck",
+        help="Calibrate the crank-speed path, OBD monitor and thermal path on training runs")
+    crank_fit.add_argument("--raw-dir", type=Path, default=Path("data/raw/core_v3"))
+    crank_fit.add_argument("--truth-dir", type=Path, default=Path("evaluation_truth/core_v3"))
+    crank_fit.add_argument("--crank", type=Path, default=CRANK_PATH)
+    crank_fit.add_argument("--thermal", type=Path, default=THERMAL_PATH)
+    obd = commands.add_parser(
+        "evaluate-crosscheck",
+        help="Score crank, thermal and simulated OBD paths against the acoustic model on "
+             "test engines")
+    obd.add_argument("--raw-dir", type=Path, default=Path("data/raw/core_v3"))
+    obd.add_argument("--truth-dir", type=Path, default=Path("evaluation_truth/core_v3"))
+    obd.add_argument("--model", type=Path, default=Path("artifacts/models/multifault_v2.joblib"))
+    obd.add_argument("--localizer", type=Path, default=LOCALIZER_PATH)
+    obd.add_argument("--crank", type=Path, default=CRANK_PATH)
+    obd.add_argument("--thermal", type=Path, default=THERMAL_PATH)
+    obd.add_argument("--report", type=Path,
+                     default=Path("reports/generated/crosscheck_v3.json"))
+    for sub in (fit, final, fit_multi, final_multi, fit_local, final_local, crank_fit, obd):
         sub.add_argument("--config", type=Path, default=Path("configs/mvp.json"))
         sub.add_argument("--schema", type=Path,
                          default=Path("schemas/project-config.schema.json"))
@@ -612,6 +719,10 @@ def main(argv: list[str] | None = None) -> int:
         return _train_localizer(args, config)
     if args.command == "evaluate-localization":
         return _evaluate_localization(args, config)
+    if args.command == "calibrate-crosscheck":
+        return _calibrate_crosscheck(args, config)
+    if args.command == "evaluate-crosscheck":
+        return _evaluate_crosscheck(args, config)
     print(json.dumps({
         "status": "valid",
         "schema_version": config["schema_version"],

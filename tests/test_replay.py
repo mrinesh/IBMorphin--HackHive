@@ -133,3 +133,52 @@ def test_replay_localizes_the_alerted_cylinder(config):
     assert records[-1]["alert"] == "misfire"
     assert records[-1]["localization"]["misfire"]["cylinder"] == 3
     assert "localization" not in replay_run(cam_bundle(config), StubModel(), config)[-1]
+
+
+def wheel_bundle(config, misfire_cylinder=None):
+    """make_bundle plus a 60-2 crank wheel and cam pulses at 1500 rpm (contract 1.2)."""
+    from test_crankspeed import synthetic_wheel
+
+    bundle = make_bundle(config)
+    edges, cam, _, _ = synthetic_wheel(seconds=DURATION_S, misfire_cylinder=misfire_cylinder,
+                                       misfire_every=2, jitter_s=1e-6)
+    bundle.crank_tooth_s, bundle.cam_sync_s = edges, cam
+    bundle.metadata["streams"]["crank_teeth"] = {"unit": "s", "clock": "vibration"}
+    bundle.metadata["streams"]["cam_sync"] = {"unit": "s", "clock": "vibration"}
+    return bundle
+
+
+def test_crank_path_rides_along_without_changing_acoustic_decisions(config):
+    from engine_diagnostics.models.obd_misfire import CrankCalibration
+
+    edges = config["obd_misfire"]["rpm_bin_edges"]
+    calibration = CrankCalibration(edges, [400.0] * (len(edges) - 1), 1.5)
+    bundle = wheel_bundle(config, misfire_cylinder=2)
+    plain = replay_run(bundle, StubModel(), config)
+    with_crank = replay_run(bundle, StubModel(), config, crank=calibration)
+    assert [r["alert"] for r in plain] == [r["alert"] for r in with_crank]
+    assert all("crank" not in r for r in plain)
+    assert with_crank[-1]["crank"]["alert"] and with_crank[-1]["crank"]["cylinder"] == 2
+    # Each stroke reaches the simulated ECU exactly once, in time order.
+    strokes = with_crank[-1]["crank"]["obd"]["strokes"]
+    lag = config["crank_detector"]["stroke_lag_s"]
+    assert strokes == pytest.approx((DURATION_S - lag) * 1500 / 30, abs=4)
+    # A run without the wheel gets no crank record even when a calibration is given.
+    assert all("crank" not in r for r in replay_run(make_bundle(config), StubModel(), config,
+                                                    crank=calibration))
+
+
+def test_crank_path_is_causal(config):
+    from engine_diagnostics.models.obd_misfire import CrankCalibration
+
+    edges = config["obd_misfire"]["rpm_bin_edges"]
+    calibration = CrankCalibration(edges, [400.0] * (len(edges) - 1), 1.5)
+    calm = wheel_bundle(config)
+    late = wheel_bundle(config)
+    late.crank_tooth_s = np.where(late.crank_tooth_s < 3.0, late.crank_tooth_s,
+                                  late.crank_tooth_s + 1e-4)  # timing changes only after 3 s
+    a = replay_run(calm, StubModel(), config, crank=calibration)
+    b = replay_run(late, StubModel(), config, crank=calibration)
+    for x, y in zip(a, b, strict=True):
+        if x["t_end_s"] <= 3.0:
+            assert x["crank"]["excess"] == y["crank"]["excess"]

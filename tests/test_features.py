@@ -125,8 +125,9 @@ def test_window_labels_mark_transitions():
 
 
 def test_inference_modules_never_import_labels_or_truth():
-    for module in ("features.py",):
-        tree = ast.parse((ROOT / "src/engine_diagnostics/pipeline" / module).read_text())
+    for module in ("pipeline/features.py", "pipeline/crankspeed.py", "runtime/crosscheck.py",
+                   "models/obd_misfire.py"):
+        tree = ast.parse((ROOT / "src/engine_diagnostics" / module).read_text())
         imported = {node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
         imported |= {a.name for node in ast.walk(tree) if isinstance(node, ast.Import)
                      for a in node.names}

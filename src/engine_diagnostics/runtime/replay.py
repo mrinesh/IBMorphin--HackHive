@@ -9,6 +9,13 @@ with the packet that contains them and are buffered like the waveforms.
 With a cylinder localizer, each decision also carries `localization`: for
 every active alert, the affected cylinder (or a relative slot without a cam
 reference) accumulated by runtime.localization.
+
+With a crank calibration and a run that has the 60-2 wheel (contract 1.2),
+each decision also carries `crank`: the independent crank-speed misfire path
+and the simulated OBD monitor (runtime.crosscheck). With a thermal
+calibration and per-cylinder EGT/CHT telemetry, each decision carries
+`thermal` (runtime.thermal). Neither changes the acoustic decision or its
+alerts; they are independent cross-checks.
 """
 
 import time
@@ -29,7 +36,9 @@ from engine_diagnostics.pipeline.features import (
     window_ends,
 )
 from engine_diagnostics.runtime.alerts import AlertState, MultiAlertState
+from engine_diagnostics.runtime.crosscheck import CrankPath
 from engine_diagnostics.runtime.localization import LocalizationState
+from engine_diagnostics.runtime.thermal import ThermalPath
 
 TELEMETRY_HISTORY_S = 5.0
 
@@ -41,6 +50,7 @@ class Packet:
     waves: dict[str, np.ndarray]
     telemetry: pd.DataFrame
     cam_sync_s: np.ndarray | None = None  # pulses in [t_start, t_end); None: no stream
+    crank_tooth_s: np.ndarray | None = None  # wheel edges in [t_start, t_end) (contract 1.2)
 
 
 def packets(bundle: RunBundle, packet_s: float) -> Iterator[Packet]:
@@ -55,16 +65,23 @@ def packets(bundle: RunBundle, packet_s: float) -> Iterator[Packet]:
             waves[m] = getattr(bundle, m)[round(start * fs):round(end * fs)]
         rows = bundle.telemetry[(bundle.telemetry["t_s"] >= start)
                                 & (bundle.telemetry["t_s"] < end)]
-        yield Packet(start, end, waves, rows, window_pulses(bundle.cam_sync_s, start, end))
+        yield Packet(start, end, waves, rows, window_pulses(bundle.cam_sync_s, start, end),
+                     window_pulses(bundle.crank_tooth_s, start, end))
 
 
 class ReplayEngine:
     def __init__(self, model, config: dict[str, Any], metadata: dict[str, Any],
-                 localizer=None):
+                 localizer=None, crank=None, thermal=None):
         if any(metadata["streams"][m]["t0_s"] != 0 for m in MODALITIES):
             raise ValueError("replay currently requires t0_s = 0 for every stream")
         self.model = model
         self.has_cam = "cam_sync" in metadata["streams"]
+        self.has_teeth = "crank_teeth" in metadata["streams"]
+        self.crank = (CrankPath(crank, config)
+                      if crank is not None and self.has_teeth else None)
+        has_thermal = "egt_cyl1" in metadata.get("telemetry_signals", {})
+        self.thermal = (ThermalPath(thermal, config)
+                        if thermal is not None and has_thermal else None)
         self.localization = (LocalizationState(localizer, config["engine"]["firing_order"])
                              if localizer is not None else None)
         # The window vector holds every extracted feature; each model uses its own names.
@@ -95,10 +112,15 @@ class ReplayEngine:
         self.received = dict.fromkeys(MODALITIES, 0)  # samples received so far
         self.telemetry = pd.DataFrame(columns=["t_s", "signal", "value", "unit", "valid"])
         self.cam_sync = np.zeros(0)
+        self.crank_teeth = np.zeros(0)
         self.next_decision = 0
         self.alerts.reset()
         if self.localization is not None:
             self.localization.reset()
+        if self.crank is not None:
+            self.crank.reset()
+        if self.thermal is not None:
+            self.thermal.reset()
 
     def push(self, packet: Packet) -> list[dict[str, Any]]:
         """Ingest one packet; return decisions whose windows are now complete."""
@@ -114,6 +136,10 @@ class ReplayEngine:
             keep_after = packet.t_end_s - window_s - self.config["analysis"]["step_s"]
             self.cam_sync = np.concatenate([self.cam_sync[self.cam_sync >= keep_after],
                                             packet.cam_sync_s])
+        if packet.crank_tooth_s is not None and packet.crank_tooth_s.size:
+            keep_after = packet.t_end_s - window_s - self.config["analysis"]["step_s"]
+            self.crank_teeth = np.concatenate(
+                [self.crank_teeth[self.crank_teeth >= keep_after], packet.crank_tooth_s])
         if not packet.telemetry.empty:
             frames = [f for f in (self.telemetry, packet.telemetry) if not f.empty]
             self.telemetry = pd.concat(frames, ignore_index=True)
@@ -168,6 +194,10 @@ class ReplayEngine:
         if self.localization is not None:
             extra["localization"] = self.localization.update(decisions, alerts,
                                                              window.cylinders, window.quality)
+        if self.crank is not None:
+            extra["crank"] = self.crank.update(t, self.crank_teeth, self.cam_sync)
+        if self.thermal is not None:
+            extra["thermal"] = self.thermal.update(t, self.telemetry)
         return {
             "t_end_s": float(t), "quality": window.quality, **result, **extra,
             "processing_ms": 1000 * (time.perf_counter() - started),
@@ -178,9 +208,11 @@ class ReplayEngine:
 
 
 def replay_run(bundle: RunBundle, model, config: dict[str, Any], speed: float | None = None,
-               on_decision=None, localizer=None) -> list[dict[str, Any]]:
+               on_decision=None, localizer=None, crank=None,
+               thermal=None) -> list[dict[str, Any]]:
     """Replay a whole run; `speed` paces packets in real time (1.0 = 1x), None = fast."""
-    engine = ReplayEngine(model, config, bundle.metadata, localizer=localizer)
+    engine = ReplayEngine(model, config, bundle.metadata, localizer=localizer, crank=crank,
+                          thermal=thermal)
     packet_s = config["runtime"]["packet_s"]
     records = []
     clock = time.perf_counter()
