@@ -140,6 +140,20 @@ def test_health_timeline_tracks_stages_and_states_no_rul_claim():
     assert "no forecast or remaining-useful-life claim" in caption
 
 
+@pytest.mark.skipif(not V1_MODEL.is_file() or not (ROOT / "data/raw/core_v1/run_00232").is_dir(),
+                    reason="needs core_v1 runs and the v1 model")
+def test_health_timeline_warns_before_the_valve_degradation_alert():
+    app = AppTest.from_file(str(APP), default_timeout=120).run()
+    widget(app.sidebar.selectbox, "Dataset").set_value("core_v1").run()
+    widget(app.sidebar.selectbox, "Run").set_value("run_00232").run()  # valve degradation
+    widget(app.sidebar.slider, "Seek (s)").set_value(24.0).run()
+    widget(app.sidebar.button, "Seek").click().run()
+    assert not app.exception
+    text = " ".join(m.value for m in app.markdown)
+    assert "healthy → developing anomaly at 17.0 s → persistent fault at 22.0 s" in text
+    assert "**Early warning:** developing anomaly flagged 5.0 s before the fault alert" in text
+
+
 needs_holdout = pytest.mark.skipif(
     not (ROOT / "data/processed/integration_v1_features.parquet").is_file()
     or not (ROOT / "data/raw/run_00014").is_dir(),

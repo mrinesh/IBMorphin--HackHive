@@ -101,6 +101,16 @@ features; the model's own anomaly threshold) were set on core_v1 tuning engines.
 All progression is simulated, so the chart is labeled a deterioration
 demonstration and makes no forecast or remaining-useful-life claim.
 
+Early warning: with a calibrated model (v1, v2) a fourth line tracks the fault
+likelihood, the probability of the most likely fault, against a warning bar of
+0.6, below the alert's 0.7 acceptance bar. A fault the model is becoming
+confident about therefore shows as developing before the alert is confirmed,
+and an **Early warning** line reports how many seconds ahead it was. The bar was
+chosen on tuning engines (0.55 doubled false warnings; 0.65 lost most valve lead
+time). Best demo of the full progression: core_v1 `run_00232` (valve degradation,
+developing 17.0 s → persistent fault 22.0 s) or `run_00215` (3.5 s ahead); demo
+preset 5 (`run_00216`) still goes straight from healthy to fault.
+
 ## Fault-injection lab
 
 Sidebar **Mode → Fault-injection lab** (needs core_v1 runs, their evaluation truth,

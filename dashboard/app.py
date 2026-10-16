@@ -541,12 +541,19 @@ def lab_response(records, t_now: float) -> None:
             st.caption("Compare to see which changes the injected signals caused.")
 
 
+def fault_probability(record) -> float:
+    """Calibrated probability of the most likely fault (NaN if the model has none)."""
+    faults = [p for c, p in record.get("probabilities", {}).items() if c != "normal"]
+    return max(faults) if faults else float("nan")
+
+
 def run_health(records) -> HealthTimeline:
     return health_timeline(
         [r["t_end_s"] for r in records],
         pd.DataFrame([feature_z(r) if r["quality"] == "ok" else {} for r in records]),
         [r["anomaly_score"] for r in records], model.anomaly_threshold,
-        [bool(active_alerts(r)) for r in records], [r["quality"] == "ok" for r in records])
+        [bool(active_alerts(r)) for r in records], [r["quality"] == "ok" for r in records],
+        [fault_probability(r) for r in records])
 
 
 def health_figure(health: HealthTimeline) -> go.Figure:
@@ -862,14 +869,22 @@ def live_view():
         health = run_health(records)
         timeline_tab.plotly_chart(health_figure(health), width="stretch")
         timeline_tab.markdown(f"**Health stages so far:** {health.summary()}")
+        leads = health.warning_leads()
+        if leads:
+            timeline_tab.markdown("**Early warning:** developing anomaly flagged "
+                                  + ", ".join(f"{lead:.1f} s" for lead in leads)
+                                  + " before the fault alert was confirmed.")
         timeline_tab.caption(
             "Each line is a smoothed (2 s, causal) deviation from the healthy baseline for the "
             "same operating range, divided by its developing threshold: firing-rhythm "
-            "irregularity and high-frequency impulsiveness as robust z (threshold 4), and the "
-            "model's anomaly score (its own threshold). Developing anomaly = a line stays at or "
-            "above 1 without a confirmed alert; persistent fault = the model's confirmed alert. "
-            "Thresholds were set on tuning engines; on held-out test engines about 9% of healthy "
-            "windows still show as developing. All progression shown is simulated, so this is a "
+            "irregularity and high-frequency impulsiveness as robust z (threshold 4), the "
+            "model's anomaly score (its own threshold), and the model's calibrated fault "
+            "likelihood (warning bar 0.6, below the alert's 0.7). Developing anomaly = a line "
+            "stays at or above 1 without a confirmed alert; persistent fault = the model's "
+            "confirmed alert. Thresholds were set on tuning engines. On held-out test engines "
+            "about 9% of healthy windows still show as developing, and the developing stage "
+            "came before the alert in misfire 6/8, knock 3/8, and valve 3/8 runs (2 of 5 "
+            "degradation runs, 3.5-5 s ahead). All progression shown is simulated, so this is a "
             "deterioration demonstration: it describes the current state and makes no forecast "
             "or remaining-useful-life claim, which would need real run-to-failure data.")
 

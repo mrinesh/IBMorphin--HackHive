@@ -2,8 +2,11 @@
 
 Tracked lines are expressed relative to their own developing threshold (1.0 =
 threshold): two interpretable features as robust z against the healthy baseline
-of the same operating range, and the model's overall anomaly score. Each
-decision window gets a stage:
+of the same operating range, the model's overall anomaly score, and (when the
+model is calibrated) its fault likelihood, the probability of the most likely
+fault. The likelihood bar (0.6) sits below the alert's acceptance bar, so a
+fault the model is becoming confident about shows as developing before the
+alert is confirmed. Each decision window gets a stage:
   healthy             every tracked line is below its threshold
   developing anomaly  a tracked line stays at or above its threshold, without a
                       confirmed alert
@@ -29,6 +32,8 @@ TRACKED = (
     ("vibration_env_kurtosis_high", "High-frequency impulsiveness (vibration)", 4.0),
 )
 OVERALL = "Overall deviation (model anomaly score)"  # threshold: the model's own
+LIKELIHOOD = "Fault likelihood (model, calibrated)"
+FAULT_PROBABILITY_WARN = 0.6  # early-warning bar on smoothed max P(fault); set on tuning engines
 HEALTHY, DEVELOPING, FAULT, NO_DATA = ("healthy", "developing anomaly", "persistent fault",
                                        "no data")
 STAGES = (HEALTHY, DEVELOPING, FAULT, NO_DATA)
@@ -49,6 +54,12 @@ class HealthTimeline:
                 out.append((float(t), s))
         return out
 
+    def warning_leads(self) -> list[float]:
+        """Seconds each persistent fault was preceded by an unbroken developing stage."""
+        steps = self.transitions()
+        return [t - steps[k - 1][0] for k, (t, s) in enumerate(steps)
+                if s == FAULT and k > 0 and steps[k - 1][1] == DEVELOPING]
+
     def summary(self) -> str:
         steps = self.transitions()
         if not steps:
@@ -58,8 +69,13 @@ class HealthTimeline:
 
 
 def health_timeline(t, z_by_feature: pd.DataFrame, anomaly_score, anomaly_threshold: float,
-                    alert_active, quality_ok) -> HealthTimeline:
-    """Stages for decision windows in time order; inputs are aligned per window."""
+                    alert_active, quality_ok, fault_probability=None,
+                    probability_warn: float = FAULT_PROBABILITY_WARN) -> HealthTimeline:
+    """Stages for decision windows in time order; inputs are aligned per window.
+
+    fault_probability: the model's calibrated probability of the most likely
+    fault per window (NaN or None when the model has no probabilities).
+    """
     t = np.asarray(t, dtype=float)
     ok = np.asarray(quality_ok, dtype=bool)
     alert = np.asarray(alert_active, dtype=bool)
@@ -70,6 +86,10 @@ def health_timeline(t, z_by_feature: pd.DataFrame, anomaly_score, anomaly_thresh
         columns[label] = _causal_median(raw, ok) / threshold
     score = _causal_median(np.asarray(anomaly_score, dtype=float), ok)
     columns[OVERALL] = score / anomaly_threshold
+    if fault_probability is not None:
+        p = np.asarray(fault_probability, dtype=float)
+        if np.isfinite(p).any():
+            columns[LIKELIHOOD] = _causal_median(p, ok) / probability_warn
     level = pd.DataFrame(columns, index=t)
     peak = level.max(axis=1, skipna=True).to_numpy()
     stage = []

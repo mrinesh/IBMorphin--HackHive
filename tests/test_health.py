@@ -7,7 +7,9 @@ import pytest
 from engine_diagnostics.runtime.health import (
     DEVELOPING,
     FAULT,
+    FAULT_PROBABILITY_WARN,
     HEALTHY,
+    LIKELIHOOD,
     NO_DATA,
     OVERALL,
     SMOOTH_WINDOWS,
@@ -76,6 +78,32 @@ def test_stage_at_t_ignores_later_windows():
     prefix = health_timeline(T[:k + 1], z, np.ones(k + 1), 2.0, np.zeros(k + 1, bool),
                              np.ones(k + 1, bool)).stage
     assert prefix == full[:k + 1]
+
+
+def test_rising_fault_likelihood_warns_before_the_alert():
+    probability = np.clip((T - 10) * 0.05, 0.05, 0.95)  # reaches 0.6 at 21 s
+    alert = T >= 26
+    tl = health_timeline(T, pd.DataFrame({FIRING: np.zeros(T.size), IMPULSE: np.zeros(T.size)}),
+                         np.ones(T.size), 2.0, alert, np.ones(T.size, bool), probability)
+    steps = tl.transitions()
+    assert [s for _, s in steps] == [HEALTHY, DEVELOPING, FAULT]
+    assert steps[1][0] >= 21.0 and steps[2][0] == 26.0
+    assert tl.warning_leads() == [pytest.approx(26.0 - steps[1][0])]
+    recent = np.median(probability[-SMOOTH_WINDOWS:])  # causal 2 s median
+    assert tl.level[LIKELIHOOD].iloc[-1] == pytest.approx(recent / FAULT_PROBABILITY_WARN)
+
+
+def test_no_lead_when_fault_arrives_without_warning():
+    tl = timeline(alert=T >= 20)
+    assert [s for _, s in tl.transitions()] == [HEALTHY, FAULT]
+    assert tl.warning_leads() == []
+
+
+def test_models_without_probabilities_keep_three_lines():
+    for probability in (None, np.full(T.size, np.nan)):
+        tl = health_timeline(T, pd.DataFrame({FIRING: np.zeros(T.size)}), np.ones(T.size), 2.0,
+                             np.zeros(T.size, bool), np.ones(T.size, bool), probability)
+        assert LIKELIHOOD not in tl.level.columns and set(tl.stage) == {HEALTHY}
 
 
 def test_missing_feature_columns_fall_back_to_anomaly_score():
