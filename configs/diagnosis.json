@@ -1,0 +1,9 @@
+{
+  "note": "Diagnose (possible causes) settings. The model must be on the Gemini API free tier (https://ai.google.dev/gemini-api/docs/pricing, checked 2026-10-17). The API key is read from the GEMINI_API_KEY environment variable, never from this file.",
+  "model": "gemini-3.8-flash",
+  "timeout_s": 30,
+  "temperature": 0.2,
+  "max_runs": 8,
+  "max_notes": 20,
+  "summary_window_s": 5.0
+}

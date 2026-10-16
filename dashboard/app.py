@@ -36,9 +36,13 @@ if str(ROOT) not in sys.path:  # `dashboard` package (theme, explain) for `strea
     sys.path.insert(0, str(ROOT))
 
 from dashboard import engine3d, explain, sensors, theme  # noqa: E402
+from engine_diagnostics import report  # noqa: E402
 from engine_diagnostics.config import load_config  # noqa: E402
 from engine_diagnostics.data.run_io import find_runs, load_run, validate_run  # noqa: E402
+from engine_diagnostics.diagnosis import DISCLAIMER as DIAGNOSIS_DISCLAIMER  # noqa: E402
+from engine_diagnostics.diagnosis import run_diagnosis  # noqa: E402
 from engine_diagnostics.history import (  # noqa: E402
+    Diagnosis,
     HistoryStore,
     Profile,
     raw_from_bundle,
@@ -1360,8 +1364,246 @@ def engine_history_panel(engine: Profile) -> None:
             st.caption("No notes yet.")
 
 
+URGENCY_TITLES = {"stop_now": ":material/dangerous: Stop now",
+                  "soon": ":material/build: Soon", "monitor": ":material/visibility: Monitor"}
+EVIDENCE_KINDS = {"crank": "crank speed", "thermal": "cylinder temperatures",
+                  "fuel": "fuel trims", "spectrum": "sound spectrum"}
+
+
+def evidence_label(item: str) -> str:
+    """Readable name of a context ID (R5, N3, S5-crank, T-misfire, SPEC)."""
+    if item == "SPEC":
+        return "engine specs"
+    if item.startswith("T-"):
+        return f"{label(item[2:]) if item[2:] in FAULT_COLORS else item[2:]} trend across runs"
+    if item.startswith("S") and "-" in item:
+        run, kind = item[1:].split("-", 1)
+        return f"run #{run} {EVIDENCE_KINDS.get(kind, kind)}"
+    if item.startswith("R"):
+        return f"run #{item[1:]}"
+    if item.startswith("N"):
+        return f"note #{item[1:]}"
+    return item
+
+
+def show_diagnosis(saved: Diagnosis) -> None:
+    """Summary, ranked causes with evidence, actions by urgency, data gaps, disclaimer."""
+    out = saved.output
+    if saved.fallback:
+        st.info(f"Basic version. {saved.fallback_reason or ''}", icon=":material/info:")
+    st.caption(f"{saved.created_utc[:16].replace('T', ' ')} UTC · {saved.model}"
+               + (f" · saved runs up to #{saved.latest_run_id}" if saved.latest_run_id else ""))
+    st.markdown(out["summary"])
+    st.markdown("**Possible causes** (most likely first)")
+    if not out["causes"]:
+        st.caption("No cause is supported by the saved data.")
+    for k, cause in enumerate(out["causes"], 1):
+        with st.container(border=True):
+            kind = "detected by the model" if cause["kind"] == "detected" else "suggested"
+            st.markdown(f"**{k}. {cause['title']}** · {kind} · "
+                        f"confidence **{cause['confidence']}**")
+            st.markdown(cause["reasoning"])
+            if cause.get("confidence_notes"):
+                st.caption(cause["confidence_notes"])
+            st.caption("Evidence: " + ", ".join(
+                f"{evidence_label(i)} ({i})" for i in cause["evidence_ids"]))
+            if cause.get("unverified_ids"):
+                st.caption(":material/warning: Also cited but not found in this engine's "
+                           "data, so ignored: " + ", ".join(cause["unverified_ids"]))
+    if out.get("dropped_causes"):
+        st.warning(f"{len(out['dropped_causes'])} cause(s) were removed because they cited "
+                   "evidence that is not in this engine's data.", icon=":material/filter_alt:")
+    st.markdown("**Recommended actions**")
+    for urgency, title in URGENCY_TITLES.items():
+        steps = [a for a in out["actions"] if a["urgency"] == urgency]
+        if steps:
+            st.markdown(f"{title}\n" + "\n".join(
+                f"- {a['step']}" + (f" _(for: {', '.join(a['addresses'])})_"
+                                    if a["addresses"] else "") for a in steps))
+    if out["data_gaps"]:
+        st.markdown("**Data gaps**\n" + "\n".join(f"- {g}" for g in out["data_gaps"]))
+    st.caption(DIAGNOSIS_DISCLAIMER)
+
+
+def diagnosis_panel(engine: Profile) -> None:
+    """Diagnose on demand from the engine's history; saved diagnoses can be reopened."""
+    state = st.session_state
+    key = f"diagnosis_pick_{engine.id}"
+    st.caption("Ranks possible causes and next steps from this engine's saved runs, notes and "
+               "signal summaries. Save the current replay first to include it.")
+    if st.button("Diagnose", type="primary", key=f"diagnose_{engine.id}",
+                 icon=":material/troubleshoot:"):
+        with st.spinner("Looking for possible causes in this engine's history..."):
+            try:
+                state[f"diagnosis_new_{engine.id}"] = run_diagnosis(store, engine, config).id
+            except Exception as error:  # noqa: BLE001 - never show a stack trace in the demo
+                st.error(f"Could not diagnose this engine ({type(error).__name__}). Its saved "
+                         "history may be incomplete; the rest of the dashboard still works.")
+    diagnoses = {d.id: d for d in store.list_diagnoses(engine.id)}
+    if not diagnoses:
+        st.caption("No diagnosis yet for this engine.")
+        return
+    new = state.pop(f"diagnosis_new_{engine.id}", None)
+    if new in diagnoses or state.get(key) not in diagnoses:
+        state[key] = new if new in diagnoses else next(iter(diagnoses))
+    pick = st.selectbox(
+        "Saved diagnoses", list(diagnoses), key=key,
+        format_func=lambda d: f"#{d} · {diagnoses[d].created_utc[:16].replace('T', ' ')} UTC · "
+                              + ("basic" if diagnoses[d].fallback else diagnoses[d].model))
+    show_diagnosis(diagnoses[pick])
+
+
+def report_timeline_figure(timeline: dict) -> go.Figure:
+    """Report health timeline (same series as the PDF chart)."""
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.8, 0.2],
+                        vertical_spacing=0.06)
+    if timeline["probabilities"]:
+        for fault, values in timeline["probabilities"].items():
+            fig.add_trace(go.Scatter(x=timeline["t"], y=values, name=label(fault),
+                                     line={"color": FAULT_COLORS[fault], "width": 2}),
+                          row=1, col=1)
+        fig.update_yaxes(range=[0, 1.02], title="likelihood", row=1, col=1)
+    else:
+        fig.add_trace(go.Scatter(x=timeline["t"], y=timeline["anomaly_ratio"],
+                                 name="anomaly score / threshold"), row=1, col=1)
+        fig.add_hline(y=1, line={"dash": "dot"}, row=1, col=1)
+        fig.update_yaxes(title="anomaly / threshold", row=1, col=1)
+    for stage in dict.fromkeys(timeline["stage"]):
+        t = [x for x, s in zip(timeline["t"], timeline["stage"], strict=True) if s == stage]
+        fig.add_trace(go.Bar(x=t, y=[1] * len(t), name=stage, width=0.5,
+                             marker_color=report.STAGE_COLORS.get(stage, "#9e9e9e")),
+                      row=2, col=1)
+    fig.update_yaxes(visible=False, row=2, col=1)
+    fig.update_xaxes(range=[0, timeline["duration_s"]], title="s", row=2, col=1)
+    fig.update_layout(height=340, bargap=0, margin={"t": 20, "b": 20},
+                      legend={"orientation": "h", "y": -0.25})
+    return fig
+
+
+def report_likelihoods_figure(likelihoods: dict) -> go.Figure:
+    fig = go.Figure(go.Bar(x=likelihoods["values"], y=likelihoods["labels"], orientation="h",
+                           marker_color=[FAULT_COLORS.get(k, "#7f7f7f")
+                                         for k in likelihoods["keys"]],
+                           text=[f"{v:.2f}" for v in likelihoods["values"]]))
+    fig.update_layout(height=220, title=likelihoods["title"], xaxis={"range": [0, 1]},
+                      yaxis={"autorange": "reversed"}, margin={"t": 40, "b": 20})
+    return fig
+
+
+def report_trends_figure(trends: dict) -> go.Figure:
+    fig = go.Figure()
+    if trends["max_probabilities"]:
+        for fault, values in trends["max_probabilities"].items():
+            fig.add_trace(go.Scatter(x=trends["runs"], y=values, name=label(fault),
+                                     mode="lines+markers",
+                                     line={"color": FAULT_COLORS[fault]}))
+        fig.update_yaxes(range=[0, 1.02], title="max likelihood")
+    else:
+        fig.add_trace(go.Scatter(x=trends["runs"], y=trends["anomaly_ratio"],
+                                 mode="lines+markers", name="peak anomaly / threshold"))
+        fig.add_hline(y=1, line={"dash": "dot"})
+        fig.update_yaxes(title="anomaly / threshold")
+    fig.update_layout(height=260, margin={"t": 20, "b": 20},
+                      xaxis={"title": "saved run (oldest to newest)", "type": "category"})
+    return fig
+
+
+def report_panel(engine: Profile) -> None:
+    """Report preview and PDF export, both drawn from one EngineReport (no Gemini call)."""
+    state = st.session_state
+    if not st.toggle("Show report", key=f"show_report_{engine.id}",
+                     help="Builds the report from this engine's saved history."):
+        st.caption("Engine profile and specs, the latest run with its health timeline and "
+                   "likelihoods, the latest saved diagnosis, and the run history, as a preview "
+                   "and a PDF.")
+        return
+    try:
+        rep = report.build_report(store, engine)
+    except Exception as error:  # noqa: BLE001 - never show a stack trace in the demo
+        st.error(f"Could not build the report ({type(error).__name__}).")
+        return
+    # The PDF is rebuilt only when the engine's history changes.
+    signature = (engine.id, tuple(r["run"] for r in rep.history),
+                 rep.diagnosis and rep.diagnosis["id"], len(rep.notes), str(engine.specs))
+    cached = state.get("report_pdf")
+    if not cached or cached[0] != signature:
+        try:
+            state.report_pdf = (signature, report.render_pdf(rep), rep.file_name())
+        except Exception as error:  # noqa: BLE001
+            state.report_pdf = (signature, None, None)
+            st.error(f"Could not create the PDF ({type(error).__name__}); the preview below "
+                     "still shows the report.")
+    _, pdf_bytes, file_name = state.report_pdf
+    st.download_button("Export PDF", data=pdf_bytes or b"", file_name=file_name or "report.pdf",
+                       mime="application/pdf", disabled=pdf_bytes is None, type="primary",
+                       icon=":material/picture_as_pdf:", key=f"export_pdf_{engine.id}")
+    st.markdown(f"#### {rep.title}")
+    st.caption(f"Generated {report.utc_text(rep.generated_utc)}. {rep.disclaimer}")
+
+    e = rep.engine
+    st.markdown("**1. Engine profile and specs**")
+    st.dataframe(pd.DataFrame([("Make", e["make"]), ("Model", e["model"]),
+                               ("Serial / ID", e["serial"]), ("Nickname", e["nickname"] or "-"),
+                               *e["specs"], ("Specs source", e["spec_source"])],
+                              columns=["Field", "Value"]), hide_index=True)
+    if e["warning"]:
+        st.warning(e["warning"], icon=":material/warning:")
+
+    st.markdown("**2. Latest run**")
+    cur = rep.current_run
+    if cur is None:
+        st.info("No saved runs yet. Play a run to the end (or use Save run so far).")
+    else:
+        st.dataframe(pd.DataFrame([
+            ("History run", f"#{cur['id']}"), ("Source", cur["source"]),
+            ("Analysed", cur["analysed"]), ("Predicted fault", cur["predicted_fault"]),
+            ("Alerts", cur["alerts"]), ("Final health stage", cur["final_health_stage"]),
+            ("Health stages", cur["health_summary"]), ("Early warning", cur["early_warning"]),
+            ("Peak anomaly", cur["peak_anomaly"]), ("Cylinder", cur["localization"]),
+            ("Model", cur["model_version"])], columns=["Field", "Value"]), hide_index=True)
+        if rep.timeline:
+            st.plotly_chart(report_timeline_figure(rep.timeline), width="stretch",
+                            key="report_timeline")
+        if rep.likelihoods:
+            st.plotly_chart(report_likelihoods_figure(rep.likelihoods), width="stretch",
+                            key="report_likelihoods")
+
+    st.markdown("**3. Latest diagnosis**")
+    d = rep.diagnosis
+    if d is None:
+        st.info("No diagnosis saved yet. Use Diagnose above to add possible causes and "
+                "actions to this report.", icon=":material/troubleshoot:")
+    else:
+        show_diagnosis(Diagnosis(d["id"], engine.id, d["latest_run_id"], d["created_utc"],
+                                 d["model"], d["fallback"], d["fallback_reason"], "",
+                                 d["output"]))
+
+    st.markdown("**4. Run history and trends**")
+    if rep.history:
+        st.dataframe(pd.DataFrame(rep.history, columns=report.HISTORY_COLUMNS),
+                     hide_index=True)
+    if rep.trends and len(rep.trends["runs"]) > 1:
+        st.plotly_chart(report_trends_figure(rep.trends), width="stretch", key="report_trends")
+    if rep.notes:
+        st.markdown("**5. Notes**\n" + "\n".join(
+            f"- {report.utc_text(n['created_utc'])} · "
+            + (f"run #{n['run_id']}" if n["run_id"] else "engine") + f": {n['text']}"
+            for n in rep.notes))
+
+
+def engine_tools_panel(engine: Profile) -> None:
+    st.subheader(f"Diagnosis and report · {engine.label}")
+    causes_tab, report_tab = st.tabs([":material/troubleshoot: Possible causes",
+                                      ":material/description: Report"])
+    with causes_tab:
+        diagnosis_panel(engine)
+    with report_tab:
+        report_panel(engine)
+
+
 if profile:
     engine_history_panel(profile)
+    engine_tools_panel(profile)
 
 
 def cross_engine_panel():

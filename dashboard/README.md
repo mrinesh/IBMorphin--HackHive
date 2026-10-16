@@ -215,6 +215,55 @@ history". Profile specs are stored metadata only: the analysis still uses
 `configs/mvp.json`, and recorded replays are synthetic runs, not measurements of
 the profiled engine.
 
+## Possible causes (Diagnose) and the engine report
+
+Shown only when an engine profile is selected, in the **Diagnosis and report**
+section below the engine history.
+
+**Possible causes.** **Diagnose** ranks likely causes of the engine's condition
+and recommends next steps, using the engine's saved history (save the current
+replay first to include it). The dashboard builds one compact context
+(`engine_diagnostics.diagnosis_context`): profile and specs (with where they
+came from and the non-4-cylinder warning), the newest saved run and up to seven
+earlier ones (predicted fault, likelihoods, alerts, health stages, operating
+point), cross-run trends, notes, and signal summaries computed locally from the
+raw data history still keeps (per-cylinder crank-speed roughness, EGT/CHT
+spread, fuel-trim drift, audio band energy). Raw waveforms, lab injection
+settings and recording ids are never sent. Every item has an ID (`SPEC`, `R5`,
+`N3`, `S5-crank`, `T-misfire`) that each cause must cite.
+
+The context goes to Google Gemini (`gemini-3.8-flash`, free tier; model and
+limits in `configs/diagnosis.json`) with structured JSON output. The answer is
+validated: malformed output counts as a failure, and a cause citing IDs that do
+not exist is removed (or keeps only its real IDs, with the rest shown as
+ignored). With no key, no network, a timeout, a rate limit (429) or invalid
+output, a short message explains why and a **basic** rule-based diagnosis in the
+same format is shown instead (model alerts, likelihoods, trends, crank/thermal/
+fuel-trim summaries and repair notes mapped to cheap-first checks). The panel
+shows the summary, causes with confidence and named evidence, actions grouped
+as stop now / soon / monitor, data gaps, and a decision-support disclaimer.
+Each diagnosis is saved to the engine's history (inputs digest, output, model,
+whether it was the basic version) and can be reopened from **Saved diagnoses**.
+
+Demo engine: `uv run --all-extras python scripts/seed_demo_engine.py` creates
+*Demo engine (DRIVEX Sim Synthetic 1.6 I4 · DEMO-058)* with four saved core_v3
+runs of one test engine (two healthy, a cylinder 3 misfire, then the misfire
+again with knock) and notes, including a spark-plug replacement that did not fix
+it. It replays the runs through the dashboard, so they are saved exactly as a
+user's replays (needs core_v3 and `calibrate-crosscheck`).
+
+Key setup: create a free key at <https://aistudio.google.com/apikey>, then set
+`GEMINI_API_KEY` in the environment or put `GEMINI_API_KEY=...` in a `.env`
+file at the repository root (git-ignored; see `.env.example`).
+
+**Report.** Turn on **Show report** for a preview of the engine report:
+profile and specs, the latest run (summary, health timeline, likelihoods), the
+latest saved diagnosis (or a prompt to run one; building a report never calls
+Gemini), the run history table and trend across runs, notes, a generation time
+and the disclaimer. **Export PDF** downloads the same report. Preview and PDF
+draw from one `EngineReport` (`engine_diagnostics.report`); the PDF uses fpdf2
+with matplotlib charts, so it needs no browser or system install.
+
 ## Checking the 3D view
 
 With the dashboard running, `node scripts/check_engine3d.mjs` (Node 22+, Google

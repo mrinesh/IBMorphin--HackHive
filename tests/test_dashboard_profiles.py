@@ -70,6 +70,8 @@ def test_without_a_profile_nothing_is_saved_and_decisions_match_offline_replay(h
     seek_to_end(app)
     assert not history_dir.exists()
     assert not any("Engine history" in s.value for s in app.subheader)
+    assert not any("Diagnosis and report" in s.value for s in app.subheader)
+    assert not any(b.label in ("Diagnose", "Export PDF") for b in app.button)
     config = load_config(ROOT / "configs/mvp.json", ROOT / "schemas/project-config.schema.json")
     offline = replay_run(load_run(ROOT / "data/raw" / RUN), joblib.load(MODEL), config)
     keys = ("t_end_s", "accepted", "alert")
@@ -112,6 +114,76 @@ def test_catalog_profile_saves_the_finished_replay_with_results_raw_data_and_not
     assert not app.exception
     (note,) = store.list_notes(profile.id)
     assert note.text == "replaced injector 3" and note.run_id == run.id
+
+
+@pytest.fixture
+def gemini(monkeypatch, tmp_path):
+    """Mocked Gemini: no .env key, and every client call raises the error set by the test."""
+    import google.genai
+    from google.genai import errors
+
+    from engine_diagnostics import diagnosis
+
+    monkeypatch.setattr(diagnosis, "ENV_FILE", tmp_path / "missing.env")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    calls = []
+
+    class RateLimited:
+        def __init__(self, **kwargs):
+            self.models = self
+
+        def generate_content(self, **kwargs):
+            calls.append(kwargs)
+            raise errors.ClientError(429, {"error": {"code": 429, "message": "quota",
+                                                     "status": "RESOURCE_EXHAUSTED"}})
+
+    monkeypatch.setattr(google.genai, "Client", RateLimited)
+    return calls
+
+
+@needs_integration
+def test_diagnose_falls_back_without_a_key_and_on_429_and_saves_each_diagnosis(
+        history_dir, gemini, monkeypatch):
+    app = AppTest.from_file(str(APP), default_timeout=180).run()
+    open_run(app)
+    create_profile(app)
+    seek_to_end(app)
+    assert any("Diagnosis and report" in s.value for s in app.subheader)
+
+    widget(app.button, "Diagnose").click().run()  # no key
+    assert not app.exception
+    assert any("No Gemini API key" in i.value for i in app.info)
+    assert any("Possible causes" in m.value for m in app.markdown)
+    assert any("Decision support only" in c.value for c in app.caption)
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    widget(app.button, "Diagnose").click().run()  # simulated 429
+    assert not app.exception and len(gemini) == 1
+    assert any("rate limit" in i.value for i in app.info)
+
+    (profile,) = HistoryStore(history_dir).list_profiles()
+    saved = HistoryStore(history_dir).list_diagnoses(profile.id)
+    assert len(saved) == 2 and all(d.fallback for d in saved)
+    assert widget(app.selectbox, "Saved diagnoses").value == saved[0].id
+    widget(app.selectbox, "Saved diagnoses").set_value(saved[1].id).run()
+    assert any("No Gemini API key" in i.value for i in app.info)
+
+
+@needs_integration
+def test_report_preview_and_pdf_export(history_dir, gemini):
+    app = AppTest.from_file(str(APP), default_timeout=180).run()
+    open_run(app)
+    create_profile(app)
+    seek_to_end(app)
+    widget(app.toggle, "Show report").set_value(True).run()
+    assert not app.exception and not gemini  # building a report never calls Gemini
+    headings = [m.value for m in app.markdown]
+    for section in ("**1. Engine profile and specs**", "**2. Latest run**",
+                    "**3. Latest diagnosis**", "**4. Run history and trends**"):
+        assert section in headings
+    assert any("No diagnosis saved yet" in i.value for i in app.info)
+    _, pdf, name = app.session_state["report_pdf"]
+    assert pdf.startswith(b"%PDF-") and name.endswith(".pdf")
 
 
 @needs_integration
