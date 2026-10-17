@@ -77,7 +77,7 @@ debounced (confirmed over several updates, held through brief dropouts).
 calibrated confidence is the single measure of certainty shown.
 
 
-- Permanent "SYNTHETIC DATA — RECORDED REPLAY" banner; model/feature versions
+- Model/feature versions
 - 3D view (Three.js): a detailed inline-4 (Reset view button, drag or arrow keys
   to orbit; the status text above it has a fixed height so it never resizes the
   canvas). Pistons, rods, crankshaft, camshafts and valves

@@ -14,7 +14,7 @@ import plotly.io as pio
 
 # Graphite surfaces with a system-blue accent. One color per decision, used in every
 # view (cards, charts, 3D): green normal, amber misfire, magenta knock, violet
-# valve-train. Red is reserved for the synthetic-data banner and errors.
+# valve-train. Red is reserved for errors.
 TOKENS = {
     "bg": "#141416",
     "bg2": "#18181B",
@@ -165,13 +165,6 @@ def css() -> str:
     variables = "".join(f"--hud-{name.replace('_', '-')}: {TOKENS[name]};" for name in _CSS_VARS)
     sheet = (Path(__file__).with_name("hud.css")).read_text(encoding="utf-8")
     return f"<style>:root {{{variables}}}\n{sheet}</style>"
-
-
-def banner_html() -> str:
-    return (f'<div class="synthetic-banner" role="note"><span class="tile">{icon("alert", 16)}'
-            '</span><b>SYNTHETIC DATA — RECORDED REPLAY</b>'
-            '<small>Simulated engines and sensors, replayed from recordings. Results do not '
-            'show real-engine accuracy.</small></div>')
 
 
 def wordmark_html(size: str = "") -> str:

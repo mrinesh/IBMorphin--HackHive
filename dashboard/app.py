@@ -313,7 +313,6 @@ config = load_config_cached()
 datasets = available_datasets()
 
 st.html(theme.css())
-st.markdown(theme.banner_html(), unsafe_allow_html=True)
 st.markdown(theme.brand_html(), unsafe_allow_html=True)
 if not datasets:
     st.error("Missing inputs. Generate runs in MATLAB, then run `engine-diagnostics "

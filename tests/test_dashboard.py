@@ -23,10 +23,10 @@ def widget(widgets, label):
 
 
 @needs_integration
-def test_dashboard_renders_banner_and_seeks_with_live_predictions():
+def test_dashboard_renders_and_seeks_with_live_predictions():
     app = AppTest.from_file(str(APP), default_timeout=60).run()
     assert not app.exception
-    assert any("SYNTHETIC DATA" in m.value for m in app.markdown)
+    assert not any("SYNTHETIC DATA" in m.value for m in app.markdown)
     widget(app.sidebar.selectbox, "Dataset").set_value("integration_v1").run()
     widget(app.sidebar.selectbox, "Run").set_value("run_00012").run()
     widget(app.sidebar.slider, "Seek (s)").set_value(12.0).run()

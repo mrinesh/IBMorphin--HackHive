@@ -5,7 +5,7 @@
    Fonts: the system UI font (SF Pro on Apple devices) with bundled Inter as the
    offline fallback; JetBrains Mono for telemetry values (tabular figures).
    Decision colors are fixed everywhere: green normal, amber misfire, magenta
-   knock-like, violet valve-train. Red is only the synthetic banner and errors. */
+   knock-like, violet valve-train. Red is only errors. */
 
 :root {
   --hud-radius: 20px;
@@ -60,21 +60,6 @@ h3 { font-size: 1.05rem !important; font-weight: 600 !important; }
   font-weight: 700; font-size: 1.5rem; letter-spacing: -0.025em; color: var(--hud-text);
 }
 .hud-brand .tag { color: var(--hud-muted); font-size: 0.9rem; }
-
-/* Synthetic-data notice: red tile and tint, always visible, never mistaken for an alert. */
-.synthetic-banner {
-  display: flex; align-items: center; gap: 0.4rem 0.75rem; flex-wrap: wrap;
-  padding: 10px 16px; border-radius: 16px;
-  background: color-mix(in srgb, var(--hud-rose) 12%, var(--hud-surface));
-  border: 1px solid color-mix(in srgb, var(--hud-rose) 38%, transparent);
-  color: var(--hud-text); font-size: 0.84rem;
-}
-.synthetic-banner .tile {
-  display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px;
-  background: var(--hud-rose); color: #fff; flex-shrink: 0;
-}
-.synthetic-banner b { font-weight: 600; letter-spacing: 0.03em; color: #ffd0cc; }
-.synthetic-banner small { font-size: 0.84rem; color: var(--hud-muted); }
 
 /* Surfaces: metrics, charts and every card built in theme.py. */
 .hud-card, [data-testid="stMetric"], [data-testid="stPlotlyChart"] {
