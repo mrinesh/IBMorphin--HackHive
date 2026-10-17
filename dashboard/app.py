@@ -1568,14 +1568,48 @@ def report_trends_figure(trends: dict) -> go.Figure:
     return fig
 
 
+PREDICTION_ICONS = {"active": ":material/error:", "building": ":material/trending_up:",
+                    "watch": ":material/visibility:"}
+
+
+def show_predictions(pred: dict | None) -> None:
+    """Outlook per fault from the run trend, with the effects expected if it continues."""
+    if pred is None:
+        st.info("No saved runs to project from yet. Play a run to the end (or use Save run "
+                "so far).", icon=":material/insights:")
+        return
+    st.markdown(pred["headline"])
+    items = pred["items"]
+    for col, item in zip(st.columns(len(items)) if items else [], items, strict=True):
+        with col.container(border=True):
+            st.markdown(f"{PREDICTION_ICONS[item['status']]} **{item['label']}** · "
+                        f"{item['status_text']}")
+            latest, trend, projected, runs = report.prediction_row(item)
+            m1, m2 = st.columns(2)
+            m1.metric("Latest likelihood", latest)
+            m2.metric("Next run (projected)", projected,
+                      delta=None if item["slope"] is None else f"{item['slope']:+.2f}/run",
+                      delta_color="inverse")
+            alerted = item["runs_alerted"]
+            st.caption(f"Trend: {item['direction']} · runs to alert level "
+                       f"({pred['alert_level']:.2f}): {runs} · alerted in {alerted} saved "
+                       f"run{'s' if alerted != 1 else ''}")
+            st.markdown(item["outlook"])
+            st.markdown("**Expected effects if it continues**\n"
+                        + "\n".join(f"- {e}" for e in item["effects"]))
+    if pred["anomaly"]:
+        st.caption(":material/monitoring: Anomaly: " + report.anomaly_text(pred["anomaly"]))
+    st.caption(pred["basis"] + " Effects are general background, not model output.")
+
+
 def report_panel(engine: Profile) -> None:
     """Report preview and PDF export, both drawn from one EngineReport (no Gemini call)."""
     state = st.session_state
     if not st.toggle("Show report", key=f"show_report_{engine.id}",
                      help="Builds the report from this engine's saved history."):
-        st.caption("Engine profile and specs, the latest run with its health timeline and "
-                   "likelihoods, the latest saved diagnosis, and the run history, as a preview "
-                   "and a PDF.")
+        st.caption("Engine profile and specs, predictions from the run trend, the latest run "
+                   "with its health timeline and likelihoods, the latest saved diagnosis, and "
+                   "the run history, as a preview and a PDF.")
         return
     try:
         rep = report.build_report(store, engine)
@@ -1609,7 +1643,10 @@ def report_panel(engine: Profile) -> None:
     if e["warning"]:
         st.warning(e["warning"], icon=":material/warning:")
 
-    st.markdown("**2. Latest run**")
+    st.markdown("**2. Predictions**")
+    show_predictions(rep.predictions)
+
+    st.markdown("**3. Latest run**")
     cur = rep.current_run
     if cur is None:
         st.info("No saved runs yet. Play a run to the end (or use Save run so far).")
@@ -1628,7 +1665,7 @@ def report_panel(engine: Profile) -> None:
             st.plotly_chart(report_likelihoods_figure(rep.likelihoods), width="stretch",
                             key="report_likelihoods")
 
-    st.markdown("**3. Latest diagnosis**")
+    st.markdown("**4. Latest diagnosis**")
     d = rep.diagnosis
     if d is None:
         st.info("No diagnosis saved yet. Use Diagnose above to add ranked causes and "
@@ -1638,14 +1675,14 @@ def report_panel(engine: Profile) -> None:
                                  d["model"], d["fallback"], d["fallback_reason"], "",
                                  d["output"]))
 
-    st.markdown("**4. Run history and trends**")
+    st.markdown("**5. Run history and trends**")
     if rep.history:
         st.dataframe(pd.DataFrame(rep.history, columns=report.HISTORY_COLUMNS),
                      hide_index=True)
     if rep.trends and len(rep.trends["runs"]) > 1:
         st.plotly_chart(report_trends_figure(rep.trends), width="stretch", key="report_trends")
     if rep.notes:
-        st.markdown("**5. Notes**\n" + "\n".join(
+        st.markdown("**6. Notes**\n" + "\n".join(
             f"- {report.utc_text(n['created_utc'])} · "
             + (f"run #{n['run_id']}" if n["run_id"] else "engine") + f": {n['text']}"
             for n in rep.notes))

@@ -1,8 +1,9 @@
 """Engine report: one data structure, shown in the dashboard and exported as a PDF.
 
 `build_report` collects everything from the engine's history (profile and specs,
-the newest saved run with its health timeline and likelihoods, the latest saved
-diagnosis, the run history and trends, notes). The dashboard preview and
+predictions projected from the run trend, the newest saved run with its health
+timeline and likelihoods, the latest saved diagnosis, the run history and trends,
+notes). The dashboard preview and
 `render_pdf` both draw from the returned EngineReport, so they cannot disagree.
 Building a report never calls Gemini: it shows the latest saved diagnosis or a
 prompt to run one.
@@ -41,6 +42,29 @@ SPEC_ROWS = [("cylinders", "Cylinders"), ("strokes", "Strokes"),
              ("load_min", "Load min (0-1)"), ("load_max", "Load max (0-1)")]
 MAX_TREND_RUNS = 20
 MAX_NOTES = 10
+ALERT_P = 0.7  # likelihood line in the charts; predictions count runs until a fault reaches it
+WATCH_P = 0.3  # a fault at or above this max likelihood (or projected to reach it) is listed
+FIT_RUNS = 6  # predictions fit a straight line through the newest runs only
+SLOPE_STEP = 0.05  # change in max likelihood per run called rising or easing
+MAX_RUNS_AHEAD = 10  # further than this is reported as no crossing in sight
+EFFECTS = {  # general background on what each fault does if it continues, not model output
+    "misfire": [
+        "Rough running and less power: the cylinder contributes nothing on missed strokes.",
+        "Unburnt fuel reaches the exhaust, raising emissions and overheating the catalytic "
+        "converter.",
+        "Fuel trims drift as the engine controller compensates, so fuel use goes up."],
+    "knock_like": [
+        "Pressure and heat spikes load the pistons, ring lands and head gasket.",
+        "Knock control retards the ignition timing, costing power and fuel economy.",
+        "Sustained knock can crack a piston or erode the combustion chamber."],
+    "valve_clearance_like": [
+        "Louder valve-train ticking as the clearance grows.",
+        "Shorter valve opening reduces air flow, so power drops at higher RPM.",
+        "Faster cam and lifter wear; if the clearance closes up instead, a valve can burn "
+        "its seat."],
+}
+STATUS_NAMES = {"active": "Alerted in the latest run", "building": "Building up",
+                "watch": "On watch"}
 
 
 def utc_text(stamp: str) -> str:
@@ -67,6 +91,7 @@ class EngineReport:
     current_run: dict[str, Any] | None
     timeline: dict[str, Any] | None
     likelihoods: dict[str, Any] | None
+    predictions: dict[str, Any] | None
     diagnosis: dict[str, Any] | None
     history: list[dict[str, Any]]
     trends: dict[str, Any] | None
@@ -184,6 +209,125 @@ def _trends(runs_oldest_first: list[RunEntry]) -> dict[str, Any] | None:
             "max_probabilities": max_p if has_p else {}, "anomaly_ratio": ratio}
 
 
+def _slope(values: list[float | None]) -> float | None:
+    """Least-squares change per run over the newest FIT_RUNS known values (None if < 2)."""
+    points = [(i, v) for i, v in enumerate(values) if v is not None][-FIT_RUNS:]
+    if len(points) < 2:
+        return None
+    mx = sum(i for i, _ in points) / len(points)
+    my = sum(v for _, v in points) / len(points)
+    spread = sum((i - mx) ** 2 for i, _ in points)
+    return sum((i - mx) * (v - my) for i, v in points) / spread
+
+
+def _direction(slope: float | None) -> str:
+    if slope is None:
+        return "one run"
+    return "rising" if slope >= SLOPE_STEP else "easing" if slope <= -SLOPE_STEP else "steady"
+
+
+def _runs_until(now: float, slope: float | None, level: float) -> int | None:
+    """Runs until a straight-line projection from `now` reaches `level` (None: not in sight)."""
+    if now >= level:
+        return 0
+    if not slope or slope <= 0:
+        return None
+    runs = math.ceil((level - now) / slope)
+    return runs if runs <= MAX_RUNS_AHEAD else None
+
+
+def _fault_outlook(status: str, direction: str, runs: int | None) -> str:
+    if status == "active":
+        return ("Alerted in the latest run but easing across runs; confirm the next run "
+                "stays below the alert level." if direction == "easing" else
+                "Alerted in the latest run and not easing: expect it again on the next run "
+                "until it is repaired.")
+    if runs == 0:
+        return "At the alert level in the latest run, but not confirmed as an alert."
+    if runs:
+        return (f"Rising across runs: at this rate it reaches the alert level ({ALERT_P:.2f}) "
+                f"in about {runs} run{'s' if runs > 1 else ''}.")
+    if direction == "rising":
+        return "Rising across runs, but no alert is in sight within the next runs."
+    if direction == "easing":
+        return "Elevated but easing across runs; no alert expected."
+    return "Elevated but not alerted; keep it on watch."
+
+
+def _predictions(runs_oldest_first: list[RunEntry]) -> dict[str, Any] | None:
+    """What the run trend points to next: per fault, its outlook and effects if it continues.
+
+    A straight line through each fault's max likelihood over the newest FIT_RUNS runs
+    gives the next-run projection and the runs until it reaches ALERT_P.
+    """
+    if not runs_oldest_first:
+        return None
+    latest = runs_oldest_first[-1].summary
+    alerted_now = {a["fault"] for a in latest.get("alerts", [])}
+    items = []
+    for fault in FAULTS:
+        values = [_num((r.summary.get("max_probabilities") or {}).get(fault), 3)
+                  for r in runs_oldest_first]
+        now = values[-1]
+        if now is None and fault not in alerted_now:
+            continue
+        now = now or 0.0
+        slope = _slope(values)
+        direction = _direction(slope)
+        projected = _num(min(0.99, max(0.0, now + slope)), 2) if slope is not None else None
+        if fault in alerted_now:
+            status = "active"
+        elif now >= WATCH_P or (direction == "rising" and (projected or 0) >= WATCH_P):
+            status = "building" if direction == "rising" else "watch"
+        else:
+            continue
+        runs = _runs_until(now, slope, ALERT_P)
+        items.append({
+            "fault": fault, "label": LABELS[fault], "status": status,
+            "status_text": STATUS_NAMES[status], "latest": _num(now), "direction": direction,
+            "slope": _num(slope, 3), "projected_next": projected,
+            "runs_to_alert": runs,
+            "runs_alerted": sum(fault in {a["fault"] for a in r.summary.get("alerts", [])}
+                                for r in runs_oldest_first),
+            "outlook": _fault_outlook(status, direction, runs),
+            "effects": EFFECTS[fault]})
+    order = {"active": 0, "building": 1, "watch": 2}
+    items.sort(key=lambda i: (order[i["status"]], -(i["latest"] or 0)))
+
+    ratios = []
+    for r in runs_oldest_first:
+        peak, thr = r.summary.get("peak_anomaly_score"), r.summary.get("anomaly_threshold")
+        ratios.append(_num(peak / thr, 3) if peak is not None and thr else None)
+    anomaly = None
+    if ratios[-1] is not None:
+        slope = _slope(ratios)
+        anomaly = {"latest": _num(ratios[-1]), "direction": _direction(slope),
+                   "projected_next": _num(max(0.0, ratios[-1] + slope), 2)
+                   if slope is not None else None,
+                   "runs_to_threshold": _runs_until(ratios[-1], slope, 1.0)}
+
+    names = " and ".join(i["label"] for i in items if i["status"] == "active")
+    building = [i for i in items if i["status"] == "building"]
+    if names:
+        headline = (f"Alerted in the latest run: {names}. Expect the effects below to "
+                    "continue until it is repaired.")
+    elif building:
+        headline = (f"Building up across runs: {' and '.join(i['label'] for i in building)}. "
+                    "No alert yet.")
+    elif items:
+        headline = "No fault is alerted or rising; some likelihoods are elevated and on watch."
+    else:
+        headline = ("No fault is building up across the saved runs. Expect healthy runs while "
+                    "operating conditions stay the same.")
+    n = len(runs_oldest_first)
+    first, last = runs_oldest_first[0].id, runs_oldest_first[-1].id
+    basis = (f"Projected from {n} saved runs (#{first} to #{last}) with a straight-line fit "
+             f"over the newest {min(n, FIT_RUNS)}." if n > 1 else
+             f"Based on one saved run (#{last}); a trend needs at least two.")
+    return {"headline": headline, "items": items, "anomaly": anomaly, "basis": basis,
+            "alert_level": ALERT_P}
+
+
 def build_report(store: HistoryStore, profile: Profile, now: str | None = None) -> EngineReport:
     """Everything the report shows, from history only (no Gemini call)."""
     runs = store.list_runs(profile.id)  # newest first
@@ -204,6 +348,7 @@ def build_report(store: HistoryStore, profile: Profile, now: str | None = None) 
         current_run=_current(current) if current else None,
         timeline=_timeline(store, current) if current else None,
         likelihoods=_likelihoods(current) if current else None,
+        predictions=_predictions(list(reversed(runs[:MAX_TREND_RUNS]))),
         diagnosis=None if latest is None else {
             "id": latest.id, "created_utc": latest.created_utc, "model": latest.model,
             "fallback": latest.fallback, "fallback_reason": latest.fallback_reason,
@@ -213,6 +358,29 @@ def build_report(store: HistoryStore, profile: Profile, now: str | None = None) 
         notes=[{"id": n.id, "created_utc": n.created_utc, "run_id": n.run_id, "text": n.text}
                for n in store.list_notes(profile.id)[:MAX_NOTES]],
     )
+
+
+def prediction_row(item: dict[str, Any]) -> list[str]:
+    """Latest likelihood, trend, next-run projection, runs to the alert level (as text)."""
+    runs = item["runs_to_alert"]
+    return [f"{item['latest']:.2f}",
+            item["direction"] + (f" ({item['slope']:+.2f}/run)" if item["slope"] is not None
+                                 else ""),
+            "-" if item["projected_next"] is None else f"{item['projected_next']:.2f}",
+            "at alert level" if runs == 0 else "not in sight" if runs is None else str(runs)]
+
+
+def anomaly_text(anomaly: dict[str, Any]) -> str:
+    runs = anomaly["runs_to_threshold"]
+    text = f"peak score is {anomaly['latest']:.2f}× its threshold"
+    if anomaly["direction"] != "one run":
+        text += f", {anomaly['direction']} across runs"
+    if runs == 0:
+        return text + "."
+    if runs:
+        return text + f"; at this rate it crosses the threshold in about {runs} " \
+                      f"run{'s' if runs > 1 else ''}."
+    return text + "; no threshold crossing in sight."
 
 
 # -- charts (matplotlib, for the PDF) -----------------------------------------------------
@@ -247,7 +415,7 @@ def timeline_png(timeline: dict[str, Any]) -> bytes:
             _plot_values(top, t, values, color=FAULT_COLORS[fault], label=LABELS[fault], lw=1.5)
         top.set_ylim(0, 1.02)
         top.set_ylabel("likelihood")
-        top.axhline(0.7, color="#555", ls=":", lw=0.8)
+        top.axhline(ALERT_P, color="#555", ls=":", lw=0.8)
     else:
         _plot_values(top, t, timeline["anomaly_ratio"], color="#1f77b4", lw=1.5,
                      label="anomaly score / threshold")
@@ -403,8 +571,29 @@ def render_pdf(report: EngineReport) -> bytes:
     if e["warning"]:
         para("Warning: " + e["warning"], 9, bold_text=True, color=150)
 
-    # 2 Current run
-    heading("2. Latest run")
+    # 2 Predictions
+    heading("2. Predictions")
+    pred = report.predictions
+    if pred is None:
+        para("No saved runs to project from yet.")
+    else:
+        para(pred["headline"], 9.5, bold_text=True)
+        for item in pred["items"]:
+            pdf.ln(1)
+            para(f"{item['label']} · {item['status_text']}", 9, bold_text=True)
+            para(item["outlook"], 8.5)
+            table([["Latest likelihood", "Trend", "Next run (projected)", "Runs to alert level"],
+                   prediction_row(item)], [40, 40, 50, 50])
+            para("Expected effects if it continues:", 8.5, bold_text=True)
+            for effect in item["effects"]:
+                para("•  " + effect, 8.5)
+        if pred["anomaly"]:
+            para("Anomaly: " + anomaly_text(pred["anomaly"]), 8.5)
+        para(pred["basis"] + " Effects are general background, not model output.", 8,
+             color=90)
+
+    # 3 Current run
+    heading("3. Latest run")
     cur = report.current_run
     if cur is None:
         para("No saved runs yet. Play a run to the end (or use Save run so far) with this "
@@ -424,8 +613,8 @@ def render_pdf(report: EngineReport) -> bytes:
         if report.likelihoods:
             chart("Likelihoods", likelihoods_png(report.likelihoods), width * 0.85)
 
-    # 3 Diagnosis
-    heading("3. Latest diagnosis")
+    # 4 Diagnosis
+    heading("4. Latest diagnosis")
     diag = report.diagnosis
     if diag is None:
         para("No diagnosis saved for this engine yet. Use Diagnose in the dashboard to add "
@@ -462,8 +651,8 @@ def render_pdf(report: EngineReport) -> bytes:
             for g in out["data_gaps"]:
                 para("•  " + g, 8.5)
 
-    # 4 History and trends
-    heading("4. Run history and trends")
+    # 5 History and trends
+    heading("5. Run history and trends")
     if report.history:
         table([HISTORY_COLUMNS] + [[r[c] for c in HISTORY_COLUMNS] for r in report.history],
               [10, 22, 27, 22, 33, 15, 15, 30, 16], size=6.5)
@@ -474,7 +663,7 @@ def render_pdf(report: EngineReport) -> bytes:
     elif report.trends:
         para("A trend needs at least two saved runs.", 8.5, color=90)
     if report.notes:
-        heading("5. Notes", 12)
+        heading("6. Notes", 12)
         for n in report.notes:
             para(f"{n['created_utc'][:16].replace('T', ' ')} UTC · "
                  + (f"run #{n['run_id']}" if n["run_id"] else "engine"), 8, color=100)

@@ -366,6 +366,37 @@ def test_report_builds_without_calling_gemini(store, engine, monkeypatch):
     assert "lab_injection" not in json.dumps(rep.__dict__, default=str)
 
 
+def test_predictions_project_the_run_trend_with_effects(store, engine):
+    pred = R.build_report(store, engine).predictions
+    misfire = pred["items"][0]
+    assert [i["fault"] for i in pred["items"]] == ["misfire"]  # knock and valve stay low
+    assert misfire["status"] == "active" and misfire["direction"] == "rising"
+    assert misfire["latest"] == pytest.approx(0.9) and misfire["runs_to_alert"] == 0
+    assert misfire["runs_alerted"] == 1 and misfire["effects"] == R.EFFECTS["misfire"]
+    assert "Misfire" in pred["headline"] and "3 saved runs (#1 to #3)" in pred["basis"]
+    assert pred["anomaly"]["latest"] == pytest.approx(2.0)
+    assert R.prediction_row(misfire)[3] == "at alert level"
+
+
+def test_predictions_count_runs_until_a_rising_fault_alerts(store):
+    profile = store.create_profile("V", "4", "Y", I4, "catalog")
+    for p in (0.1, 0.25, 0.4):
+        save(store, profile, [record(2.0 + 0.5 * k, p_misfire=p) for k in range(4)])
+    pred = R.build_report(store, profile).predictions
+    misfire = pred["items"][0]
+    assert misfire["status"] == "building" and misfire["slope"] == pytest.approx(0.15)
+    assert misfire["projected_next"] == pytest.approx(0.55) and misfire["runs_to_alert"] == 2
+    assert "about 2 runs" in misfire["outlook"] and pred["headline"].startswith("Building up")
+
+
+def test_healthy_history_predicts_no_fault(store):
+    profile = store.create_profile("V", "4", "Z", I4, "catalog")
+    save(store, profile, HEALTHY)
+    pred = R.build_report(store, profile).predictions
+    assert pred["items"] == [] and pred["headline"].startswith("No fault is building up")
+    assert pred["basis"].startswith("Based on one saved run")
+
+
 def pdf_pages(data: bytes) -> int:
     return len(re.findall(rb"/Type /Page\b", data))
 
@@ -385,6 +416,7 @@ def test_pdf_for_an_engine_without_runs_or_diagnosis(store):
     profile = store.create_profile("V", "6", "X", V6, "manual", "Odd one")
     rep = R.build_report(store, profile)
     assert rep.current_run is None and rep.diagnosis is None and rep.engine["warning"]
+    assert rep.predictions is None
     data = R.render_pdf(rep)
     assert data.startswith(b"%PDF-") and pdf_pages(data) == 1
     assert b"/Subtype /Image" not in data

@@ -178,10 +178,12 @@ def test_report_preview_and_pdf_export(history_dir, gemini):
     widget(app.toggle, "Show report").set_value(True).run()
     assert not app.exception and not gemini  # building a report never calls Gemini
     headings = [m.value for m in app.markdown]
-    for section in ("**1. Engine profile and specs**", "**2. Latest run**",
-                    "**3. Latest diagnosis**", "**4. Run history and trends**"):
+    for section in ("**1. Engine profile and specs**", "**2. Predictions**",
+                    "**3. Latest run**", "**4. Latest diagnosis**",
+                    "**5. Run history and trends**"):
         assert section in headings
     assert any("No diagnosis saved yet" in i.value for i in app.info)
+    assert any("Expected effects if it continues" in m for m in headings)
     _, pdf, name = app.session_state["report_pdf"]
     assert pdf.startswith(b"%PDF-") and name.endswith(".pdf")
 
