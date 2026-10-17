@@ -89,8 +89,8 @@ held (not in this window)", "Misfire awaiting confirmation"). "Best guess" and
   for it; shake follows the window's vibration RMS relative to the normal
   reference. When the cylinder localizer
   (`artifacts/models/cylinder_localizer.joblib`) names a fault's cylinder, that
-  fault's effect is confined to it, its piston glows red and a ring in the
-  fault's color marks it, so two faults on two cylinders show side by side;
+  fault's effect is confined to it, its piston head glows in the
+  fault's color (blue misfire, lavender knock, green valve-train impacts), so two faults on two cylinders show side by side;
   a fault without a cylinder (or without the localizer) shows engine-wide.
   Faults on one cylinder compose (misfire weakens or skips the firing, knock
   adds sparks, valve-train impacts add seat ticks). The HUD names each fault
