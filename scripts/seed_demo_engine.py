@@ -13,7 +13,10 @@ The run choice is demo curation (like the demo presets); nothing from
 evaluation_truth/ is written to history. Needs data/raw/core_v3, the v2 model,
 and the crank/thermal calibrations (calibrate-crosscheck).
 
-    uv run --all-extras python scripts/seed_demo_engine.py [--history-dir DIR]
+    uv run --all-extras python scripts/seed_demo_engine.py [--story STORY] [--history-dir DIR]
+
+Stories: "misfire" (default, engine_058, profile DEMO-058) and "three-fault"
+(engine_057, profile DEMO-057), whose last run is demo preset 13.
 """
 
 import argparse
@@ -24,14 +27,29 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "dashboard/app.py"
 DATASET = "core_v3"
-MAKE, MODEL, SERIAL = "DRIVEX Sim", "Synthetic 1.6 I4", "DEMO-058"
-NICKNAME = "Demo engine"
-STORY = [
-    ("run_00244", None),
-    ("run_00245", None),
-    ("run_00246", "Rough running reported. Replaced the spark plug on cylinder 3."),
-    ("run_00249", "Customer reports the misfire is back, plus pinging under load."),
-]
+MAKE, MODEL = "DRIVEX Sim", "Synthetic 1.6 I4"
+STORIES = {
+    "misfire": {
+        "serial": "DEMO-058",
+        "nickname": "Demo engine",
+        "runs": [
+            ("run_00244", None),
+            ("run_00245", None),
+            ("run_00246", "Rough running reported. Replaced the spark plug on cylinder 3."),
+            ("run_00249", "Customer reports the misfire is back, plus pinging under load."),
+        ],
+    },
+    # engine_057; the last run is demo preset 13 (misfire, valve, then knock).
+    "three-fault": {
+        "serial": "DEMO-057",
+        "nickname": "Demo engine (three faults)",
+        "runs": [
+            ("run_00236", "Baseline recording at intake. No complaints."),
+            ("run_00243", "Customer reports rough running, a ticking noise, and pinging "
+                          "under load."),
+        ],
+    },
+}
 
 
 def widget(widgets, label):
@@ -40,6 +58,8 @@ def widget(widgets, label):
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--story", choices=STORIES, default="misfire",
+                        help="which demo engine to create (default: misfire)")
     parser.add_argument("--history-dir", type=Path,
                         help="history directory (default: ENGINE_HISTORY_DIR or "
                              "data/engine_history)")
@@ -53,21 +73,24 @@ def main() -> int:
     from engine_diagnostics.history import HistoryStore
     from engine_diagnostics.profiles import load_catalog, lookup
 
-    missing = [r for r, _ in STORY if not (ROOT / "data/raw" / DATASET / r).is_dir()]
+    story = STORIES[args.story]
+    serial = story["serial"]
+    missing = [r for r, _ in story["runs"] if not (ROOT / "data/raw" / DATASET / r).is_dir()]
     if missing:
         print(f"missing {DATASET} runs {missing}: generate core_v3 first", file=sys.stderr)
         return 1
     store = HistoryStore()
-    if store.find_profile(MAKE, MODEL, SERIAL):
-        print(f"{MAKE} {MODEL} serial {SERIAL} already exists in {store.root}; nothing done. "
+    if store.find_profile(MAKE, MODEL, serial):
+        print(f"{MAKE} {MODEL} serial {serial} already exists in {store.root}; nothing done. "
               "Use --history-dir for a fresh history.")
         return 0
     entry = lookup(load_catalog(), MAKE, MODEL)
-    profile = store.create_profile(MAKE, MODEL, SERIAL, dict(entry.engine), "catalog", NICKNAME)
+    profile = store.create_profile(MAKE, MODEL, serial, dict(entry.engine), "catalog",
+                                   story["nickname"])
 
     app = AppTest.from_file(str(APP), default_timeout=300).run()
     widget(app.sidebar.selectbox, "Engine").set_value(profile.id).run()
-    for run_id, note in STORY:
+    for run_id, note in story["runs"]:
         widget(app.sidebar.selectbox, "Dataset").set_value(DATASET).run()
         widget(app.sidebar.selectbox, "Run").set_value(run_id).run()
         end = float(app.session_state["bundle"].metadata["duration_s"])
