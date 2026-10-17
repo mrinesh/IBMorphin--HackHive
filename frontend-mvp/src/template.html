@@ -1,0 +1,879 @@
+<title>DRIVEX EngineSense</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.159.0/three.min.js"></script>
+<style>
+/* Layout: floating glass sidebar left (same controls as before), segmented tabs for the main area.
+   Look: Apple design language in dark. System font stack (SF Pro on Apple devices, Inter elsewhere),
+   large continuous corners, frosted materials, system blue accent, semantic green/orange/red for status.
+   Front-end prototype with generated sample data (no backend). */
+:root {
+  --bg: #141416; --card: #1e1e21; --card2: #29292d; --hairline: rgba(255, 255, 255, .07); --line: rgba(255, 255, 255, .1);
+  --fill: rgba(120, 120, 128, .24); --fill2: rgba(120, 120, 128, .36); --thumb: #636366;
+  --text: #f5f5f7; --muted: rgba(235, 235, 245, .62); --dim: rgba(235, 235, 245, .4);
+  --accent: #0a84ff; --accent2: #64d2ff; --accent3: #9fdcff; --on-accent: #fff;
+  --cyan: var(--accent2); --cyan-soft: var(--accent3); --cyan-hover: var(--accent3);
+  --green: #30d158; --orange: #ff9f0a; --red: #ff453a; --amber: #ffd60a;
+  --glass: rgba(40, 40, 44, .68); --blur: blur(28px) saturate(1.8);
+  --r-card: 20px; --r-inner: 14px; --r-ctl: 10px; --fs: 15px;
+  --spring: cubic-bezier(.32, .72, 0, 1);
+  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", Inter, "Helvetica Neue", system-ui, sans-serif;
+  --display: -apple-system, BlinkMacSystemFont, "SF Pro Display", Inter, "Helvetica Neue", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+:root[data-bg="black"] { --bg: #000; --card: #1c1c1e; --card2: #2c2c2e; --glass: rgba(34, 34, 38, .7); }
+:root[data-glass="off"] { --glass: var(--card2); --blur: none; }
+:root[data-size="s"] { --fs: 14px; }
+:root[data-size="l"] { --fs: 16.5px; }
+
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--text); font: 400 var(--fs)/1.47 var(--sans); letter-spacing: -.011em;
+  -webkit-font-smoothing: antialiased; font-variant-numeric: tabular-nums;
+  padding-inline: max(16px, env(safe-area-inset-left, 0px)) max(16px, env(safe-area-inset-right, 0px)); padding-block: 16px 44px;
+}
+button, select, input { font: inherit; color: inherit; letter-spacing: inherit; }
+h1, h2, h3, p { margin: 0; }
+:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 65%, transparent); outline-offset: 2px; }
+.mono { font-variant-numeric: tabular-nums; }
+.app { max-width: 1560px; margin: 0 auto; display: grid; grid-template-columns: 284px minmax(0, 1fr); gap: 20px; align-items: start; }
+.main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
+
+/* ---------- brand and header ---------- */
+.drivex { display: inline-block; font: 700 1.55em/1 var(--display); letter-spacing: .3em; margin-right: -.3em; color: var(--text); }
+.drivex .x { color: var(--accent2); }
+.drivex.sm { font-size: 1.15em; letter-spacing: .28em; margin-right: -.28em; }
+.header { display: flex; align-items: center; gap: 12px 18px; flex-wrap: wrap; padding: 4px 4px 2px; }
+.header .div { width: 1px; height: 30px; background: var(--line); }
+.header h1 { font: 700 1.5em/1.15 var(--display); letter-spacing: -.025em; }
+.header .tag { color: var(--muted); font-size: .9em; }
+.header .grow { flex: 1; }
+.pill { display: inline-flex; align-items: center; gap: 8px; padding: 6px 13px; border-radius: 999px; background: var(--fill); color: var(--muted); font: 500 .86em var(--sans); }
+.notice { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; padding: 9px 16px; border-radius: 14px; background: var(--fill); font-size: .84em; color: var(--muted); }
+.notice b { font-weight: 600; color: var(--text); }
+
+/* ---------- surfaces ---------- */
+.card { position: relative; background: var(--card); border: 1px solid var(--hairline); border-radius: var(--r-card); min-width: 0; }
+.lbl { font: 400 .87em var(--sans); color: var(--muted); letter-spacing: -.005em; }
+.ic { display: inline-block; vertical-align: -3px; flex-shrink: 0; }
+.sec { font: 600 .95em var(--display); letter-spacing: -.01em; color: var(--text); margin-bottom: 10px; }
+.mt12 { margin-top: 12px; }
+.small { font-size: .82em; color: var(--dim); }
+.help { color: var(--dim); font-size: .84em; line-height: 1.45; margin-top: 8px; }
+
+/* ---------- sidebar (frosted) ---------- */
+.side { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto; padding: 18px; display: grid; gap: 20px; align-content: start;
+  background: var(--glass); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); border-radius: 24px; scrollbar-width: none; }
+.side > * { min-width: 0; }
+.sb-brand { padding: 2px 2px 14px; border-bottom: 1px solid var(--line); }
+.sb-brand .sub { display: block; margin-top: 8px; font-size: .84em; color: var(--muted); }
+.field { display: grid; gap: 7px; }
+.seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px; padding: 2px; background: var(--fill); border-radius: 10px; }
+.seg button { border: 0; background: transparent; padding: 7px 8px; border-radius: 8px; color: var(--text); cursor: pointer; font-size: .9em; font-weight: 500; transition: background .25s var(--spring), box-shadow .25s var(--spring); }
+.seg button[aria-pressed="true"] { background: var(--thumb); box-shadow: 0 2px 6px rgba(0, 0, 0, .35), 0 0 0 .5px rgba(255, 255, 255, .06); }
+.chips { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.chip { display: inline-flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 12px; border: 0; background: var(--fill); color: var(--text); cursor: pointer; font-size: .9em; font-weight: 500; text-align: left; transition: background .25s var(--spring), transform .15s var(--spring); }
+.chip .ic { color: var(--accent2); }
+.chip[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+.chip[aria-pressed="true"] .ic { color: var(--on-accent); }
+select { appearance: none; -webkit-appearance: none; width: 100%; height: 40px; border: 0; border-radius: var(--r-ctl); background: var(--fill) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='16' viewBox='0 0 12 16'%3E%3Cpath d='M2 6l4-4 4 4M2 10l4 4 4-4' fill='none' stroke='%23aeaeb2' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 12px center / 11px; padding: 0 32px 0 12px; color: var(--text); cursor: pointer; }
+select option { background: #2c2c2e; color: #fff; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; padding: 0 16px; border: 0; border-radius: var(--r-ctl); background: var(--fill); color: var(--accent2); font: 600 .95em var(--sans); cursor: pointer; transition: background .25s var(--spring), transform .15s var(--spring), filter .2s; }
+.btn:hover { filter: brightness(1.15); }
+.btn.primary { background: var(--accent); color: var(--on-accent); }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.note { padding: 11px 13px; border-radius: 12px; background: var(--fill); color: var(--muted); font-size: .86em; line-height: 1.5; }
+.rangeval { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.rangeval .mono { color: var(--text); font-size: .88em; }
+input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 28px; background: transparent; --p: 0%; cursor: pointer; }
+input[type="range"]::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: linear-gradient(90deg, var(--accent) var(--p), var(--fill2) var(--p)); }
+input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 22px; height: 22px; margin-top: -9px; border-radius: 50%; background: #fff; border: 0; box-shadow: 0 1px 5px rgba(0, 0, 0, .55); }
+input[type="range"]::-moz-range-track { height: 4px; border-radius: 2px; background: var(--fill2); }
+input[type="range"]::-moz-range-progress { height: 4px; border-radius: 2px; background: var(--accent); }
+input[type="range"]::-moz-range-thumb { width: 22px; height: 22px; border-radius: 50%; background: #fff; border: 0; box-shadow: 0 1px 5px rgba(0, 0, 0, .55); }
+.switchrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; font-size: .92em; }
+input.switch { appearance: none; -webkit-appearance: none; flex-shrink: 0; width: 51px; height: 31px; border-radius: 99px; background: var(--fill2); position: relative; cursor: pointer; transition: background .25s var(--spring); }
+input.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%; background: #fff; box-shadow: 0 2px 5px rgba(0, 0, 0, .4); transition: transform .25s var(--spring); }
+input.switch:checked { background: var(--green); }
+input.switch:checked::after { transform: translateX(20px); }
+.menu-btn, .scrim { display: none; }
+
+/* ---------- alert banner (notification style) ---------- */
+.alert { display: flex; align-items: center; gap: 14px; padding: 12px 16px; border-radius: 18px; background: var(--card); border: 1px solid var(--hairline); transition: background .3s var(--spring); }
+.alert .tile { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 10px; background: var(--green); color: #fff; flex-shrink: 0; }
+.alert .txt { display: grid; gap: 1px; min-width: 0; }
+.alert .txt b { font-weight: 600; letter-spacing: -.012em; }
+.alert .txt span { color: var(--muted); font-size: .9em; }
+.alert.bad { background: color-mix(in srgb, var(--orange) 14%, var(--card)); border-color: color-mix(in srgb, var(--orange) 35%, transparent); animation: banner .5s var(--spring) 1; }
+.alert.bad .tile { background: var(--orange); }
+.alert.warn .tile { background: var(--amber); color: #3a2f00; }
+@keyframes banner { from { transform: translateY(-6px); opacity: .4; } }
+
+/* ---------- tabs: segmented control ---------- */
+.tabs { display: inline-flex; gap: 2px; padding: 3px; background: var(--fill); border-radius: 13px; overflow-x: auto; scrollbar-width: none; max-width: 100%; justify-self: start; }
+.tabs button { border: 0; background: transparent; padding: 0 16px; min-height: 36px; border-radius: 10px; color: var(--muted); font: 500 .94em var(--sans); cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; gap: 8px; transition: background .25s var(--spring), color .2s, transform .15s var(--spring); }
+.tabs button:hover { color: var(--text); }
+.tabs button[aria-selected="true"] { background: var(--thumb); color: var(--text); box-shadow: 0 2px 6px rgba(0, 0, 0, .35), 0 0 0 .5px rgba(255, 255, 255, .06); }
+.panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.panel[hidden] { display: none; }
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } }
+.panel > *, .hero > * { animation: rise .45s var(--spring) both; }
+.panel > :nth-child(2), .hero > :nth-child(2) { animation-delay: .06s; }
+.panel > :nth-child(3) { animation-delay: .12s; }
+.panel > :nth-child(4) { animation-delay: .18s; }
+
+/* ---------- overview ---------- */
+.metrics { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 12px; }
+.metric { padding: 14px 16px; border-radius: 18px; }
+.metric .v { font: 600 1.45em/1.25 var(--display); letter-spacing: -.025em; margin-top: 3px; overflow-wrap: anywhere; }
+.hero { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.engine { padding: 14px; }
+.engine3d-root { position: relative; width: 100%; height: clamp(340px, 36vw, 500px); border-radius: var(--r-inner); overflow: hidden; outline: none; background: radial-gradient(120% 90% at 50% 15%, #1d1d21 0%, #0b0b0d 80%); }
+.engine3d-root canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+.engine3d-root:not(.ready)::after { content: "Loading engine view…"; position: absolute; inset: 0; display: grid; place-items: center; color: var(--dim); font-size: .9em; pointer-events: none; }
+.engine3d-hud { position: absolute; left: 16px; top: 14px; right: 16px; pointer-events: none; font: 500 12px/1.55 var(--mono); color: var(--muted); z-index: 1; }
+.engine3d-hud div:nth-child(2) { font-weight: 600; margin-top: 2px; }
+.engine3d-controls { position: absolute; right: 12px; bottom: 12px; z-index: 2; }
+.engine3d-controls button { height: 32px; padding: 0 14px; border: 0; border-radius: 999px; cursor: pointer; font: 600 13px var(--sans); color: var(--text); background: var(--glass); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); transition: transform .15s var(--spring), filter .2s; }
+.engine3d-controls button:hover { filter: brightness(1.2); }
+.engine3d-fallback[hidden], .engine3d-controls[hidden] { display: none; }
+.engine3d-fallback { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 16px; background: #0b0b0d; color: var(--text); text-align: center; z-index: 3; }
+.engine3d-fallback svg { stroke: var(--accent2); }
+.engine3d-fallback-status { font: 500 13px/1.5 var(--mono); color: var(--muted); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 14px 4px 0; font-size: .82em; color: var(--muted); }
+.legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: currentColor; }
+.cylrow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
+.cyl { padding: 10px 12px; border-radius: 12px; background: var(--card2); font-size: .86em; min-width: 0; color: var(--muted); }
+.cyl b { display: block; font: 600 1.02em var(--display); color: var(--text); letter-spacing: -.01em; }
+.cyl.hot { background: color-mix(in srgb, var(--red) 20%, var(--card2)); color: #ffc7c3; }
+.cyl.hot b { color: #ff8a82; }
+#engWhere:not(:empty) { margin-top: 12px; }
+.where { border-radius: var(--r-inner); padding: 13px 14px; background: var(--card2); display: grid; gap: 10px; }
+.where .cy { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; align-items: end; height: 66px; }
+.where .cy div { display: grid; align-items: end; justify-items: center; height: 100%; gap: 4px; font-size: .78em; color: var(--muted); grid-template-rows: 1fr auto; }
+.where .cy span { display: block; width: 100%; max-width: 46px; background: var(--fill2); border-radius: 6px 6px 3px 3px; transition: height .4s var(--spring); align-self: end; }
+.where .cy .hot span { background: var(--red); }
+.diag { padding: 18px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.d-head { display: flex; align-items: center; gap: 14px; }
+.badge { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 15px; background: color-mix(in srgb, currentColor 18%, transparent); transition: color .3s; flex-shrink: 0; }
+.d-title { font: 700 1.55em/1.2 var(--display); letter-spacing: -.028em; transition: color .3s; text-wrap: balance; }
+.d-sub { color: var(--muted); font-size: .92em; }
+.d-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 18px; }
+.d-grid .n { font: 600 1.15em var(--display); letter-spacing: -.02em; }
+.bar { height: 6px; border-radius: 3px; background: var(--fill); margin-top: 8px; position: relative; overflow: hidden; }
+.bar > i { display: block; height: 100%; border-radius: 3px; background: var(--accent); transition: width .4s var(--spring); }
+.bar > b { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; opacity: .85; }
+.strength { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.strength .head { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+.segs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.segs i { height: 6px; border-radius: 3px; background: var(--fill); }
+.strength ul, .why ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.strength li { display: flex; gap: 10px; align-items: center; font-size: .94em; }
+.strength li.no { color: var(--muted); } .strength li.ok .ic { color: var(--green); }
+.why ol { counter-reset: w; margin-top: 10px; }
+.why li { counter-increment: w; position: relative; padding-left: 32px; font-size: .94em; line-height: 1.5; }
+.why li::before { content: counter(w); position: absolute; left: 0; top: 0; width: 22px; height: 22px; border-radius: 50%; background: var(--fill); color: var(--accent2); font: 600 .78em/22px var(--sans); text-align: center; }
+.why .z { font-size: .82em; color: var(--dim); white-space: nowrap; }
+.about p { margin-top: 6px; color: var(--muted); font-size: .94em; line-height: 1.55; }
+.dnote { color: var(--dim); font-size: .82em; border-top: 1px solid var(--line); padding-top: 14px; }
+.pill.alertpill { color: var(--orange); background: color-mix(in srgb, var(--orange) 16%, transparent); font-weight: 600; }
+.pill.okpill { color: var(--green); background: color-mix(in srgb, var(--green) 15%, transparent); font-weight: 600; }
+
+/* ---------- engine data ---------- */
+.tele { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+.t { padding: 14px 16px 10px; border-radius: 18px; }
+.t .r { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.t .val { font: 600 1.65em/1.2 var(--display); letter-spacing: -.03em; margin-top: 4px; white-space: nowrap; }
+.t .u { font: 500 .5em var(--sans); color: var(--muted); margin-left: 4px; letter-spacing: 0; }
+.t canvas { display: block; width: 100%; height: 32px; margin-top: 8px; }
+.live { display: inline-flex; gap: 6px; align-items: center; font: 500 .78em var(--sans); color: var(--green); }
+.live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.chart { padding: 12px 14px; }
+.chart canvas { display: block; width: 100%; }
+table { width: 100%; border-collapse: collapse; font-size: .92em; }
+th { text-align: left; font-weight: 500; font-size: .88em; color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--line); }
+td { padding: 11px 10px; border-bottom: 1px solid var(--hairline); }
+td.num { text-align: right; } th.num { text-align: right; }
+.scroll { overflow-x: auto; }
+.skip { position: absolute; left: -9999px; top: 8px; z-index: 100; padding: 8px 14px; border-radius: 10px; background: var(--card2); color: var(--text); }
+.skip:focus { left: 16px; }
+
+/* ---------- tweak sheet ---------- */
+.tw-btn { position: fixed; right: max(16px, env(safe-area-inset-right, 0px)); bottom: max(16px, env(safe-area-inset-bottom, 0px)); z-index: 30; border-radius: 999px; background: var(--glass); color: var(--text); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); box-shadow: 0 8px 28px rgba(0, 0, 0, .45); }
+.tw { position: fixed; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(max(16px, env(safe-area-inset-bottom, 0px)) + 54px); z-index: 30; width: min(310px, calc(100vw - 32px)); padding: 16px; display: grid; gap: 14px; background: var(--glass); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); box-shadow: 0 24px 60px rgba(0, 0, 0, .55); border-radius: 22px; }
+.tw[hidden] { display: none; }
+.swatches { display: flex; gap: 12px; padding: 4px 2px; }
+.swatches button { width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; background: var(--sw); cursor: pointer; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .25); transition: transform .2s var(--spring), box-shadow .2s var(--spring); }
+.swatches button:hover { transform: scale(1.08); }
+.swatches button[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--card2), 0 0 0 4px var(--sw); }
+
+/* pressed feedback */
+.btn:active, .chip:active, .seg button:active, .tabs button:active, .engine3d-controls button:active { transform: scale(.97); }
+
+/* ---------- responsive ---------- */
+@media (max-width: 1240px) { .metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); } .tele { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 1000px) { .hero, .two { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 900px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+  .side { position: fixed; z-index: 40; inset: 0 auto 0 0; width: min(330px, 90vw); max-height: none; border-radius: 0 24px 24px 0; transform: translateX(-104%); transition: transform .35s var(--spring); padding-top: max(18px, env(safe-area-inset-top, 0px)); padding-left: max(18px, env(safe-area-inset-left, 0px)); background: var(--card2); }
+  .side.open { transform: none; box-shadow: 0 0 60px #000; }
+  .scrim { display: block; position: fixed; inset: 0; z-index: 35; background: rgba(0, 0, 0, .55); }
+  .scrim[hidden] { display: none; }
+  .menu-btn { display: inline-flex; width: 40px; padding: 0; }
+}
+@media (max-width: 640px) {
+  .metrics, .tele { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .header .div { display: none; } .header .product { flex-basis: 100%; }
+  .drivex { font-size: 1.3em; }
+  .tabs button { padding: 0 12px; }
+  .cylrow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .engine3d-hud div:first-child { display: none; }
+}
+/* ---------- whitespace pass: 8-pt spacing scale (4 8 12 16 24 32 48), grouping by space ---------- */
+.main { gap: 0; }
+.main > .header { margin-top: 16px; }
+.statusline { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 8px 4px 0; font-size: .84em; color: var(--dim); }
+.statusline b { color: var(--muted); font-weight: 500; }
+.alert { margin-top: 12px; padding: 12px 16px; }
+.alert .txt { max-width: 70ch; }
+.tabs { margin-top: 32px; }
+.panel { margin-top: 24px; gap: 32px; }
+.metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.metric { padding: 20px 24px; }
+.metric .v { font-size: 2em; margin-top: 8px; }
+.hero { gap: 16px; align-items: stretch; }
+.engine { padding: 16px; display: flex; flex-direction: column; }
+.engine3d-hud { position: static; margin: 4px 8px 12px; }
+.engine3d-root { height: clamp(380px, 40vw, 600px); flex: 1; }
+.diag { padding: 24px; gap: 24px; align-content: start; }
+.detail { padding: 20px 24px; display: grid; gap: 16px; }
+.cylrow { margin-top: 0; gap: 12px; }
+.cylrow .quiet { grid-column: 1 / -1; margin: 0; color: var(--muted); }
+.cyl { padding: 12px 16px; }
+#engWhere:not(:empty) { margin-top: 0; }
+.where { padding: 16px; }
+.legend { margin: 0; }
+details.more { border-top: 1px solid var(--line); padding-top: 12px; }
+details.more > summary { cursor: pointer; color: var(--accent2); font-size: .92em; list-style: none; display: flex; align-items: center; gap: 8px; }
+details.more > summary::-webkit-details-marker { display: none; }
+details.more > summary::before { content: "›"; font-size: 1.3em; line-height: 1; transition: transform .25s var(--spring); }
+details.more[open] > summary::before { transform: rotate(90deg); }
+details.more > :not(summary) { margin-top: 12px; }
+.why details ol { counter-reset: w 2; }
+.empty { display: grid; justify-items: center; align-content: center; text-align: center; gap: 8px; min-height: 280px; padding: 48px 16px; color: var(--muted); }
+.empty b { color: var(--text); font: 600 1.2em var(--display); letter-spacing: -.02em; }
+.empty .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--accent2); margin-bottom: 8px; animation: breathe 1.6s ease-in-out infinite; }
+@keyframes breathe { 50% { transform: scale(1.7); opacity: .35; } }
+.note, .about p, .help { max-width: 65ch; }
+.note { background: none; padding: 0; }
+.side { gap: 32px; padding: 24px 20px; }
+.sb-brand { border-bottom: 0; padding-bottom: 0; }
+.sec { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.subsec { margin-top: 32px; }
+.help { margin: 0 0 12px; }
+.info { display: inline-grid; place-items: center; width: 20px; height: 20px; padding: 0; border-radius: 50%; border: 0; background: var(--fill); color: var(--muted); font: italic 600 12px/1 Georgia, serif; cursor: pointer; }
+.info[aria-expanded="true"] { background: var(--accent); color: var(--on-accent); }
+.pad { padding: 20px 24px; }
+.chart { padding: 16px 20px 12px; }
+.t { padding: 16px 16px 12px; }
+.tele { gap: 16px; }
+.two { gap: 24px; }
+@media (max-width: 1000px) { .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) {
+  .metrics { gap: 12px; }
+  .metric { padding: 16px; }
+  .metric .v { font-size: 1.6em; }
+  .tabs { margin-top: 24px; }
+  .panel { gap: 24px; }
+  .legend, .statusline .resp { display: none; }
+  .engine3d-root { height: 340px; flex: none; }
+  .diag, .detail { padding: 20px 16px; }
+}
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+
+<a class="skip" href="#main">Skip to content</a>
+<div class="app" id="app">
+  <aside class="side card" id="side" aria-label="Controls">
+    <div class="sb-brand"><span class="drivex sm" role="img" aria-label="DRIVEX"><span aria-hidden="true">DRIVE<span class="x">X</span></span></span><span class="sub">EngineSense · diagnostics</span></div>
+
+    <div class="field"><div class="lbl">Mode</div>
+      <div class="seg" role="group" aria-label="Mode"><button type="button" data-mode="replay" aria-pressed="true">Replay</button><button type="button" data-mode="lab" aria-pressed="false">Fault lab</button></div></div>
+
+    <section id="replayPanel">
+      <div class="sec">Scenario <button class="info" type="button" aria-expanded="false" aria-controls="scenHelp" aria-label="About scenarios">i</button></div>
+      <p class="help" id="scenHelp" hidden>Each scenario replays a sample run. Abnormal vibration is shown as valve-train impacts, the fault type the model is trained on.</p>
+      <div class="chips" id="chips"></div>
+      <div class="field mt12"><label class="lbl" for="preset">Demo preset</label><select id="preset"></select></div>
+      <div class="note mt12" id="presetNote"></div>
+      <div class="sec subsec">Run selection <button class="info" type="button" aria-expanded="false" aria-controls="dsHelp" aria-label="About datasets">i</button></div>
+      <p class="help" id="dsHelp" hidden></p>
+      <div class="field"><label class="lbl" for="dataset">Dataset</label>
+        <select id="dataset"><option value="core_v1">core_v1 · one fault per run</option><option value="core_v2">core_v2 · several faults per run</option></select></div>
+      <div class="field mt12"><label class="lbl" for="run">Run</label><select id="run"></select></div>
+    </section>
+
+    <section id="labPanel" hidden>
+      <div class="sec">Fault-injection lab <button class="info" type="button" aria-expanded="false" aria-controls="labHelp" aria-label="About the fault lab">i</button></div>
+      <p class="help" id="labHelp" hidden>Healthy sample recording with a fault added on request.</p>
+      <form id="labForm" class="field" style="gap:12px">
+        <div class="field"><label class="lbl" for="labFault">Injected fault</label>
+          <select id="labFault"><option value="none">No fault</option><option value="misfire">Misfire</option><option value="knock_like" selected>Knock bursts</option><option value="valve">Valve-train impacts</option></select></div>
+        <div class="field"><label class="lbl" for="labCyl">Affected cylinder</label>
+          <select id="labCyl"><option>1</option><option>2</option><option selected>3</option><option>4</option></select></div>
+        <div class="field"><div class="rangeval"><label class="lbl" for="labSev">Fault severity</label><span id="labSevV" class="mono">0.50</span></div><input type="range" id="labSev" min="0.1" max="1" step="0.05" value="0.5"></div>
+        <div class="field"><div class="rangeval"><label class="lbl" for="labOn">Fault onset</label><span id="labOnV" class="mono">8.0 s</span></div><input type="range" id="labOn" min="3" max="25" step="0.5" value="8"></div>
+        <button class="btn primary" type="submit">Apply and replay</button>
+      </form>
+    </section>
+
+    <section>
+      <div class="sec">Playback</div>
+      <div class="field"><div class="lbl">Speed</div>
+        <div class="seg" id="speed" role="group" aria-label="Speed"><button type="button" data-v="0.5" aria-pressed="false">0.5×</button><button type="button" data-v="1" aria-pressed="true">1×</button><button type="button" data-v="2" aria-pressed="false">2×</button><button type="button" data-v="4" aria-pressed="false">4×</button></div></div>
+      <div class="row2 mt12"><button class="btn primary" id="play" type="button"></button><button class="btn" id="restart" type="button"></button></div>
+      <div class="field mt12"><div class="rangeval"><label class="lbl" for="seek">Seek</label><span id="seekV" class="mono">0.0 s</span></div>
+        <input type="range" id="seek" min="0" max="30" step="0.5" value="0"><button class="btn" id="seekBtn" type="button">Seek</button></div>
+      <label class="switchrow mt12"><span>Show evaluation truth overlay</span><input type="checkbox" id="truth" class="switch" role="switch"></label>
+      <p class="small mt12" id="modelCap">Model v1.0.0 · window 2 s / step 0.5 s</p>
+    </section>
+  </aside>
+  <div class="scrim" id="scrim" hidden></div>
+
+  <main class="main" id="main">
+    <div class="notice" role="note"><b>DESIGN PROTOTYPE</b><span>Sample data generated in the browser for layout review. Not connected to any engine, model or backend.</span></div>
+
+    <header class="header">
+      <button class="btn menu-btn" id="menuBtn" type="button" aria-label="Open controls" aria-expanded="false"></button>
+      <span class="drivex" role="img" aria-label="DRIVEX"><span aria-hidden="true">DRIVE<span class="x">X</span></span></span>
+      <span class="div" aria-hidden="true"></span>
+      <div class="product"><h1>EngineSense</h1><div class="tag">Engine diagnostics from sound, vibration and sensor data</div></div>
+      <span class="grow"></span>
+      <span class="pill" id="clock"></span>
+    </header>
+    <div class="statusline" id="statusline"></div>
+
+    <div class="alert" id="alert" role="status"></div>
+
+    <div class="tabs" role="tablist" id="tabs" aria-label="Dashboard sections">
+      <button role="tab" aria-selected="true" data-tab="o" id="tab-o" aria-controls="p-o"></button>
+      <button role="tab" aria-selected="false" data-tab="s" id="tab-s" aria-controls="p-s" tabindex="-1"></button>
+      <button role="tab" aria-selected="false" data-tab="f" id="tab-f" aria-controls="p-f" tabindex="-1"></button>
+      <button role="tab" aria-selected="false" data-tab="d" id="tab-d" aria-controls="p-d" tabindex="-1"></button>
+      <button role="tab" aria-selected="false" data-tab="h" id="tab-h" aria-controls="p-h" tabindex="-1"></button>
+    </div>
+
+    <section class="panel" id="p-o" role="tabpanel" aria-labelledby="tab-o">
+      <div class="metrics" id="metrics"></div>
+      <div class="hero">
+        <section class="card engine" aria-label="Engine view">
+          <div class="engine3d-hud" data-engine-hud aria-hidden="true"></div>
+          <div class="engine3d-root" id="engRoot" tabindex="0" role="img" aria-label="3D engine view. Drag or use arrow keys to orbit, plus and minus to zoom.">
+            <div class="engine3d-controls"><button type="button" data-action="reset">Reset view</button></div>
+            <div class="engine3d-fallback" hidden></div>
+          </div>
+        </section>
+        <section class="card diag" id="diag" aria-label="Current diagnosis"></section>
+      </div>
+      <section class="card detail" aria-label="Cylinders">
+        <div class="cylrow" id="cylRow"></div>
+        <div id="engWhere"></div>
+        <div class="legend" id="legend"></div>
+      </section>
+    </section>
+
+    <section class="panel" id="p-s" role="tabpanel" aria-labelledby="tab-s" hidden>
+      <div class="card chart"><canvas id="cWave" data-h="480"></canvas></div>
+      <p class="small">Waveforms are decimated for display and shown at illustrative scale. Shaded bands mark the segments the model flagged.</p>
+    </section>
+
+    <section class="panel" id="p-f" role="tabpanel" aria-labelledby="tab-f" hidden>
+      <div class="two">
+        <div class="card chart"><canvas id="cPsd" data-h="360"></canvas></div>
+        <div class="card chart"><canvas id="cSpec" data-h="360"></canvas></div>
+      </div>
+    </section>
+
+    <section class="panel" id="p-d" role="tabpanel" aria-labelledby="tab-d" hidden>
+      <div class="tele" id="tele"></div>
+      <div class="card chart"><canvas id="cTele" data-h="400"></canvas></div>
+    </section>
+
+    <section class="panel" id="p-h" role="tabpanel" aria-labelledby="tab-h" hidden>
+      <div class="card chart"><canvas id="cTime" data-h="276"></canvas></div>
+      <div class="card chart"><canvas id="cHealth" data-h="344"></canvas></div>
+      <div class="two">
+        <div class="card pad"><div class="sec">Biggest differences from normal</div><div class="scroll"><table id="diffTable"></table></div><p class="small" style="margin-top:8px">A deviation shows what changed; it does not prove a fault.</p></div>
+        <div class="card pad"><div class="sec">Valve wear trend (simulated)</div><canvas id="cWear" data-h="190" style="display:block;width:100%"></canvas><p class="small" style="margin-top:6px">Rolling mean of valve-train probability. Accelerated simulation, not a remaining-life estimate.</p></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<button class="btn tw-btn" id="twBtn" type="button" aria-expanded="false" aria-controls="tw"></button>
+<div class="card tw" id="tw" hidden>
+  <div class="sec" style="margin:0">Tweak the look</div>
+  <div class="field"><div class="lbl">Background</div><div class="seg" data-tw="bg"><button type="button" data-v="graphite">Graphite</button><button type="button" data-v="black">Black</button></div></div>
+  <div class="field"><div class="lbl">Accent color</div><div class="swatches" data-tw="accent" role="group" aria-label="Accent color"><button type="button" data-v="blue" aria-label="Blue" style="--sw:#0a84ff"></button><button type="button" data-v="steel" aria-label="Steel" style="--sw:#4f8cff"></button><button type="button" data-v="indigo" aria-label="Indigo" style="--sw:#5e5ce6"></button><button type="button" data-v="mint" aria-label="Mint" style="--sw:#63e6e2"></button><button type="button" data-v="graphite" aria-label="Graphite" style="--sw:#8e8e93"></button></div><div class="small" id="accentName">Blue</div></div>
+  <div class="field"><div class="lbl">Frosted glass</div><div class="seg" data-tw="glass"><button type="button" data-v="on">On</button><button type="button" data-v="off">Off</button></div></div>
+  <div class="field"><div class="lbl">Text size</div><div class="seg" data-tw="size"><button type="button" data-v="s">Small</button><button type="button" data-v="m">Medium</button><button type="button" data-v="l">Large</button></div></div>
+  <p class="small">Only for trying looks. Tell me which combination you like.</p>
+</div>
+
+<script>
+/*ENGINE_JS*/
+</script>
+<script>
+"use strict";
+const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v)), sq = (x) => x * x;
+const PI = Math.PI;
+function rnd(i) { i = Math.imul(i | 0, 0x9E3779B1); i ^= i >>> 15; i = Math.imul(i, 0x85EBCA6B); i ^= i >>> 13; return (i >>> 0) / 4294967296; }
+const nz = (i, s = 0) => rnd(i * 31 + s * 7919) * 2 - 1;
+const cv = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+/* ---------- icons ---------- */
+const P = {
+  check: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/>',
+  flame: '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>',
+  zap: '<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>', activity: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+  help: '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
+  alert: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+  play: '<path d="m6 3 14 9-14 9z"/>', pause: '<rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>',
+  restart: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>',
+  menu: '<path d="M4 6h16M4 12h16M4 18h16"/>', sliders: '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
+  wave: '<path d="M2 12h3l2-7 4 14 3-10 2 3h6"/>', bars: '<path d="M4 20V10M10 20V4M16 20v-8M22 20V8"/>',
+  gauge: '<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>', line: '<path d="M3 3v18h18"/><path d="m7 15 4-5 3 3 5-7"/>',
+  grid: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>',
+};
+const ic = (n, s = 18) => `<svg class="ic" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n]}</svg>`;
+
+/* ---------- sample scenarios ---------- */
+const DUR = 30, WARM = 2, THR = 2.51, SLOT_HZ = 12;
+const FAULTC = "var(--orange)";
+const CLS = {
+  normal: { label: "Normal", color: "var(--green)", icon: "check", fire: "#ff8a2a", fireName: "orange" },
+  misfire: { label: "Misfire", color: FAULTC, icon: "flame", fire: "#3b9dff", fireName: "blue" },
+  knock_like: { label: "Knock", color: FAULTC, icon: "zap", fire: "#b48cff", fireName: "lavender" },
+  valve: { label: "Valve-train impacts", color: FAULTC, icon: "activity", fire: "#22c55e", fireName: "green" },
+  uncertain: { label: "Uncertain", color: "var(--amber)", icon: "help" },
+  warming: { label: "Warming up", color: "var(--dim)", icon: "help" },
+};
+const EK = { normal: "normal", misfire: "misfire", knock_like: "knock_like", valve: "valve_clearance_like" };
+const THRF = { misfire: .5, knock_like: .85, valve: .95 }; // per-fault detection thresholds (v2)
+const DATASETS = {
+  core_v1: { model: "v1.0.0", multi: false, help: "One fault per run. The model names one class for each window." },
+  core_v2: { model: "multi-fault v2.0.0", multi: true, help: "Faults can overlap. Each fault has its own detector, probability, alert and cylinder." },
+};
+const RUNS = {
+  core_v1: [
+    { id: "run_00226", engine: "engine_029", split: "test", faults: [] },
+    { id: "run_00237", engine: "engine_030", split: "test", faults: [{ cls: "knock_like", cyl: 1, sev: .71, onset: 12.5 }] },
+    { id: "run_00235", engine: "engine_030", split: "test", faults: [{ cls: "misfire", cyl: 4, sev: .6, onset: 15.1 }] },
+    { id: "run_00241", engine: "engine_031", split: "test", faults: [{ cls: "valve", cyl: 2, sev: .65, onset: 9 }] },
+  ],
+  core_v2: [
+    { id: "run_00019", engine: "engine_041", split: "test", faults: [] },
+    { id: "run_00031", engine: "engine_044", split: "test", faults: [{ cls: "misfire", cyl: 4, sev: .6, onset: 11.2 }, { cls: "knock_like", cyl: 1, sev: .7, onset: 15.5 }] },
+    { id: "run_00058", engine: "engine_046", split: "test", faults: [{ cls: "knock_like", cyl: 2, sev: .65, onset: 8.4 }, { cls: "valve", cyl: 3, sev: .6, onset: 13 }] },
+    { id: "run_00102", engine: "engine_047", split: "test", faults: [{ cls: "misfire", cyl: 1, sev: .55, onset: 9.5 }, { cls: "knock_like", cyl: 3, sev: .7, onset: 13.5 }, { cls: "valve", cyl: 4, sev: .6, onset: 17 }] },
+  ],
+};
+const runOf = (ds, id) => RUNS[ds].find((r) => r.id === id);
+const PRESETS = [
+  { name: "1. Normal operation with a load step", scen: "normal", ds: "core_v1", run: "run_00226", note: "Sample run. Healthy engine with a load step at about 20 s: decisions are normal or occasionally uncertain, and no alert is raised." },
+  { name: "2. Knock bursts, then a load step", scen: "knock_like", ds: "core_v1", run: "run_00237", note: "Sample run. Knock bursts from 12.5 s (severity 0.71). Alert about 2.5 s later; evidence shows high-band envelope deviations." },
+  { name: "3. Intermittent misfire", scen: "misfire", ds: "core_v1", run: "run_00235", note: "Sample run. Misfire from 15.1 s. The top evidence is variation in the audio firing peaks." },
+  { name: "4. Valve-train impacts (wear)", scen: "valve", ds: "core_v1", run: "run_00241", note: "Sample run. Valve-train impacts from 9 s: repeated sharp ticks in the high vibration band." },
+  { name: "5. Misfire and knock together (v2)", scen: null, ds: "core_v2", run: "run_00031", note: "Sample run. Misfire in cylinder 4 from 11.2 s, then knock in cylinder 1 from 15.5 s. Each fault has its own probability, alert and cylinder." },
+  { name: "6. Three faults at once (v2)", scen: null, ds: "core_v2", run: "run_00102", note: "Sample run. Misfire, knock and valve-train impacts start one after another in different cylinders." },
+];
+const S = { openWhy: false, openAbout: false, ds: "core_v1", run: "run_00237", preset: 1, faults: RUNS.core_v1[1].faults.map((f) => ({ ...f })), t: 0, playing: false, speed: 1, truth: false, tab: "o", mode: "replay" };
+function meta(key) {
+  if (CLS[key]) return CLS[key];
+  return { label: key.split("+").map((k) => CLS[k].label).join(" + "), color: FAULTC, icon: "alert" };
+}
+
+function decide(t) {
+  const F = S.faults, k2 = Math.floor(t * 2);
+  const r = { t, cls: "normal", conf: .83 + .03 * nz(k2, 1), anom: 1.35 + .22 * Math.sin(t * 1.7) + .08 * nz(k2, 2), alert: null, alerts: [], located: null, locConf: 0, fl: [], detected: [] };
+  if (t < WARM) return { ...r, cls: "warming", conf: null, anom: null };
+  if (t >= 20 && t < 21.4 && !F.some((f) => t >= f.onset)) { r.cls = "uncertain"; r.anom = 2.1; r.conf = .62; }
+  F.forEach((f) => {
+    const since = t - f.onset; if (since < 0) return;
+    const thr = THRF[f.cls], e = { cls: f.cls, cyl: f.cyl, since, state: "uncertain", prob: 0, alert: false, located: null, locConf: 0 };
+    if (since < 1.5) e.prob = thr * .88 + .03 * since;
+    else { e.state = "fault"; e.prob = clamp(thr + (1 - thr) * clamp(.5 + .45 * f.sev, 0, .97) + .01 * Math.sin(t * 2 + f.cyl), 0, .99); }
+    e.alert = since >= 2.5;
+    if (since >= 3.5) { e.located = f.cyl; e.locConf = clamp(.45 + (since - 3.5) * .3, .45, 1); }
+    r.fl.push(e);
+  });
+  const det = r.fl.filter((e) => e.state === "fault"), unc = r.fl.filter((e) => e.state === "uncertain");
+  if (det.length) {
+    r.detected = det.map((e) => e.cls); r.cls = r.detected.join("+");
+    r.conf = Math.max(...det.map((e) => e.prob)); r.anom = 2.6 + 1.1 * Math.max(...F.map((f) => f.sev)) + .15 * Math.sin(t * 1.3) + .35 * (det.length - 1);
+  } else if (unc.length) { r.cls = "uncertain"; r.anom = 2 + Math.min(...unc.map((e) => e.since)) * .5; r.conf = .6; }
+  const al = r.fl.filter((e) => e.alert); r.alerts = al.map((e) => e.cls); r.alert = r.alerts.join("+") || null;
+  const loc = r.fl.filter((e) => e.located);
+  if (loc.length) { r.located = loc[0].cyl; r.locConf = Math.max(...loc.map((e) => e.locConf)); }
+  return r;
+}
+const rpmAt = (t) => 1500 + 28 * Math.sin(t * .9) + 10 * nz(Math.floor(t * 20)) - (t > 20 ? 60 * clamp((t - 20) / 1.5, 0, 1) : 0);
+const TELE = [
+  { label: "RPM", unit: "rpm", fmt: (v) => Math.round(v).toLocaleString("en-US"), f: rpmAt, lo: 1380, hi: 1580 },
+  { label: "Load", unit: "%", fmt: (v) => v.toFixed(1), f: (t) => 32 + 2.5 * Math.sin(t * .5) + 1.2 * nz(Math.floor(t * 4), 3) + (t > 20 ? 6 * clamp((t - 20) / 1.5, 0, 1) : 0), lo: 24, hi: 46 },
+  { label: "Throttle", unit: "%", fmt: (v) => v.toFixed(1), f: (t) => 34 + 2 * Math.sin(t * .6 + 1) + nz(Math.floor(t * 4), 4) + (t > 20 ? 5 * clamp((t - 20) / 1.5, 0, 1) : 0), lo: 26, hi: 46 },
+  { label: "Coolant", unit: "°C", fmt: (v) => v.toFixed(1), f: (t) => 78 + .28 * t + .15 * nz(Math.floor(t * 2), 5), lo: 74, hi: 90 },
+  { label: "Short-term trim", unit: "%", fmt: (v) => (v >= 0 ? "+" : "") + v.toFixed(1), f: (t) => 1.2 * Math.sin(t * 1.3) + .9 * nz(Math.floor(t * 2), 6), lo: -4, hi: 4 },
+  { label: "Long-term trim", unit: "%", fmt: (v) => (v >= 0 ? "+" : "") + v.toFixed(1), f: (t) => -2.1 + .15 * nz(Math.floor(t), 7), lo: -4, hi: 4 },
+];
+const WHY = {
+  normal: [["Firing pulses are regular", "+0.8"], ["Overall vibration level is close to normal", "-0.4"], ["No sharp bursts in the 5–10 kHz band", "+0.3"]],
+  knock_like: [["Audio burstiness of the 5–10 kHz envelope is far above normal", "+8.5"], ["Audio spikiness of the 5–10 kHz envelope is far above normal", "+8.7"], ["Vibration burstiness of the 5–10 kHz envelope is well above normal", "+4.2"]],
+  misfire: [["Audio firing-peak variation is far above normal", "+12.5"], ["Vibration cycle-to-cycle variation of firing pulses is well above normal", "+4.0"], ["Weak or missing firings: 9 of 96 pulses", "+3.1"]],
+  valve: [["Vibration 5–10 kHz impact density is far above normal", "+7.1"], ["Repeated sharp ticks near valve events", "+5.3"], ["Overall vibration level is slightly above normal", "+2.0"]],
+};
+const ABOUT = {
+  normal: "Sound and vibration match the normal signature for this operating range.",
+  knock_like: "Uncontrolled auto-ignition after firing causes sharp, short high-frequency pressure bursts. Typical checks on a real engine: fuel octane, ignition timing, carbon deposits, cooling.",
+  misfire: "A cylinder fails to burn its charge on some strokes, so firing pulses become weak or missing. Typical checks: spark plug, coil, injector, compression.",
+  valve: "Excess valve clearance makes repeated sharp ticks as the valves seat. Typical checks: valve lash adjustment, camshaft and lifter wear.",
+};
+
+/* ---------- static UI ---------- */
+$("#menuBtn").innerHTML = ic("menu", 20); $("#twBtn").innerHTML = ic("sliders", 16) + " Tweak look";
+$("#tab-o").innerHTML = ic("grid", 15) + " Overview"; $("#tab-s").innerHTML = ic("wave", 15) + " Signals"; $("#tab-f").innerHTML = ic("bars", 15) + " Frequencies";
+$("#tab-d").innerHTML = ic("gauge", 15) + " Engine data"; $("#tab-h").innerHTML = ic("line", 15) + " History";
+$("#restart").innerHTML = ic("restart", 15) + " Restart";
+$("#chips").innerHTML = [["normal", "check"], ["knock_like", "zap"], ["misfire", "flame"], ["valve", "activity"]].map(([k, i]) => `<button class="chip" type="button" data-scen="${k}" aria-pressed="false">${ic(i, 15)}${k === "knock_like" ? "Knock" : CLS[k].label}</button>`).join("");
+$("#preset").innerHTML = `<option value="-1">(none)</option>` + PRESETS.map((p, i) => `<option value="${i}">${p.name}</option>`).join("");
+$("#legend").innerHTML = ["normal", "misfire", "knock_like", "valve"].map((k) => `<span><i style="color:${CLS[k].fire}"></i>${k === "valve" ? "Valve-train" : CLS[k].label} · ${CLS[k].fireName} spark</span>`).join("") + `<span><i style="color:var(--red)"></i>Red glow · faulty cylinder</span>`;
+$("#metrics").innerHTML = ["Decision", "Confidence", "Anomaly score", "Replay time"].map((l, i) => `<div class="card metric"><div class="lbl">${l}</div><div class="v" id="m${i}">–</div></div>`).join("");
+$("#tele").innerHTML = TELE.map((m, i) => `<div class="card t"><div class="r"><span class="lbl">${m.label}</span><span class="live">Live</span></div><div class="val" id="tv${i}">–<span class="u">${m.unit}</span></div><canvas id="ts${i}" data-h="30"></canvas></div>`).join("");
+
+/* ---------- 3D engine (ported piston animation, no car) ---------- */
+const engineView = typeof mountEngine === "function" ? mountEngine($("#engRoot")) : { update() {} };
+$("#engRoot").classList.add("ready");
+function engineData(m) {
+  const act = m.fl.filter((e) => e.state === "fault" || e.alert), locd = m.fl.filter((e) => e.located), effects = {};
+  locd.forEach((e) => { effects[e.located - 1] = EK[e.cls]; });
+  const sev = Math.max(0, ...S.faults.map((f) => f.sev)), mt = meta(m.cls), live = S.faults.filter((f) => S.t >= f.onset);
+  const cyls = locd.map((e) => e.located);
+  return {
+    t: S.t, playing: S.playing, rpm: rpmAt(S.t), firing_order: [1, 3, 4, 2], effect: act.length ? EK[act[0].cls] : null,
+    intensity: act.length ? (m.conf || .45) : 0, vibration_ratio: act.length ? 1 + .9 * sev : 1, alert: m.alerts.length ? EK[m.alerts[0]] : null,
+    edge_color: act.length ? "#ff9f0a" : ACCENTS[TW.accent][1],
+    status_text: m.cls === "warming" ? "Model: warming up" : `Model: ${mt.label}${m.conf ? ` · confidence ${m.conf.toFixed(2)}` : ""}${m.alerts.length ? (cyls.length ? ` · cylinder${cyls.length > 1 ? "s" : ""} ${cyls.join(" and ")}` : " · locating cylinder…") : ""}`,
+    model_cylinder: cyls[0] || null, model_cylinders: cyls, cyl_effects: effects,
+    truth_cylinder: S.truth && live.length ? live[0].cyl : null,
+    truth_text: S.truth && live.length ? `Evaluation truth overlay: ${live.map((f) => `${CLS[f.cls].label} in cylinder ${f.cyl}`).join(", ")} (not used by the model)` : null,
+  };
+}
+/* ---------- canvas helpers ---------- */
+function cnv(c) {
+  const h = +c.dataset.h, w = Math.max(60, c.clientWidth), d = window.devicePixelRatio || 1;
+  if (c._w !== w || c._d !== d) { c.width = w * d; c.height = h * d; c.style.height = h + "px"; c._w = w; c._d = d; }
+  const g = c.getContext("2d"); g.setTransform(d, 0, 0, d, 0, 0); g.clearRect(0, 0, w, h); return { g, w, h };
+}
+const FONT = (s, f = "Inter, sans-serif", wgt = 400) => `${wgt} ${s}px ${f}`;
+function axes(g, x0, y0, x1, y1, o = {}) {
+  g.strokeStyle = cv("--line"); g.lineWidth = 1; g.fillStyle = cv("--muted"); g.font = FONT(10.5);
+  (o.yt || []).forEach(([v, lab]) => { const y = y1 - (v - o.lo) / (o.hi - o.lo) * (y1 - y0); g.beginPath(); g.moveTo(x0, y); g.lineTo(x1, y); g.stroke(); g.textAlign = "right"; g.fillText(lab, x0 - 6, y + 3.5); });
+  (o.xt || []).forEach(([v, lab]) => { const x = x0 + (v - o.xlo) / (o.xhi - o.xlo) * (x1 - x0); g.textAlign = "center"; g.fillText(lab, x, y1 + 15); });
+}
+function poly(g, xs, ys, color, lw = 1.6) { g.save(); g.strokeStyle = color; g.lineWidth = lw; g.lineJoin = "round"; g.lineCap = "round"; g.beginPath(); xs.forEach((x, i) => (i ? g.lineTo(x, ys[i]) : g.moveTo(x, ys[i]))); g.stroke(); g.restore(); }
+function title(g, x, y, txt) { g.fillStyle = cv("--text"); g.font = FONT(13, "-apple-system, BlinkMacSystemFont, Inter, sans-serif", 600); g.textAlign = "left"; g.fillText(txt, x, y); }
+
+/* waveforms: illustrative, deterministic in time */
+function wave(t, n) {
+  const F = S.faults, snd = [], vib = [], env = [], bands = [];
+  for (let i = 0; i < n; i++) {
+    const ts = t - 2 + (i / n) * 2, p = Math.floor(ts * SLOT_HZ), ph = ts * SLOT_HZ - p, tp = (p + .25) / SLOT_HZ;
+    let a = Math.exp(-ph * 9) * (1 + .15 * nz(p, 1)), b = Math.exp(-ph * 12) * (1 + .12 * nz(p, 2)), e = .1 + .02 * nz(i + Math.floor(t * 40), 3);
+    F.forEach((f) => {
+      if (!(tp - f.onset > 0 && p % 4 === (f.cyl - 1) % 4 && ts > WARM)) return;
+      if (f.cls === "misfire" && rnd(p) < .85) { a *= .15; b *= .2; }
+      if (f.cls === "knock_like") { const r = Math.exp(-Math.max(ph - .35, 0) * 18) * (ph > .35 ? 1 : 0); b += 1.6 * r * Math.sin(ph * 700); a += .5 * r * Math.sin(ph * 520); e += 1.3 * r; }
+      if (f.cls === "valve") { const r = Math.exp(-Math.abs(ph - .55) * 40); b += .55 * r * Math.sin(ph * 640); e += .7 * r; }
+    });
+    snd.push(a + .09 * nz(i + Math.floor(t * 77), 4)); vib.push(b + .08 * nz(i + Math.floor(t * 61), 5)); env.push(Math.abs(e));
+  }
+  decide(t).fl.filter((e) => e.alert).forEach((e) => {
+    const f = F.find((x) => x.cls === e.cls);
+    for (let p = Math.floor((t - 2) * SLOT_HZ); p <= Math.floor(t * SLOT_HZ); p++) { const tp = (p + .4) / SLOT_HZ; if (p % 4 === (f.cyl - 1) % 4 && tp - f.onset > 0 && tp > t - 2 && tp < t) bands.push([tp - .03, tp + .09]); }
+  });
+  return { snd, vib, env, bands };
+}
+function drawWave() {
+  const { g, w, h } = cnv($("#cWave")), t = Math.max(S.t, WARM), n = 520, W = wave(t, n), L = 46, R = w - 12;
+  const rows = [["Sound · last 2 s", W.snd, cv("--cyan-soft"), 1.6, true], ["Vibration · last 2 s", W.vib, cv("--cyan"), 2, true], ["Sharp vibration impacts (5–10 kHz envelope)", W.env, cv("--text"), 1.8, false]], rh = (h - 72) / 3;
+  rows.forEach(([ttl, ys, col, mx, band], r) => {
+    const y0 = 32 + r * (rh + 14) + 10, y1 = y0 + rh - 30, lo = r === 2 ? 0 : -mx, hi = mx;
+    title(g, L, y0 - 8, ttl);
+    axes(g, L, y0, R, y1, { lo, hi, yt: [[lo, lo.toFixed(1)], [(lo + hi) / 2, ((lo + hi) / 2).toFixed(1)], [hi, hi.toFixed(1)]] });
+    if (band) W.bands.forEach(([a, b]) => { g.fillStyle = "rgba(255,159,10,.2)"; const x = L + (a - (t - 2)) / 2 * (R - L); g.fillRect(x, y0, (b - a) / 2 * (R - L), y1 - y0); g.strokeStyle = "rgba(255,159,10,.55)"; g.strokeRect(x, y0, (b - a) / 2 * (R - L), y1 - y0); });
+    poly(g, ys.map((_, i) => L + i / (n - 1) * (R - L)), ys.map((v) => y1 - (clamp(v, lo, hi) - lo) / (hi - lo) * (y1 - y0)), col, 1);
+    if (r === 2) { g.fillStyle = cv("--muted"); g.textAlign = "center"; g.font = FONT(10.5); [0, .5, 1, 1.5, 2].forEach((d) => g.fillText((t - 2 + d).toFixed(1) + "s", L + d / 2 * (R - L), y1 + 16)); }
+  });
+}
+function psdAt(f, ch, ks) {
+  let db = -30 - 20 * Math.log10(1 + f * 2.6) - (ch ? 0 : 3);
+  [.1, .2, .31, .42].forEach((c, i) => { db += 7 / (1 + ((f - c) / .03) ** 2) / (i + 1); });
+  const g = (c, wd, a) => a * Math.exp(-sq((f - c) / wd));
+  ks.forEach((k) => {
+    if (k === "knock_like") db += g(7.2, 1.7, ch ? 15 : 12) + g(5.6, 1, 6);
+    if (k === "valve") db += g(7.8, .6, ch ? 17 : 6) + g(6.4, .5, ch ? 10 : 3);
+    if (k === "misfire") db += g(1.2, .9, ch ? 7 : 11) + g(.5, .3, 5);
+  });
+  return db;
+}
+function drawPsd(m) {
+  const { g, w, h } = cnv($("#cPsd")), L = 52, R = w - 16, T = 54, B = h - 38, kk = m.detected;
+  title(g, L, 22, "Frequency content now (FFT, dB)");
+  axes(g, L, T, R, B, { lo: -90, hi: -20, xlo: 0, xhi: 12, yt: [-80, -60, -40, -20].map((v) => [v, v]), xt: [0, 2, 4, 6, 8, 10, 12].map((v) => [v, v]) });
+  g.fillStyle = cv("--muted"); g.textAlign = "center"; g.font = FONT(11); g.fillText("kHz", (L + R) / 2, h - 6);
+  [["Sound", 0, cv("--cyan-soft")], ["Vibration", 1, cv("--cyan")]].forEach(([nm, ch, col], j) => {
+    const xs = [], ys = [];
+    for (let i = 0; i <= 160; i++) { const f = i / 160 * 12; xs.push(L + f / 12 * (R - L)); ys.push(B - (clamp(psdAt(f, ch, kk) + 1.4 * nz(i + Math.floor(S.t * 3), 8 + j), -90, -20) + 90) / 70 * (B - T)); }
+    poly(g, xs, ys, col, 1.5); g.fillStyle = col; g.fillRect(R - 170 + j * 84, T + 12, 10, 3); g.fillStyle = cv("--muted"); g.textAlign = "left"; g.font = FONT(11); g.fillText(nm, R - 156 + j * 84, T + 17);
+  });
+}
+const HEAT = [[0, [26, 26, 30]], [.38, [12, 52, 110]], [.68, [10, 132, 255]], [.9, [100, 210, 255]], [1, [255, 255, 255]]];
+function heat(v) { v = clamp(v, 0, 1); for (let i = 1; i < HEAT.length; i++) if (v <= HEAT[i][0]) { const [a, ca] = HEAT[i - 1], [b, cb] = HEAT[i], u = (v - a) / (b - a); return `rgb(${ca.map((x, j) => Math.round(x + (cb[j] - x) * u)).join(",")})`; } return "rgb(235,252,255)"; }
+function drawSpec() {
+  const { g, w, h } = cnv($("#cSpec")), L = 52, R = w - 16, T = 54, B = h - 38, cols = 90, rows = 32, t = Math.max(S.t, 1);
+  title(g, L, 22, "Vibration frequencies, last 10 s (STFT)");
+  const cw = (R - L) / cols, rh = (B - T) / rows;
+  for (let c = 0; c < cols; c++) {
+    const tc = t - 10 + (c / cols) * 10;
+    for (let r = 0; r < rows; r++) {
+      const fr = (r + .5) / rows * 12; let v = .14 + .25 * Math.exp(-fr / 2) + .05 * nz(c * 97 + r, 9);
+      if (tc > 0) S.faults.forEach((f) => {
+        const since = tc - f.onset, on = since > 0 ? clamp(since / 1.2, 0, 1) : 0;
+        if (f.cls === "knock_like") v += on * .5 * Math.exp(-sq((fr - 7.2) / 1.9)) * (.6 + .4 * Math.abs(nz(c, 10)));
+        if (f.cls === "valve") v += on * .55 * Math.exp(-sq((fr - 7.8) / .8));
+        if (f.cls === "misfire") v += on * .3 * Math.exp(-sq((fr - 1.2) / 1)) * (.5 + .5 * Math.abs(nz(c, 11)));
+      });
+      g.fillStyle = tc < 0 ? "#1a1a1e" : heat(v); g.fillRect(L + c * cw, B - (r + 1) * rh, cw + .6, rh + .6);
+    }
+  }
+  g.fillStyle = cv("--muted"); g.font = FONT(10.5); g.textAlign = "right";
+  [0, 4, 8, 12].forEach((k) => g.fillText(k, L - 6, B - k / 12 * (B - T) + 3.5)); g.textAlign = "center";
+  [0, 5, 10].forEach((d) => g.fillText((t - 10 + d).toFixed(0) + "s", L + d / 10 * (R - L), B + 15)); g.font = FONT(11); g.fillText("kHz", L - 20, T - 6);
+}
+function drawTele() {
+  const { g, w, h } = cnv($("#cTele")), cols = w < 560 ? 1 : w < 860 ? 2 : 3, rows = Math.ceil(6 / cols), cw = w / cols, ch = h / rows, tt = Math.max(S.t, .5);
+  TELE.forEach((m, i) => {
+    const cx = (i % cols) * cw, cy = Math.floor(i / cols) * ch, L = cx + 40, R = cx + cw - 12, T = cy + 42, B = cy + ch - 26, xs = [], ys = [];
+    title(g, cx + 12, cy + 20, m.label);
+    axes(g, L, T, R, B, { lo: m.lo, hi: m.hi, yt: [m.lo, (m.lo + m.hi) / 2, m.hi].map((v) => [v, Math.round(v)]) });
+    for (let s = 0; s <= tt; s += .5) { xs.push(L + s / DUR * (R - L)); ys.push(B - (clamp(m.f(s), m.lo, m.hi) - m.lo) / (m.hi - m.lo) * (B - T)); }
+    poly(g, xs, ys, cv("--cyan"), 1.6);
+    if (xs.length) { g.fillStyle = cv("--cyan-soft"); g.beginPath(); g.arc(xs.at(-1), ys.at(-1), 3, 0, 2 * PI); g.fill(); }
+    g.fillStyle = cv("--muted"); g.font = FONT(10.5); g.textAlign = "center"; [0, 15, 30].forEach((d) => g.fillText(d + "s", L + d / DUR * (R - L), B + 14));
+  });
+}
+const LANES = ["valve", "knock_like", "misfire", "uncertain", "normal"];
+function drawTimeline() {
+  const { g, w, h } = cnv($("#cTime")), L = 140, R = w - 16, T = 54, B = h - 32, t = S.t;
+  title(g, 12, 22, "What the model decided over time");
+  if (S.truth) S.faults.forEach((f, i) => { const x0 = L + f.onset / DUR * (R - L); g.fillStyle = "rgba(224,176,96,.1)"; g.fillRect(x0, T, (DUR - f.onset) / DUR * (R - L), B - T); g.fillStyle = cv("--amber"); g.font = FONT(11); g.textAlign = "left"; g.fillText("evaluation truth: " + CLS[f.cls].label + " in cylinder " + f.cyl, x0 + 8, T + 14 + i * 14); });
+  g.font = FONT(11.5); LANES.forEach((k, i) => { const y = T + (i + .5) / LANES.length * (B - T); g.strokeStyle = cv("--line"); g.beginPath(); g.moveTo(L, y); g.lineTo(R, y); g.stroke(); g.fillStyle = cv("--muted"); g.textAlign = "right"; g.fillText(CLS[k].label, L - 10, y + 4); });
+  for (let s = WARM; s <= t; s += .5) {
+    const d = decide(s), x = L + s / DUR * (R - L);
+    (d.detected.length ? d.detected : [d.cls]).forEach((cls) => {
+      const yi = LANES.indexOf(cls); if (yi < 0) return;
+      const y = T + (yi + .5) / LANES.length * (B - T), col = cls === "normal" ? cv("--green") : cls === "uncertain" ? cv("--amber") : cv("--orange");
+      g.save(); g.fillStyle = col; g.shadowColor = col; g.shadowBlur = 6; g.beginPath(); g.arc(x, y, 3.6, 0, 2 * PI); g.fill(); g.restore();
+      if (d.alerts.includes(cls)) { g.strokeStyle = cv("--red"); g.lineWidth = 1.5; g.strokeRect(x - 6.5, y - 6.5, 13, 13); g.lineWidth = 1; }
+    });
+  }
+  g.fillStyle = cv("--muted"); g.font = FONT(10.5); g.textAlign = "center"; [0, 5, 10, 15, 20, 25, 30].forEach((d) => g.fillText(d + "s", L + d / DUR * (R - L), B + 16));
+}
+const STAGES = [["healthy", "#30d158"], ["developing anomaly", "#ffd60a"], ["persistent fault", "#ff453a"]];
+function drawHealth() {
+  const { g, w, h } = cnv($("#cHealth")), L = 52, R = w - 16, T = 62, B = h - 64, top = 3.2;
+  title(g, 12, 22, "Health timeline vs healthy baseline (simulated)");
+  axes(g, L, T, R, B, { lo: 0, hi: top, yt: [0, 1, 2, 3].map((v) => [v, v + "×"]) });
+  g.strokeStyle = cv("--orange"); g.setLineDash([6, 5]); const y1 = B - 1 / top * (B - T); g.beginPath(); g.moveTo(L, y1); g.lineTo(R, y1); g.stroke(); g.setLineDash([]);
+  g.fillStyle = cv("--orange"); g.font = FONT(10.5); g.textAlign = "left"; g.fillText("developing threshold", L + 6, y1 - 6);
+  const series = [["Firing irregularity", cv("--muted"), (d) => d.anom / THR * .78], ["High-frequency impulsiveness", cv("--cyan-soft"), (d) => d.anom / THR * .62 + .1], ["Model anomaly score", cv("--cyan"), (d) => d.anom / THR]];
+  series.forEach(([nm, col, fn], j) => {
+    const xs = [], ys = []; for (let s = WARM; s <= Math.max(S.t, WARM + .5); s += .5) { const d = decide(s); xs.push(L + s / DUR * (R - L)); ys.push(B - clamp(fn(d), 0, top) / top * (B - T)); }
+    poly(g, xs, ys, col, 1.6); g.fillStyle = col; g.fillRect(L + j * 215, h - 20, 10, 3); g.fillStyle = cv("--muted"); g.textAlign = "left"; g.font = FONT(11); g.fillText(nm, L + 16 + j * 215, h - 15);
+  });
+  for (let s = WARM; s <= S.t; s += .5) { const d = decide(s), st = d.alert ? 2 : d.anom / THR > 1 ? 1 : 0; g.fillStyle = STAGES[st][1]; g.globalAlpha = .85; g.fillRect(L + s / DUR * (R - L), B + 10, (R - L) / DUR * .5 + .6, 14); g.globalAlpha = 1; }
+  g.fillStyle = cv("--muted"); g.font = FONT(10.5); g.textAlign = "center"; [0, 10, 20, 30].forEach((d) => g.fillText(d + "s", L + d / DUR * (R - L), B + 38));
+}
+function drawWear() {
+  const { g, w, h } = cnv($("#cWear")), L = 38, R = w - 8, T = 8, B = h - 24;
+  axes(g, L, T, R, B, { lo: 0, hi: 1, yt: [0, .5, 1].map((v) => [v, v.toFixed(1)]) });
+  const xs = [], ys = []; for (let s = WARM; s <= Math.max(S.t, WARM + .5); s += .5) { const vf = S.faults.find((f) => f.cls === "valve"), since = vf ? s - vf.onset : -9, p = since > 0 ? clamp(.15 + .75 * (1 - Math.exp(-since / 4)), 0, .95) : .05 + .02 * Math.abs(nz(Math.floor(s * 2), 12)); xs.push(L + s / DUR * (R - L)); ys.push(B - p * (B - T)); }
+  poly(g, xs, ys, cv("--cyan"), 2);
+  g.fillStyle = cv("--muted"); g.font = FONT(10.5); g.textAlign = "center"; [0, 15, 30].forEach((d) => g.fillText(d + "s", L + d / DUR * (R - L), B + 14));
+}
+function drawSparks() {
+  TELE.forEach((m, i) => {
+    const c = $("#ts" + i), { g, w, h } = cnv(c), pts = []; for (let s = Math.max(0, S.t - 10); s <= S.t + .001; s += .25) pts.push(m.f(s));
+    if (pts.length < 2) return; const lo = Math.min(...pts), hi = Math.max(...pts), sp = hi - lo || 1, col = cv("--cyan");
+    const xs = pts.map((_, k) => k / (pts.length - 1) * (w - 4) + 2), ys = pts.map((v) => h - 4 - (v - lo) / sp * (h - 9));
+    g.beginPath(); xs.forEach((x, k) => (k ? g.lineTo(x, ys[k]) : g.moveTo(x, ys[k]))); g.lineTo(xs.at(-1), h); g.lineTo(xs[0], h); g.closePath(); g.fillStyle = col; g.globalAlpha = .1; g.fill(); g.globalAlpha = 1;
+    poly(g, xs, ys, col, 1.5); g.fillStyle = cv("--cyan-soft"); g.beginPath(); g.arc(xs.at(-1), ys.at(-1), 2.6, 0, 2 * PI); g.fill();
+  });
+}
+
+/* ---------- UI update ---------- */
+let lastDiag = null, lastCyl = null, lastWhere = null; // null = not drawn yet, so an empty panel still clears
+const pad = (v) => v.toFixed(1);
+const paintRange = (el) => el.style.setProperty("--p", `${((el.value - el.min) / (el.max - el.min)) * 100}%`);
+function updateUI() {
+  const respMs = `${40 + Math.round(rnd(Math.floor(S.t * 2)) * 14)} / ${190 + Math.round(rnd(Math.floor(S.t * 2) + 1) * 40)} ms`;
+  $("#statusline").innerHTML = `<span>Signal quality <b>Good</b></span><span class="resp">Response time <b>${respMs}</b></span><span>Model <b>${DATASETS[S.ds].model}</b></span>`;
+  $$("input[type=range]").forEach(paintRange);
+  const m = decide(S.t), t = S.t, mt = meta(m.cls), V2 = DATASETS[S.ds].multi;
+  const active = m.fl.filter((e) => e.alert), locd = m.fl.filter((e) => e.located), allLoc = active.length > 0 && active.every((e) => e.located);
+  $("#clock").innerHTML = `${ic("play", 11)} Replay ${pad(t)} / ${DUR} s`;
+  const al = $("#alert");
+  const banner = (kind, icon, head, sub) => { al.className = "alert" + (kind ? " " + kind : ""); al.innerHTML = `<span class="tile">${ic(icon, 20)}</span><span class="txt"><b>${head}</b><span>${sub}</span></span>`; };
+  if (active.length) banner("bad", "alert", active.map((e) => `${CLS[e.cls].label}${e.located ? ` in cylinder ${e.located}` : ""}`).join(" and "), allLoc ? "Alert confirmed by 2 consistent updates" : "Alert raised · locating the cylinder…");
+  else if (m.cls === "uncertain") banner("warn", "help", "Checking an unusual window", "No alert yet");
+  else banner("", "check", "No active alert", "The engine sounds normal so far");
+  engineView.update(engineData(m));
+  $("#seekV").textContent = `${pad(+$("#seek").value)} s`;
+  $("#play").innerHTML = S.playing ? ic("pause", 15) + " Pause" : ic("play", 15) + " Play";
+  if (S.tab === "o") {
+    const many = m.detected.length > 1, short = many ? `${m.detected.length} faults` : mt.label;
+    const guess = m.cls === "warming" ? "–" : m.cls === "uncertain" ? "Normal?" : short;
+    const vals = [many ? short : mt.label, m.conf == null ? "–" : m.conf.toFixed(2), m.anom == null ? "–" : m.anom.toFixed(2), `${pad(t)} s`];
+    vals.forEach((v, i) => { $("#m" + i).textContent = v; });
+    const cylHtml = active.length || locd.length
+          ? [1, 2, 3, 4].map((c) => { const e = locd.find((x) => x.located === c); return `<div class="cyl ${e ? "hot" : ""}"><b>C${c}</b><span>${e ? `Fault · ${CLS[e.cls].label}` : !allLoc ? "Checking…" : "Healthy"}</span></div>`; }).join("")
+          : `<p class="quiet">${m.cls === "warming" ? "Waiting for the first analysis window." : "All four cylinders are firing normally."}</p>`;
+    if (cylHtml !== lastCyl) { $("#cylRow").innerHTML = cylHtml; lastCyl = cylHtml; }
+    const where = active.length ? `<div class="where"><div class="lbl" style="color:var(--text)">${locd.length ? `Location: ${locd.map((e) => `${CLS[e.cls].label} → cylinder ${e.located}`).join(" · ")}` : "Location: locating cylinder…"}</div><div class="cy">${[1, 2, 3, 4].map((c) => { const e = locd.find((x) => x.located === c); return `<div class="${e ? "hot" : ""}"><span style="height:${e ? Math.max(4, e.locConf * 100) : locd.length ? 6 : 8}%"></span>${c}</div>`; }).join("")}</div><div class="small">Strokes are attributed to cylinders using the cam pulse; sample data.</div></div>` : "";
+    if (where !== lastWhere) { $("#engWhere").innerHTML = where; lastWhere = where; }
+    const sub = m.cls === "warming" ? "Waiting for the first full analysis window." : m.cls === "uncertain" ? "Not accepted: the anomaly score is high but no fault detector fired." : `Classifier: ${mt.label}`;
+    const bar = (fr, mk, c) => `<div class="bar"><i style="width:${clamp(fr, 0, 1) * 100}%;background:${c};box-shadow:0 0 10px ${c}"></i>${mk != null ? `<b style="left:calc(${mk * 100}% - 1px)"></b>` : ""}</div>`;
+    let metrics = [];
+    if (m.cls !== "warming") {
+      const anomalyRow = ["Anomaly score", `${m.anom.toFixed(2)} / ${THR.toFixed(2)}`, m.anom / (2 * THR), .5, m.anom > THR ? "var(--orange)" : "var(--cyan)"];
+      if (V2) {
+        metrics = ["misfire", "knock_like", "valve"].map((k) => {
+          const e = m.fl.find((x) => x.cls === k), pr = e ? e.prob : .03 + .02 * Math.abs(nz(Math.floor(t * 2), k.length));
+          return [`P(${CLS[k].label})`, pr.toFixed(2), pr, THRF[k], pr >= THRF[k] ? "var(--orange)" : "var(--cyan)"];
+        });
+        metrics.push(anomalyRow);
+      } else metrics = [["Calibrated confidence", m.conf.toFixed(2), m.conf, .7, "var(--cyan)"], anomalyRow];
+    }
+    const grid = metrics.map(([l, v, fr, mk, c]) => `<div><div class="lbl">${l}</div><div class="n mono">${v}</div>${bar(fr, mk, c)}</div>`).join("") + (m.cls === "warming" ? "" : `<div><div class="lbl">Window ends</div><div class="n mono">${pad(t)} s</div></div><div><div class="lbl">Data quality</div><div class="n mono">ok</div></div>`);
+    const keys = m.detected.length ? m.detected : m.cls === "warming" ? [] : ["normal"];
+    let strength = "";
+    if (m.cls !== "warming" && m.cls !== "uncertain") {
+      const normal = !m.detected.length;
+      const det = m.fl.filter((e) => e.state === "fault");
+      const crit = normal ? [[`Confidence ${m.conf.toFixed(2)} ≥ 0.70`, m.conf >= .7], ["Anomaly score within the normal range", m.anom <= THR], ["No active alert", !active.length]]
+        : V2 ? [["Each detected fault is above its own threshold", det.every((e) => e.prob >= THRF[e.cls])], ["Anomaly score above its threshold", m.anom > THR], [`Alert confirmed for ${mt.label}`, active.length >= det.length]]
+        : [[`Confidence ${m.conf.toFixed(2)} ${m.conf >= .7 ? "≥" : "<"} 0.70`, m.conf >= .7], ["Anomaly score above its threshold", m.anom > THR], [`Alert confirmed for ${mt.label}`, active.length > 0]];
+      const lvl = crit.filter((c) => c[1]).length, color = normal ? "var(--cyan)" : lvl === 3 ? "var(--orange)" : lvl === 2 ? "var(--amber)" : "var(--dim)";
+      strength = `<div class="strength"><div class="head"><span class="lbl">Evidence strength · ${mt.label}</span><span style="color:${color};font:600 .84em var(--sans)">${["Weak", "Weak", "Elevated", "Confirmed"][lvl]} · ${lvl}/3</span></div><div class="segs">${[0, 1, 2].map((i) => `<i style="${i < lvl ? `background:${color};box-shadow:0 0 8px ${color}` : ""}"></i>`).join("")}</div><ul>${crit.map(([tx, ok]) => `<li class="${ok ? "ok" : "no"}">${ic(ok ? "check" : "help", 14)}<span>${tx}</span></li>`).join("")}</ul></div>`;
+    }
+    const whyLines = keys.flatMap((k) => WHY[k].slice(0, keys.length > 1 ? 2 : 3)), whyTop = whyLines.slice(0, 2), whyRest = whyLines.slice(2);
+        const li = ([tx, z]) => `<li>${tx} <span class="z">z ${z}</span></li>`;
+    const why = keys.length ? `<div class="why"><div class="lbl">Why the model thinks so</div><ol>${whyTop.map(li).join("")}</ol>${whyRest.length ? `<details class="more" data-k="why"${S.openWhy ? " open" : ""}><summary>Show ${whyRest.length} more reason${whyRest.length > 1 ? "s" : ""}</summary><ol>${whyRest.map(li).join("")}</ol></details>` : ""}</div>` : "";
+    const about = keys.length ? `<details class="more about" data-k="about"${S.openAbout ? " open" : ""}><summary>What ${keys.map((k) => (k === "normal" ? "Normal" : CLS[k].label)).join(" and ")} means</summary>${keys.map((k) => `<p>${ABOUT[k]}</p>`).join("")}<p class="small">General background, not model output.</p></details>` : "";
+    const alertPill = active.length ? `<span class="pill alertpill">${ic("alert", 14)}Alert · ${meta(m.alert).label}</span>` : `<span class="pill okpill">${ic("check", 14)}No active alert</span>`;
+    const html = m.cls === "warming" ? `<div class="empty"><span class="dot"></span><b>Listening to the engine…</b><span>The first decision arrives in ${Math.max(0, WARM - t).toFixed(1)} s.</span></div>` : `<div class="lbl">Model decision · ${DATASETS[S.ds].model}</div><div class="d-head"><div class="badge" style="color:${mt.color}">${ic(mt.icon, 24)}</div><div><div class="d-title" style="color:${mt.color}">${mt.label}</div><div class="d-sub">${sub}</div></div></div><div>${alertPill}</div><div class="d-grid">${grid}</div>${strength}${why}${about}<div class="dnote">Sample output generated in the browser for design review. Evaluation truth is never used for the decision.</div>`;
+    if (html !== lastDiag) { $("#diag").innerHTML = html; lastDiag = html; }
+  }
+  if (S.tab === "s") drawWave();
+  else if (S.tab === "f") { drawPsd(m); drawSpec(); }
+  else if (S.tab === "d") { TELE.forEach((x, i) => { $("#tv" + i).firstChild.textContent = t < .1 ? "–" : x.fmt(x.f(t)); }); drawSparks(); drawTele(); }
+  else if (S.tab === "h") {
+    const keys = m.detected.length ? m.detected : ["normal"], rows = keys.flatMap((k) => WHY[k].slice(0, keys.length > 1 ? 2 : 3));
+    $("#diffTable").innerHTML = `<tr><th>Feature</th><th class="num">Value</th><th class="num">Normal median</th><th class="num">Robust z</th></tr>` + rows.map(([tx, z], i) => `<tr><td>${tx.split(" ").slice(0, 5).join(" ")}…</td><td class="num">${(.2 + i * .35 + (keys[0] === "normal" ? 0 : 2.1)).toFixed(2)}</td><td class="num">${(.18 + i * .3).toFixed(2)}</td><td class="num">${z}</td></tr>`).join("");
+    drawTimeline(); drawHealth(); drawWear();
+  }
+}
+/* ---------- controls ---------- */
+function setRun(ds, id, play) {
+  const run = runOf(ds, id) || RUNS[ds][0];
+  S.ds = ds; S.run = run.id; S.faults = run.faults.map((f) => ({ ...f })); S.t = 0; S.playing = !!play;
+  $("#dataset").value = ds; $("#run").innerHTML = RUNS[ds].map((r) => `<option value="${r.id}">${r.id} · ${r.engine} · ${r.split}</option>`).join(""); $("#run").value = run.id;
+  $("#dsHelp").textContent = DATASETS[ds].help; $("#modelCap").textContent = `Model ${DATASETS[ds].model} · window 2 s / step 0.5 s`;
+  $("#seek").value = 0; $$(".chip").forEach((b) => b.setAttribute("aria-pressed", String(!!PRESETS[S.preset] && b.dataset.scen === PRESETS[S.preset].scen)));
+  lastDiag = lastCyl = lastWhere = null; updateUI();
+}
+function setPreset(i, play) {
+  S.preset = i; const p = PRESETS[i];
+  $("#preset").value = p ? i : -1; $("#presetNote").textContent = p ? p.note : "";
+  if (p) setRun(p.ds, p.run, play); else setRun(S.ds, S.run, play);
+}
+$("#chips").addEventListener("click", (e) => { const b = e.target.closest(".chip"); if (b) setPreset(PRESETS.findIndex((p) => p.scen === b.dataset.scen), false); });
+$("#preset").addEventListener("change", (e) => setPreset(+e.target.value, false));
+$("#dataset").addEventListener("change", (e) => { S.preset = -1; $("#preset").value = -1; $("#presetNote").textContent = ""; setRun(e.target.value, RUNS[e.target.value][0].id, false); });
+$("#run").addEventListener("change", (e) => { S.preset = -1; $("#preset").value = -1; $("#presetNote").textContent = ""; setRun(S.ds, e.target.value, false); });
+$("#play").addEventListener("click", () => { if (S.t >= DUR) S.t = 0; S.playing = !S.playing; updateUI(); });
+$("#restart").addEventListener("click", () => { S.t = 0; lastDiag = lastCyl = lastWhere = null; updateUI(); });
+$("#seek").addEventListener("input", () => { $("#seekV").textContent = `${pad(+$("#seek").value)} s`; });
+$("#seekBtn").addEventListener("click", () => { S.t = +$("#seek").value; lastDiag = lastCyl = lastWhere = null; updateUI(); });
+$("#truth").addEventListener("change", (e) => { S.truth = e.target.checked; updateUI(); });
+$("#speed").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; S.speed = +b.dataset.v; $$("#speed button").forEach((x) => x.setAttribute("aria-pressed", String(x === b))); });
+$$("[data-mode]").forEach((b) => b.addEventListener("click", () => { S.mode = b.dataset.mode; $$("[data-mode]").forEach((x) => x.setAttribute("aria-pressed", String(x === b))); $("#replayPanel").hidden = S.mode === "lab"; $("#labPanel").hidden = S.mode !== "lab"; if (S.mode === "lab") applyLab(false); else setPreset(S.preset, false); }));
+function applyLab(play) {
+  const k = $("#labFault").value; S.preset = -1; $("#preset").value = -1;
+  S.faults = k === "none" ? [] : [{ cls: k, cyl: +$("#labCyl").value, sev: +$("#labSev").value, onset: +$("#labOn").value }];
+  S.t = 0; S.playing = !!play; lastDiag = lastCyl = lastWhere = null; $$(".chip").forEach((b) => b.setAttribute("aria-pressed", "false")); updateUI();
+}
+$("#labForm").addEventListener("submit", (e) => { e.preventDefault(); applyLab(true); });
+$("#labSev").addEventListener("input", (e) => { $("#labSevV").textContent = (+e.target.value).toFixed(2); });
+$("#labOn").addEventListener("input", (e) => { $("#labOnV").textContent = (+e.target.value).toFixed(1) + " s"; });
+function showTab(k, focus) {
+  S.tab = k; $$("#tabs button").forEach((x) => { const on = x.dataset.tab === k; x.setAttribute("aria-selected", String(on)); x.tabIndex = on ? 0 : -1; if (on && focus) x.focus(); });
+  ["o", "s", "f", "d", "h"].forEach((id) => { $("#p-" + id).hidden = id !== k; }); lastDiag = lastCyl = lastWhere = null; updateUI();
+}
+$("#tabs").addEventListener("click", (e) => { const b = e.target.closest("[data-tab]"); if (b) showTab(b.dataset.tab); });
+$("#tabs").addEventListener("keydown", (e) => { const ids = ["o", "s", "f", "d", "h"], i = ids.indexOf(S.tab); if (e.key === "ArrowRight") { e.preventDefault(); showTab(ids[(i + 1) % 5], true); } if (e.key === "ArrowLeft") { e.preventDefault(); showTab(ids[(i + 4) % 5], true); } });
+const side = $("#side"), scrim = $("#scrim");
+function drawer(open) { side.classList.toggle("open", open); scrim.hidden = !open; $("#menuBtn").setAttribute("aria-expanded", String(open)); }
+$("#menuBtn").addEventListener("click", () => drawer(!side.classList.contains("open"))); scrim.addEventListener("click", () => drawer(false));
+addEventListener("keydown", (e) => { if (e.key === "Escape") { drawer(false); $("#tw").hidden = true; $("#twBtn").setAttribute("aria-expanded", "false"); } });
+
+/* look tweaks (remembered per viewer when storage is available) */
+const ACCENTS = { // main, chart and 3D shade, soft shade, text on the accent, name
+  blue: ["#0a84ff", "#64d2ff", "#9fdcff", "#fff", "Blue"],
+  steel: ["#4f8cff", "#9cc2ff", "#c4dbff", "#fff", "Steel"],
+  indigo: ["#5e5ce6", "#9a99ff", "#c2c1ff", "#fff", "Indigo"],
+  mint: ["#63e6e2", "#a6f2ef", "#cff8f6", "#0b2a29", "Mint"],
+  graphite: ["#8e8e93", "#c7c7cc", "#e1e1e6", "#111113", "Graphite"],
+};
+const TW = { bg: "graphite", accent: "blue", glass: "on", size: "m" };
+try { Object.assign(TW, JSON.parse(localStorage.getItem("drivex-look-apple") || "{}")); } catch (e) { /* storage unavailable */ }
+if (!ACCENTS[TW.accent]) TW.accent = "blue";
+function applyTW() {
+  const r = document.documentElement, a = ACCENTS[TW.accent];
+  r.dataset.bg = TW.bg; r.dataset.glass = TW.glass; r.dataset.size = TW.size;
+  r.style.setProperty("--accent", a[0]); r.style.setProperty("--accent2", a[1]); r.style.setProperty("--accent3", a[2]); r.style.setProperty("--on-accent", a[3]); $("#accentName").textContent = a[4];
+  $$("[data-tw]").forEach((g) => $$("button", g).forEach((b) => b.setAttribute("aria-pressed", String(TW[g.dataset.tw] === b.dataset.v))));
+  try { localStorage.setItem("drivex-look-apple", JSON.stringify(TW)); } catch (e) { /* ignore */ }
+}
+$("#twBtn").addEventListener("click", () => { const o = $("#tw").hidden; $("#tw").hidden = !o; $("#twBtn").setAttribute("aria-expanded", String(o)); });
+$("#diag").addEventListener("toggle", (e) => { const d = e.target; if (d.dataset.k === "why") S.openWhy = d.open; if (d.dataset.k === "about") S.openAbout = d.open; lastDiag = null; }, true);
+$$(".info").forEach((b) => b.addEventListener("click", () => { const tip = $("#" + b.getAttribute("aria-controls")), open = tip.hidden; tip.hidden = !open; b.setAttribute("aria-expanded", String(open)); }));
+$("#tw").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; TW[b.parentElement.dataset.tw] = b.dataset.v; applyTW(); updateUI(); });
+applyTW();
+new ResizeObserver(() => updateUI()).observe(document.body);
+
+/* ---------- loop ---------- */
+let last = performance.now(), acc = 0;
+function frame(now) {
+  const dt = Math.min(.05, (now - last) / 1000); last = now;
+  if (S.playing) { S.t = Math.min(DUR, S.t + dt * S.speed); if (S.t >= DUR) S.playing = false; $("#seek").value = Math.round(S.t * 2) / 2; }
+  acc += dt; if (acc > .25) { acc = 0; updateUI(); }
+  requestAnimationFrame(frame);
+}
+setPreset(1, false); S.t = 22; $("#seek").value = 22; updateUI();
+requestAnimationFrame(frame);
+</script>

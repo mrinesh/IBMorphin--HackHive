@@ -12,26 +12,31 @@ from urllib.parse import quote
 import plotly.graph_objects as go
 import plotly.io as pio
 
+# Graphite surfaces with a system-blue accent. One color per decision, used in every
+# view (cards, charts, 3D): green normal, amber misfire, magenta knock-like, violet
+# valve-train. Red is reserved for the synthetic-data banner and errors.
 TOKENS = {
-    "bg": "#0E1116",
-    "bg2": "#12161C",
-    "surface": "#161B22",
-    "surface_solid": "#161B22",
-    "elevated": "#1D232C",
-    "line": "#2B333E",
-    "grid": "rgba(174, 180, 190, 0.12)",
-    "text": "#E6E8EB",
-    "muted": "#AEB4BE",
-    "dim": "#8B929C",
-    "cyan": "#00E5E5",
-    "cyan_soft": "#5EEAEA",
-    "cyan_hover": "#35F4F4",
+    "bg": "#141416",
+    "bg2": "#18181B",
+    "surface": "#1E1E21",
+    "surface_solid": "#1E1E21",
+    "elevated": "#29292D",
+    "line": "#34343A",
+    "grid": "rgba(235, 235, 245, 0.08)",
+    "text": "#F5F5F7",
+    "muted": "#A1A1A8",
+    "dim": "#8A8A91",
+    "accent": "#0A84FF",
+    "cyan": "#64D2FF",
+    "cyan_soft": "#9FDCFF",
+    "cyan_hover": "#9FDCFF",
+    "indigo": "#7D7AFF",
     "magenta": "#F472B6",
-    "violet": "#A78BFA",
-    "amber": "#F59E0B",
-    "rose": "#F05252",
-    "green": "#22C55E",
-    "slate": "#9AA1AB",
+    "violet": "#BF5AF2",
+    "amber": "#FF9F0A",
+    "rose": "#FF453A",
+    "green": "#30D158",
+    "slate": "#8E8E93",
 }
 
 # Lucide icon paths (24x24, 2px stroke), inlined so the dashboard works offline.
@@ -60,7 +65,7 @@ ICONS = {
 CLASS_META = {
     "normal": {"label": "Normal", "color": TOKENS["green"], "icon": "check"},
     "misfire": {"label": "Misfire", "color": TOKENS["amber"], "icon": "flame"},
-    "knock_like": {"label": "Knock-like", "color": TOKENS["rose"], "icon": "zap"},
+    "knock_like": {"label": "Knock-like", "color": TOKENS["magenta"], "icon": "zap"},
     "valve_clearance_like": {"label": "Valve-train impacts", "color": TOKENS["violet"],
                              "icon": "activity"},
     "uncertain": {"label": "Uncertain", "color": TOKENS["slate"], "icon": "help"},
@@ -68,14 +73,16 @@ CLASS_META = {
 }
 
 # Modality colors used in every chart (audio vs vibration stay consistent).
-MODALITY_COLORS = {"audio": TOKENS["magenta"], "vibration": TOKENS["cyan"],
-                   "envelope": TOKENS["violet"]}
+# Kept off the decision colors so a trace is never mistaken for a fault.
+MODALITY_COLORS = {"audio": TOKENS["indigo"], "vibration": TOKENS["cyan"],
+                   "envelope": TOKENS["cyan_soft"]}
 
 
 # One accent per telemetry card (RPM, load, throttle, coolant, two fuel trims) so
 # each signal is easy to find; the label always names it, so color is not the only cue.
-TELEMETRY_ACCENTS = [TOKENS["cyan"], TOKENS["violet"], TOKENS["magenta"], TOKENS["amber"],
-                     TOKENS["green"], "#60A5FA"]
+# Cool neutrals only: status colors stay reserved for model decisions.
+TELEMETRY_ACCENTS = [TOKENS["cyan"], TOKENS["accent"], TOKENS["indigo"], "#40C8E0",
+                     TOKENS["cyan_soft"], TOKENS["slate"]]
 
 
 def _svg_uri(svg: str) -> str:
@@ -102,6 +109,10 @@ INFERNO = [[k / 8, c] for k, c in enumerate(
      "#fcffa4"))]
 
 
+# System UI font where available (SF Pro on Apple devices), bundled Inter elsewhere.
+_SANS = '-apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, "Helvetica Neue", sans-serif'
+
+
 def class_meta(accepted: str | None, quality: str | None = None) -> dict:
     if quality not in (None, "ok"):
         return CLASS_META["no_decision"]
@@ -124,12 +135,10 @@ def register_plotly_template() -> None:
     overrides = go.layout.Template(layout={
         "paper_bgcolor": "rgba(0,0,0,0)",
         "plot_bgcolor": TOKENS["surface"],
-        "font": {"family": "Inter, system-ui, sans-serif", "color": TOKENS["text"],
-                 "size": 13},
-        "title": {"font": {"family": "Space Grotesk, Inter, sans-serif", "size": 15,
-                           "color": TOKENS["text"]}, "x": 0.01},
-        "colorway": [TOKENS["cyan"], TOKENS["magenta"], TOKENS["violet"], TOKENS["amber"],
-                     TOKENS["green"], TOKENS["rose"]],
+        "font": {"family": _SANS, "color": TOKENS["text"], "size": 13},
+        "title": {"font": {"family": _SANS, "size": 15, "color": TOKENS["text"]}, "x": 0.01},
+        "colorway": [TOKENS["cyan"], TOKENS["indigo"], TOKENS["accent"], "#40C8E0",
+                     TOKENS["cyan_soft"], TOKENS["slate"]],
         "xaxis": axis, "yaxis": axis,
         "legend": {"bgcolor": "rgba(0,0,0,0)", "font": {"color": TOKENS["muted"]}},
         "hoverlabel": {"bgcolor": TOKENS["elevated"], "bordercolor": TOKENS["line"],
@@ -142,8 +151,9 @@ def register_plotly_template() -> None:
     pio.templates.default = "engine_hud"
 
 
-_CSS_VARS = ("bg", "bg2", "surface", "elevated", "line", "text", "muted", "dim", "cyan",
-             "cyan_soft", "cyan_hover", "magenta", "rose", "green", "amber", "violet")
+_CSS_VARS = ("bg", "bg2", "surface", "elevated", "line", "text", "muted", "dim", "accent",
+             "cyan", "cyan_soft", "cyan_hover", "indigo", "magenta", "rose", "green", "amber",
+             "violet", "slate")
 
 
 def css() -> str:
@@ -154,7 +164,8 @@ def css() -> str:
 
 
 def banner_html() -> str:
-    return ('<div class="synthetic-banner" role="note">SYNTHETIC DATA — RECORDED REPLAY'
+    return (f'<div class="synthetic-banner" role="note"><span class="tile">{icon("alert", 16)}'
+            '</span><b>SYNTHETIC DATA — RECORDED REPLAY</b>'
             '<small>Simulated engines and sensors, replayed from recordings. Results do not '
             'show real-engine accuracy.</small></div>')
 

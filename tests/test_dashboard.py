@@ -131,7 +131,7 @@ def test_active_alert_shows_linked_evidence_panel():
                     reason="needs core_v1 runs, truth, and the v1 model")
 def test_fault_injection_lab_labels_injected_signals_and_shows_response():
     app = AppTest.from_file(str(APP), default_timeout=180).run()
-    widget(app.sidebar.radio, "Mode").set_value("Fault-injection lab").run()
+    widget(app.sidebar.segmented_control, "Mode").set_value("Fault lab").run()
     assert not app.exception
     widget(app.sidebar.button, "Apply and replay").click().run()  # default: misfire 0.5 at 8 s
     widget(app.sidebar.slider, "Seek (s)").set_value(12.0).run()
@@ -143,9 +143,9 @@ def test_fault_injection_lab_labels_injected_signals_and_shows_response():
     assert "FAULT-INJECTION LAB" in text and "INJECTED misfire" in text
     assert "Lab response" in text and "Unmodified recording" in text
     assert state["records"][-1]["alert"] == "misfire"
-    assert not any("evaluation truth" in c.label for c in app.sidebar.checkbox)
+    assert not any("evaluation truth" in c.label for c in app.sidebar.toggle)
 
-    widget(app.sidebar.radio, "Mode").set_value("Recorded replay").run()
+    widget(app.sidebar.segmented_control, "Mode").set_value("Replay").run()
     assert not app.exception
     assert app.session_state["lab"] is None
     assert "FAULT-INJECTION LAB" not in " ".join(m.value for m in app.markdown)
@@ -331,7 +331,7 @@ def test_active_alert_names_the_localized_cylinder():
 @pytest.mark.parametrize(("fault", "cylinder"), [("misfire", 4), ("knock_like", 1)])
 def test_lab_injected_fault_is_localized_to_the_chosen_cylinder(fault, cylinder):
     app = AppTest.from_file(str(APP), default_timeout=240).run()
-    widget(app.sidebar.radio, "Mode").set_value("Fault-injection lab").run()
+    widget(app.sidebar.segmented_control, "Mode").set_value("Fault lab").run()
     widget(app.sidebar.selectbox, "Injected fault").set_value(fault)
     widget(app.sidebar.selectbox, "Affected cylinder").set_value(cylinder)
     widget(app.sidebar.button, "Apply and replay").click().run()

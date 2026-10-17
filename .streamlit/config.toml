@@ -12,33 +12,35 @@ toolbarMode = "minimal"
 [browser]
 gatherUsageStats = false
 
-# DRIVEX theme, tuned for comfortable reading: charcoal (not pure black) surfaces,
-# off-white text, cyan for active states. Tokens mirror dashboard/theme.py.
+# DRIVEX theme: graphite surfaces, off-white text, system blue for active states.
+# Tokens mirror dashboard/theme.py.
 [theme]
 base = "dark"
-primaryColor = "#00E5E5"
-backgroundColor = "#0E1116"
-secondaryBackgroundColor = "#1D232C"
-textColor = "#E6E8EB"
-linkColor = "#5EEAEA"
-borderColor = "#2B333E"
-showWidgetBorder = true
+primaryColor = "#0A84FF"
+backgroundColor = "#141416"
+secondaryBackgroundColor = "#29292D"
+textColor = "#F5F5F7"
+linkColor = "#64D2FF"
+borderColor = "#34343A"
+showWidgetBorder = false
 baseRadius = "10px"
-baseFontSize = 15
+baseFontSize = 17
 font = "Inter"
-headingFont = "Space Grotesk"
+headingFont = "Inter"
 codeFont = "JetBrains Mono"
 headingFontWeights = [700, 600, 600, 600, 600, 600]
-codeBackgroundColor = "#1D232C"
-dataframeHeaderBackgroundColor = "#1D232C"
-redColor = "#EF4444"
-greenColor = "#22C55E"
-orangeColor = "#F59E0B"
-chartCategoricalColors = ["#00E5E5", "#F472B6", "#A78BFA", "#F59E0B", "#22C55E", "#EF4444"]
+codeBackgroundColor = "#29292D"
+dataframeHeaderBackgroundColor = "#29292D"
+redColor = "#FF453A"
+greenColor = "#30D158"
+orangeColor = "#FF9F0A"
+blueColor = "#0A84FF"
+violetColor = "#BF5AF2"
+chartCategoricalColors = ["#64D2FF", "#7D7AFF", "#0A84FF", "#40C8E0", "#9FDCFF", "#8E8E93"]
 
 [theme.sidebar]
-backgroundColor = "#12161C"
-secondaryBackgroundColor = "#1D232C"
+backgroundColor = "#141416"
+secondaryBackgroundColor = "#29292D"
 
 [[theme.fontFaces]]
 family = "Inter"

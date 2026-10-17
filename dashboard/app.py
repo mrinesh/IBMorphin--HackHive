@@ -110,7 +110,9 @@ TICK_S = 0.5
 CONTEXT_SIGNALS = ("rpm", "load", "throttle")
 SLOW_SIGNALS = ("coolant_temp", "short_term_fuel_trim", "long_term_fuel_trim")
 CLASS_ORDER = ["normal", "misfire", "knock_like", "valve_clearance_like", "uncertain"]
-FAULT_COLORS = {"misfire": "#d62728", "knock_like": "#ff7f0e", "valve_clearance_like": "#9467bd"}
+# Same decision colors as theme.CLASS_META and the 3D view.
+FAULT_COLORS = {fault: theme.CLASS_META[fault]["color"]
+                for fault in ("misfire", "knock_like", "valve_clearance_like")}
 VALVE = "valve_clearance_like"
 DEGRADATION_WINDOW = 10
 SPARKLINE_S = 10.0
@@ -130,18 +132,18 @@ TELEMETRY_CARDS = [  # signal, label, value format, unit
     ("long_term_fuel_trim", "Long-term trim", "+.1f", "%"),
 ]
 # Evidence panels: each signal's statement and its highlighted segments share a color.
-SIGNAL_COLORS = {"sound": "#1f77b4", "vibration": "#2ca02c", "rpm": "#d62728"}
+SIGNAL_COLORS = {"sound": "#0A84FF", "vibration": "#30D158", "rpm": "#FF453A"}
 SIGNAL_TAGS = {"sound": "blue", "vibration": "green", "rpm": "red"}
 SIGNAL_NAMES = {"sound": "Sound", "vibration": "Vibration", "rpm": "RPM"}
 WAVE_ROWS = {"sound": [1], "vibration": [2, 3]}  # rows of the waveform figure
 # Fault-injection lab: healthy core_v1 recordings modified on request, replayed unchanged.
 LAB_DATASET = "core_v1"
-LAB_COLOR = "#b35900"
+LAB_COLOR = "#FF9F0A"
 LAB_FAULT_NAMES = {"none": "No fault", "misfire": "Misfire", "knock_like": "Knock-like bursts"}
 LAB_NOISE = [1.0, 1.5, 2.0, 3.0, 5.0]  # x recorded noise; 2x is the challenge-run level
 LAB_SENSORS = {"audio": "Microphone (audio)", "vibration": "Accelerometer (vibration)",
                "rpm": "RPM telemetry"}
-STAGE_COLORS = dict(zip(STAGES, ("#2ca02c", "#ff9f1c", "#d62728", "#bbbbbb"), strict=True))
+STAGE_COLORS = dict(zip(STAGES, ("#30D158", "#FF9F0A", "#FF453A", "#8E8E93"), strict=True))
 # Engine profiles (optional): selecting one turns on saving to that engine's history.
 NEW_PROFILE = "new"
 OTHER = "Other (not in catalog)…"
@@ -498,23 +500,38 @@ def profile_controls() -> Profile | None:
 
 store = HistoryStore()  # nothing is written until a profile is created
 
+
+def keep_choice(key: str) -> None:
+    """Segmented controls can be clicked off; keep the last choice instead of none."""
+    state = st.session_state
+    if state[key] is None:
+        state[key] = state[f"_{key}_last"]
+    else:
+        state[f"_{key}_last"] = state[key]
+
+
+st.session_state.setdefault("_mode_last", "Replay")
+st.session_state.setdefault("_speed_last", 1.0)
+
 with st.sidebar:
     st.html(f'<div class="sidebar-brand">{theme.wordmark_html("small")}'
             '<span class="sub">EngineSense · diagnostics</span></div>')
-    modes = ["Recorded replay"] + (["Fault-injection lab"] if lab_available() else [])
-    mode = st.radio("Mode", modes, horizontal=True)
-    lab_mode = mode == "Fault-injection lab"
+    modes = ["Replay"] + (["Fault lab"] if lab_available() else [])
+    mode = st.segmented_control("Mode", modes, default="Replay", key="mode",
+                                on_change=keep_choice, args=("mode",)) or "Replay"
+    lab_mode = mode == "Fault lab"
     if lab_mode:
-        st.header("Fault-injection lab")
+        st.header("Fault-injection lab",
+                  help="A healthy recording with a fault added on request, then replayed.")
         lab_controls()
     else:
-        st.header("Scenario")
+        st.header("Scenario", help="Each scenario replays a recorded held-out run. Abnormal "
+                  "vibration is shown as valve-train impacts, the fault class the model was "
+                  "trained on.")
         if scenario_options:
             st.segmented_control("Scenario", scenario_options, format_func=SCENARIOS.get,
                                  key="scenario", on_change=on_scenario_change,
                                  label_visibility="collapsed")
-            st.caption("Each scenario replays a recorded held-out run. Abnormal vibration is "
-                       "shown as valve-train impacts, the fault class the model was trained on.")
         preset_name = st.selectbox("Demo preset", preset_names, key="preset_select",
                                    on_change=on_preset_change)
         preset = next((p for p in presets if p["name"] == preset_name), None)
@@ -524,9 +541,9 @@ with st.sidebar:
                 advance_to(preset["start_s"])
             st.session_state.applied_preset = preset_name
         if preset:
-            st.info(preset.get("note", ""))
+            st.caption(preset.get("note", ""))
 
-        st.subheader("Run selection")
+        st.header("Run selection")
         dataset = st.selectbox("Dataset", datasets,
                                index=datasets.index(st.session_state.get("dataset", datasets[0]))
                                if st.session_state.get("dataset") in datasets else 0)
@@ -556,7 +573,9 @@ with st.sidebar:
     duration = bundle.metadata["duration_s"]
 
     st.header("Playback")
-    speed = st.select_slider("Speed", options=[0.5, 1.0, 2.0, 4.0], value=1.0, key="speed")
+    speed = st.segmented_control("Speed", [0.5, 1.0, 2.0, 4.0], default=1.0,
+                                 format_func=lambda v: f"{v:g}×", key="speed",
+                                 on_change=keep_choice, args=("speed",)) or 1.0
 
     def toggle_play() -> None:
         # A callback runs before the rerun, so the button label below is already current.
@@ -573,7 +592,7 @@ with st.sidebar:
     if st.button("Seek", width="stretch"):
         seek(target)
         st.session_state.anchor = time.monotonic() - st.session_state.stream_t / speed
-    show_truth = not lab_mode and st.checkbox(
+    show_truth = not lab_mode and st.toggle(
         "Show evaluation truth overlay", value=False,
         help="Simulation truth for review only; never used by the model.")
     st.caption(f"Model {model.model_version} · features {model.feature_version} · "
@@ -702,7 +721,7 @@ def localization_figure(where: dict, fault: str) -> go.Figure:
     values = [where["probabilities"][k] for k in labels]
     named = where.get("cylinder") is not None or where.get("slot") is not None
     best = max(range(len(values)), key=values.__getitem__)
-    colors = [FAULT_COLORS.get(fault, "#888") if named and k == best else "#b8bec6"
+    colors = [FAULT_COLORS.get(fault, "#888") if named and k == best else "#636366"
               for k in range(len(values))]
     prefix = "Cylinder" if where.get("phase") == "cam_sync" else "Slot"
     fig = go.Figure(go.Bar(x=[str(k) for k in labels], y=values, marker_color=colors,
@@ -1053,11 +1072,21 @@ def live_view():
             st.success("No active alert — the engine sounds normal so far",
                        icon=":material/check_circle:")
 
+    # Segmented tabs below the alert: Overview holds the readout, the 3D view and the
+    # diagnosis; the other views each get their own tab. Labels stay fixed so the
+    # selected tab and the 3D view survive every rerun.
+    overview_tab, signals_tab, frequency_tab, telemetry_tab, timeline_tab = st.tabs([
+        ":material/grid_view: Overview", ":material/graphic_eq: Signals",
+        ":material/equalizer: Frequencies", ":material/speed: Engine data",
+        ":material/timeline: History"])
+    overview = overview_tab.container()
+
     # Decision: every fault reported now (same faults as the alert banners), else this
     # window's class. A note marks faults held by their alert but not detected in this
     # window, or detected but not confirmed yet.
     reported = explain.reported_faults(latest)
-    cols = st.container(key="readout").columns(7)
+    readout = overview.container(key="readout")
+    cols = readout.columns(4) + readout.columns(4)  # four per row, as in the design
     cols[0].metric("Replay time", f"{t_now:.1f} s")
     cols[1].metric("Decision",
                    explain.reported_names(reported) if reported
@@ -1097,7 +1126,7 @@ def live_view():
                    if latest else "-",
                    help="Model processing per decision / dashboard update time (server).")
 
-    with st.container(key="fault_probabilities"):  # v2 only: fixed slot (see above)
+    with overview, st.container(key="fault_probabilities"):  # v2 only: fixed slot (see above)
         if multi:
             fault_cols = st.columns(len(model.fault_classes))
             for col, fault in zip(fault_cols, model.fault_classes, strict=True):
@@ -1106,12 +1135,12 @@ def live_view():
                            help=f"Detected at ≥ {model.thresholds[fault]:.2f}; calibrated on "
                                 "separate calibration engines (synthetic).")
 
-    with st.container(key="lab_response"):
+    with overview, st.container(key="lab_response"):
         if lab_log:
             lab_response(records, t_now)
 
     panels = [p for p in (alert_evidence(records, f) for f in active) if p]
-    with st.container(key="evidence"):
+    with overview, st.container(key="evidence"):
         if panels:
             st.subheader("Evidence for active alerts")
             for col, panel in zip(st.columns(len(panels)), panels, strict=True):
@@ -1120,7 +1149,7 @@ def live_view():
                                     (latest.get("localization") or {}).get(panel.fault))
 
     cards = telemetry_cards(t_now)
-    view_col, diag_col = st.columns([3, 2], gap="medium")
+    view_col, diag_col = overview.columns([3, 2], gap="medium")
     with view_col, st.container(key="viewport"):
         engine3d.render(engine3d.scene_state(
             latest, model, t_now=t_now, playing=bool(state.playing),
@@ -1133,16 +1162,7 @@ def live_view():
     with diag_col:
         st.html(theme.status_card_html(explain.diagnose(latest, model, confirm)))
 
-    st.html(theme.telemetry_cards_html(cards))
-
-    signals_tab, frequency_tab, telemetry_tab, crank_tab, thermal_tab, timeline_tab = st.tabs([
-        ":material/graphic_eq: Sound & vibration", ":material/equalizer: Frequencies (FFT / STFT)",
-        ":material/speed: Engine data", ":material/settings_backup_restore: Crank speed",
-        ":material/thermostat: Exhaust temperatures", ":material/timeline: History & evidence"])
-    with crank_tab:
-        crank_panel(records, latest, t_now)
-    with thermal_tab:
-        thermal_panel(latest, t_now)
+    telemetry_tab.html(theme.telemetry_cards_html(cards))
 
     engine = state.engine
     window_s = config["analysis"]["window_s"]
@@ -1220,6 +1240,12 @@ def live_view():
     tele.update_xaxes(range=[0, duration])
     tele.update_layout(height=400, showlegend=False, margin={"t": 50, "b": 20})
     telemetry_tab.plotly_chart(tele, width="stretch")
+    # Per-cylinder views from the crank wheel and exhaust temperatures (core_v3 runs).
+    with telemetry_tab:
+        st.subheader("Crank speed")
+        crank_panel(records, latest, t_now)
+        st.subheader("Exhaust temperatures")
+        thermal_panel(latest, t_now)
 
     timeline = multi_timeline(records) if multi else single_timeline(records)
     if show_truth:
@@ -1497,7 +1523,7 @@ def report_timeline_figure(timeline: dict) -> go.Figure:
     for stage in dict.fromkeys(timeline["stage"]):
         t = [x for x, s in zip(timeline["t"], timeline["stage"], strict=True) if s == stage]
         fig.add_trace(go.Bar(x=t, y=[1] * len(t), name=stage, width=0.5,
-                             marker_color=report.STAGE_COLORS.get(stage, "#9e9e9e")),
+                             marker_color=STAGE_COLORS.get(stage, "#8E8E93")),
                       row=2, col=1)
     fig.update_yaxes(visible=False, row=2, col=1)
     fig.update_xaxes(range=[0, timeline["duration_s"]], title="s", row=2, col=1)

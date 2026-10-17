@@ -55,12 +55,12 @@ export function render(root, data) {
 }
 
 const COLORS = {
-  cyan: 0x00e5e5,
+  cyan: 0x64d2ff,
   magenta: 0xf472b6,
-  violet: 0xa78bfa,
-  amber: 0xf59e0b,
-  rose: 0xf05252,
-  green: 0x22c55e,
+  violet: 0xbf5af2,
+  amber: 0xff9f0a,
+  rose: 0xff453a,
+  green: 0x30d158,
   slate: 0x8b9bb4,
   steel: 0x1b2a3f,
   steelLight: 0x3a5272,
@@ -73,12 +73,13 @@ const COLORS = {
 };
 const EMBERS = 26; // ember particles per cylinder
 // Fire colors per model state: fireball, hot core, embers and spark-plug arc.
-// Each scenario has its own color so it is recognizable at a glance.
+// Faults use the dashboard's decision colors (amber misfire, magenta knock-like,
+// violet valve-train) so the 3D view, cards and charts agree; normal burns orange.
 const FIRE = {
   normal: { flame: 0xff7a1a, core: 0xfff1b0, ember: 0xffa53d, plug: 0xfff8e1 }, // orange
-  misfire: { flame: 0x2f8bff, core: 0xd2e8ff, ember: 0x6cb6ff, plug: 0xe8f4ff }, // blue
-  knock_like: { flame: 0xb48cff, core: 0xf1e8ff, ember: 0xcdb4ff, plug: 0xf7f2ff }, // lavender
-  valve_clearance_like: { flame: 0x22c55e, core: 0xd9ffe6, ember: 0x5ee38f, plug: 0xeafff1 }, // green
+  misfire: { flame: 0xff9f0a, core: 0xffe6b8, ember: 0xffbf5c, plug: 0xfff4e0 }, // amber
+  knock_like: { flame: 0xf472b6, core: 0xffe0f0, ember: 0xf9a8d4, plug: 0xfff0f7 }, // magenta
+  valve_clearance_like: { flame: 0xbf5af2, core: 0xf0dcff, ember: 0xd69cf7, plug: 0xf8eeff }, // violet
 };
 
 // Geometry (arbitrary units; one cylinder pitch = 1).
@@ -96,9 +97,9 @@ const TRANSITION_S = 1.3;
 // Reduced-motion stand-ins for the animated effects (steady glow per model state).
 const STEADY = {
   normal: { flash: 0.35, color: 0xff7a1a },
-  misfire: { flash: 0.3, color: 0x2f8bff },
-  knock_like: { flash: 0.6, color: 0xb48cff },
-  valve_clearance_like: { flash: 0.35, color: 0x22c55e },
+  misfire: { flash: 0.3, color: 0xff9f0a },
+  knock_like: { flash: 0.6, color: 0xf472b6 },
+  valve_clearance_like: { flash: 0.35, color: 0xbf5af2 },
 };
 const CAMERA = {
   car: { radius: 17, target: new THREE.Vector3(0, 1.0, 0.3) },
@@ -409,7 +410,7 @@ function createView(root) {
                                (Math.random() - 0.5) * amp);
 
     // Block outline color follows the model state; an active alert pulses gently.
-    tmpColor.set(t.edge_color || '#00e5e5');
+    tmpColor.set(t.edge_color || '#64d2ff');
     sim.edgeColor.lerp(tmpColor, Math.min(1, dt * 4));
     const pulse = t.alert && !still ? 0.75 + 0.25 * Math.sin(timer.getElapsed() * 4) : 0.85;
     engine.edgeMaterials.forEach((material) => {
@@ -693,7 +694,7 @@ function fallbackView(root) {
     update(data) {
       target = data;
       root.setAttribute('aria-label', `Engine schematic (2D). ${data.status_text || ''}.`);
-      const color = data.edge_color || '#00e5e5';
+      const color = data.edge_color || '#64d2ff';
       block.setAttribute('stroke', color);
       const { located, perCylinder } = layoutFaults(data.faults);
       pistons.forEach(({ glow, port, piston }, k) => {
@@ -963,7 +964,7 @@ function buildEngine() {
 }
 
 function buildFloorGrid() {
-  const grid = new THREE.GridHelper(24, 48, COLORS.cyan, 0x1d3a40);
+  const grid = new THREE.GridHelper(24, 48, COLORS.cyan, 0x2a2f38);
   grid.material.transparent = true;
   grid.material.opacity = 0.22;
   return grid;

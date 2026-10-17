@@ -172,45 +172,49 @@ _HTML = """
 """
 
 _CSS = """
+/* Status text sits above the canvas on the card, never over the model. */
 .engine3d-root {
-  position: relative; width: 100%; height: clamp(300px, 46vw, 640px);
-  border-radius: 12px; overflow: hidden; outline: none;
-  border: 1px solid #2b333e;
-  background: radial-gradient(120% 90% at 50% 25%, #1a212b 0%, #10141a 75%);
+  position: relative; width: 100%; height: clamp(440px, 44vw, 660px);
+  display: flex; flex-direction: column; outline: none; border-radius: 14px;
 }
-.engine3d-root:focus-visible { box-shadow: inset 0 0 0 2px #00e5e5; }
-.engine3d-root canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+.engine3d-root:focus-visible { box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.65); }
+.engine3d-root canvas {
+  display: block; width: 100%; flex: 1; min-height: 0; touch-action: none; border-radius: 14px;
+  background: radial-gradient(120% 90% at 50% 15%, #1d1d21 0%, #0b0b0d 80%);
+}
 .engine3d-hud {
-  position: absolute; left: 16px; top: 14px; right: 16px; pointer-events: none;
-  font: 500 13px/1.5 "Inter", system-ui, sans-serif; color: #aeb4be;
+  order: -1; margin: 4px 8px 12px; pointer-events: none;
+  font: 500 13.5px/1.55 ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace; color: #a1a1a8;
 }
+.engine3d-hud div:nth-child(2) { font-weight: 600; margin-top: 2px; }
 .engine3d-controls {
-  position: absolute; right: 10px; bottom: 10px; display: flex; gap: 6px; flex-wrap: wrap;
+  position: absolute; right: 12px; bottom: 12px; display: flex; gap: 6px; flex-wrap: wrap;
   justify-content: flex-end;
 }
 .engine3d-controls button {
-  min-height: 38px; min-width: 44px; padding: 0 16px; border-radius: 8px; cursor: pointer;
-  font: 600 13px/1 "Inter", system-ui, sans-serif;
-  color: #e6e8eb; background: rgba(29, 35, 44, 0.92); border: 1px solid #2b333e;
+  min-height: 34px; min-width: 44px; padding: 0 16px; border-radius: 999px; cursor: pointer;
+  font: 600 13px/1 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+  color: #f5f5f7; background: rgba(40, 40, 44, 0.68); border: 0;
+  -webkit-backdrop-filter: blur(28px) saturate(1.8); backdrop-filter: blur(28px) saturate(1.8);
   transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
   touch-action: manipulation;
 }
-.engine3d-controls button:hover { border-color: #00e5e5; color: #00e5e5; }
+.engine3d-controls button:hover { filter: brightness(1.2); }
 .engine3d-controls button[aria-pressed="true"] {
-  background: rgba(0, 229, 229, 0.12); border-color: #00e5e5; color: #00e5e5;
+  background: #0a84ff; color: #fff;
 }
-.engine3d-controls button:focus-visible { outline: 2px solid #00e5e5; outline-offset: 2px; }
+.engine3d-controls button:focus-visible { outline: 3px solid rgba(10, 132, 255, 0.65); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) {
   .engine3d-controls button { transition: none; }
 }
 .engine3d-fallback[hidden], .engine3d-controls[hidden] { display: none; }
 .engine3d-fallback-status {
-  font: 500 13px/1.5 "Inter", system-ui, sans-serif; color: #aeb4be;
+  font: 500 13px/1.5 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif; color: #a1a1a8;
 }
 .engine3d-fallback {
   position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
-  justify-content: center; gap: 8px; padding: 16px; background: #10141a;
-  color: #e6e8eb; font: 14px/1.5 "Inter", system-ui, sans-serif; text-align: center;
+  justify-content: center; gap: 8px; padding: 16px; background: #0b0b0d;
+  color: #f5f5f7; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif; text-align: center;
 }
 """
 
