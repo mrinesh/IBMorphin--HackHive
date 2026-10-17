@@ -127,18 +127,22 @@ def register_plotly_template() -> None:
     """
     if pio.templates.default == "engine_hud":
         return
+    # automargin: margins grow to fit tick labels and axis titles, so charts that set a
+    # tight margin never clip their "kHz" / "s" titles. hoverformat: no 5-decimal readouts.
     axis = {"gridcolor": TOKENS["grid"], "zerolinecolor": TOKENS["grid"],
-            "linecolor": TOKENS["line"],
+            "linecolor": TOKENS["line"], "automargin": True, "hoverformat": ".4~g",
             "tickfont": {"family": "JetBrains Mono, monospace", "color": TOKENS["muted"],
-                         "size": 11},
+                         "size": 12},
             "title": {"font": {"color": TOKENS["muted"]}}}
     overrides = go.layout.Template(layout={
         "paper_bgcolor": "rgba(0,0,0,0)",
         "plot_bgcolor": TOKENS["surface"],
         "font": {"family": _SANS, "color": TOKENS["text"], "size": 13},
-        "title": {"font": {"family": _SANS, "size": 15, "color": TOKENS["text"]}, "x": 0.01},
-        "colorway": [TOKENS["cyan"], TOKENS["indigo"], TOKENS["accent"], "#40C8E0",
-                     TOKENS["cyan_soft"], TOKENS["slate"]],
+        # Cool, mutually distinct hues for generic series; decision colors stay reserved.
+        "colorway": [TOKENS["cyan"], TOKENS["indigo"], "#E5E5EA", TOKENS["accent"],
+                     TOKENS["slate"], TOKENS["cyan_soft"]],
+        "title": {"font": {"family": _SANS, "size": 15, "color": TOKENS["text"]},
+                  "x": 0, "xanchor": "left", "pad": {"l": 16}},
         "xaxis": axis, "yaxis": axis,
         "legend": {"bgcolor": "rgba(0,0,0,0)", "font": {"color": TOKENS["muted"]}},
         "hoverlabel": {"bgcolor": TOKENS["elevated"], "bordercolor": TOKENS["line"],

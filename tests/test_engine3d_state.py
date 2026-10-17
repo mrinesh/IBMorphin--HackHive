@@ -155,8 +155,7 @@ def test_payload_stays_small():
 
 
 def test_view_controls_are_labelled_buttons():
-    html = engine3d._HTML
-    for label in ("Car", "Engine", "Reset view"):
-        assert f">{label}</button>" in html
-    assert html.count('type="button"') == 3 and 'aria-pressed="true"' in html
+    html = engine3d._HTML  # engine view only: the car view was removed
+    assert ">Reset view</button>" in html and html.count('type="button"') == 1
+    assert ">Car</button>" not in html
     assert 'role="img"' in html and "arrow keys" in html  # keyboard alternative to dragging

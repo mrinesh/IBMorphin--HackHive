@@ -163,8 +163,6 @@ _HTML = """
      aria-label="3D engine view. Drag or use arrow keys to orbit, plus and minus to zoom.">
   <div class="engine3d-hud" aria-hidden="true"></div>
   <div class="engine3d-controls" role="group" aria-label="3D view">
-    <button type="button" data-view="car" aria-pressed="true">Car</button>
-    <button type="button" data-view="engine" aria-pressed="false">Engine</button>
     <button type="button" data-action="reset">Reset view</button>
   </div>
   <div class="engine3d-fallback" hidden></div>

@@ -89,11 +89,8 @@ const ROD_L = 1.4;
 const PISTON_H = 0.42;
 const DECK_Y = 2.5;
 
-// Car view: a transverse engine at BAY.scale in the engine bay; detail view: full size.
-// The engine's crank axis is at its local origin; its oil pan reaches about -0.83.
-const BAY = { scale: 0.24, y: 0.62 + 0.83 * 0.24 + 0.02, z: 2.75 };
+// The engine is shown full size; its crank axis is at its local origin, lifted to DETAIL_Y.
 const DETAIL_Y = 1.6;
-const TRANSITION_S = 1.3;
 // Reduced-motion stand-ins for the animated effects (steady glow per model state).
 const STEADY = {
   normal: { flash: 0.35, color: 0xff7a1a },
@@ -101,10 +98,7 @@ const STEADY = {
   knock_like: { flash: 0.6, color: 0xf472b6 },
   valve_clearance_like: { flash: 0.35, color: 0xbf5af2 },
 };
-const CAMERA = {
-  car: { radius: 17, target: new THREE.Vector3(0, 1.0, 0.3) },
-  engine: { radius: 11.5, target: new THREE.Vector3(0, DETAIL_Y + 0.95, 0) },
-};
+const CAMERA = { radius: 11.5, target: new THREE.Vector3(0, DETAIL_Y + 0.95, 0) };
 const CHAMBER_Y = 2.32;
 // WebGL context loss: browsers keep only a few contexts per page and drop the oldest
 // when more are made (the dashboard's charts are SVG so the 3D view is the only one),
@@ -209,27 +203,18 @@ function createView(root) {
   rim.position.set(-5, 3, -4);
   scene.add(rim);
 
-  // The engine sits in `assembly`, whose pose blends from the car's engine bay (small,
-  // transverse) to the full-size detail pose as the view moves from car to engine.
   const engine = buildEngine();
   const assembly = new THREE.Group();
   assembly.add(engine.group);
+  assembly.position.set(0, DETAIL_Y, 0);
   scene.add(assembly);
-  const car = buildCar();
-  scene.add(car.group);
   scene.add(buildFloorGrid());
+  stats.view = 1; // engine view only (read by scripts/check_engine3d.mjs)
 
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   const START = { theta: 0.72, phi: 1.12, zoom: 1 };
   const orbit = createOrbit(root, camera, START);
-  const viewButtons = createViewControls(root, (mode) => setMode(mode));
-  const transition = { target: 0, raw: 0 }; // 0 = car exterior, 1 = engine detail
-  function setMode(mode) {
-    transition.target = mode === 'engine' ? 1 : 0;
-    viewButtons.show(mode);
-  }
-  viewButtons.onReset(() => Object.assign(orbit.view, START));
-  setMode('car');
+  createResetControl(root, () => Object.assign(orbit.view, START));
   const timer = new THREE.Timer();
   timer.connect(document);
   const sim = {
@@ -278,28 +263,8 @@ function createView(root) {
     const dt = Math.min(timer.getDelta(), 0.1);
     if (!visible || document.hidden) return;
     step(dt);
-    const m = stepTransition(dt);
-    orbit.apply(lerp(CAMERA.car.radius, CAMERA.engine.radius, m),
-                tmpTarget.lerpVectors(CAMERA.car.target, CAMERA.engine.target, m));
+    orbit.apply(CAMERA.radius, CAMERA.target);
     renderer.render(scene, camera);
-  }
-
-  // Car -> engine: hood lifts, car fades, engine grows out of the bay, camera dollies in.
-  const tmpTarget = new THREE.Vector3();
-  function stepTransition(dt) {
-    if (reduceMotion.matches) transition.raw = transition.target;
-    else {
-      const direction = Math.sign(transition.target - transition.raw);
-      transition.raw = clamp01(transition.raw + direction * dt / TRANSITION_S);
-    }
-    const m = easeInOutCubic(transition.raw);
-    const pose = smoothstep(clamp01((m - 0.15) / 0.85));
-    assembly.scale.setScalar(lerp(BAY.scale, 1, pose));
-    assembly.position.set(0, lerp(BAY.y, DETAIL_Y, pose), lerp(BAY.z, 0, pose));
-    car.hood.rotation.z = 0.95 * clamp01(m / 0.35);
-    car.setOpacity(1 - clamp01((m - 0.35) / 0.45));
-    stats.view = m;
-    return m;
   }
 
   function step(dt) {
@@ -566,11 +531,6 @@ function createView(root) {
     update(data) {
       const previous = sim.target;
       const firstOrder = !previous.firing_order;
-      // Fly into the engine when playback starts or a new alert is raised. The
-      // Car / Engine buttons override this at any time.
-      if ((data.playing && !previous.playing) || (data.alert && data.alert !== previous.alert)) {
-        setMode('engine');
-      }
       sim.target = data;
       sim.layout = layoutFaults(data.faults);
       if (firstOrder && Array.isArray(data.firing_order)) engine.setFiringOrder(data.firing_order);
@@ -970,138 +930,9 @@ function buildFloorGrid() {
   return grid;
 }
 
-// Stylized low-poly coupe: side profile extruded across its width, neon edges,
-// translucent shell so the engine shows through. Built with length along X and turned
-// so the nose points to +Z (transverse engine across the car, crank along X).
-function buildCar() {
-  const group = new THREE.Group();
-  group.rotation.y = -Math.PI / 2;
-  const fades = [];
-  const shell = (color, opacity) => {
-    const material = new THREE.MeshStandardMaterial({
-      color, transparent: true, opacity, metalness: 0.6, roughness: 0.35, depthWrite: false,
-      side: THREE.DoubleSide,
-    });
-    material.userData.base = opacity;
-    fades.push(material);
-    return material;
-  };
-  const neon = (mesh, color, opacity) => {
-    const material = new THREE.LineBasicMaterial({ color, transparent: true, opacity });
-    material.userData.base = opacity;
-    fades.push(material);
-    mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry, 18), material));
-    return mesh;
-  };
-  const extrude = (shape, depth, bevel) => {
-    const geometry = new THREE.ExtrudeGeometry(shape, {
-      depth, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel * 0.8,
-      bevelSegments: 2, curveSegments: 18,
-    });
-    geometry.translate(0, 0, -depth / 2);
-    return geometry;
-  };
-
-  const WHEEL_Y = 0.62;
-  const body = new THREE.Shape();
-  body.moveTo(-4.45, WHEEL_Y);
-  body.lineTo(-3.78, WHEEL_Y);
-  body.absarc(-3.0, WHEEL_Y, 0.78, Math.PI, 0, true);
-  body.lineTo(2.22, WHEEL_Y);
-  body.absarc(3.0, WHEEL_Y, 0.78, Math.PI, 0, true);
-  body.lineTo(4.35, WHEEL_Y);
-  body.lineTo(4.62, 0.95);
-  body.lineTo(4.45, 1.2);
-  body.lineTo(1.5, 1.45);
-  body.lineTo(-2.75, 1.5);
-  body.lineTo(-4.35, 1.4);
-  body.lineTo(-4.62, 1.0);
-  body.closePath();
-  group.add(neon(new THREE.Mesh(extrude(body, 2.9, 0.12), shell(COLORS.steel, 0.2)),
-                 COLORS.cyan, 0.75));
-
-  const cabin = new THREE.Shape();
-  cabin.moveTo(1.5, 1.45);
-  cabin.lineTo(-0.15, 2.3);
-  cabin.lineTo(-2.05, 2.32);
-  cabin.lineTo(-3.25, 1.5);
-  cabin.closePath();
-  group.add(neon(new THREE.Mesh(extrude(cabin, 2.45, 0.08), shell(0x0e7490, 0.22)),
-                 COLORS.cyan, 0.55));
-
-  // Hood hinged at the windshield base; rotation.z > 0 lifts it.
-  const hood = new THREE.Group();
-  hood.position.set(1.5, 1.49, 0);
-  const panel = new THREE.Mesh(new THREE.BoxGeometry(2.98, 0.05, 2.85), shell(COLORS.steel, 0.3));
-  panel.position.x = 1.49;
-  panel.rotation.z = Math.atan2(1.2 - 1.45, 2.95);
-  hood.add(neon(panel, COLORS.magenta, 0.85));
-  group.add(hood);
-
-  const tire = new THREE.TorusGeometry(0.47, 0.16, 12, 36);
-  const rim = new THREE.CylinderGeometry(0.33, 0.33, 0.22, 24);
-  rim.rotateX(Math.PI / 2);
-  for (const x of [-3.0, 3.0]) {
-    for (const z of [-1.55, 1.55]) {
-      const wheel = new THREE.Group();
-      wheel.position.set(x, WHEEL_Y, z);
-      wheel.add(neon(new THREE.Mesh(tire, shell(0x0b1220, 0.9)), COLORS.cyan, 0.35));
-      wheel.add(neon(new THREE.Mesh(rim, shell(COLORS.steelLight, 0.7)), COLORS.cyan, 0.6));
-      group.add(wheel);
-    }
-  }
-
-  const strip = (x, y, color) => {
-    const material = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1 });
-    material.userData.base = 1;
-    fades.push(material);
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.07, 2.5), material);
-    mesh.position.set(x, y, 0);
-    return mesh;
-  };
-  group.add(strip(4.56, 1.06, COLORS.cyan), strip(-4.6, 1.18, COLORS.rose));
-
-  const glow = new THREE.MeshBasicMaterial({
-    map: glowTexture(), color: COLORS.cyan, transparent: true, opacity: 0.35,
-    blending: THREE.AdditiveBlending, depthWrite: false,
-  });
-  glow.userData.base = 0.35;
-  fades.push(glow);
-  const underglow = new THREE.Mesh(new THREE.PlaneGeometry(10.5, 4.2), glow);
-  underglow.rotation.x = -Math.PI / 2;
-  underglow.position.y = 0.02;
-  group.add(underglow);
-
-  return {
-    group,
-    hood,
-    setOpacity(alpha) {
-      fades.forEach((material) => { material.opacity = material.userData.base * alpha; });
-      group.visible = alpha > 0.01;
-    },
-  };
-}
-
-// Car / Engine / Reset buttons rendered in the component HTML.
-function createViewControls(root, onSelect) {
-  const buttons = [...root.querySelectorAll('.engine3d-controls button')];
-  let reset = () => {};
-  buttons.forEach((button) => {
-    button.addEventListener('click', () => {
-      if (button.dataset.view) onSelect(button.dataset.view);
-      else if (button.dataset.action === 'reset') reset();
-    });
-  });
-  return {
-    show(mode) {
-      buttons.forEach((button) => {
-        if (button.dataset.view) {
-          button.setAttribute('aria-pressed', String(button.dataset.view === mode));
-        }
-      });
-    },
-    onReset(callback) { reset = callback; },
-  };
+// Reset view button rendered in the component HTML.
+function createResetControl(root, onReset) {
+  root.querySelector('.engine3d-controls [data-action="reset"]')?.addEventListener('click', onReset);
 }
 
 function glowTexture() {
@@ -1177,20 +1008,8 @@ function has(faults, kind) {
   return faults.some((f) => f.fault === kind);
 }
 
-function lerp(a, b, t) {
-  return a + (b - a) * t;
-}
-
 function clamp01(value) {
   return Math.min(Math.max(value, 0), 1);
-}
-
-function smoothstep(t) {
-  return t * t * (3 - 2 * t);
-}
-
-function easeInOutCubic(t) {
-  return t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
 }
 
 function mod(value, period) {

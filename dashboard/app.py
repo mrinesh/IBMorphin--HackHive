@@ -344,8 +344,12 @@ def lab_controls() -> None:
     default = current.base_run if current else bases.run_id.iloc[len(bases) // 2]
     with st.form("lab_form"):
         st.caption("Healthy recordings from engines the classifier was not trained on.")
+        # The thumb shows only the RPM (a long label ran off the sidebar); the profile and
+        # run are in the help text and the lab log.
         base = st.select_slider("Engine RPM (base recording)", options=list(bases.run_id),
-                                value=default, format_func=lambda r: labels[r])
+                                value=default, format_func=lambda r: labels[r].split(" · ")[0],
+                                help="Base recordings, slowest to fastest: "
+                                     + "; ".join(labels[r] for r in bases.run_id))
         fault = st.selectbox("Injected fault", LAB_FAULTS, format_func=LAB_FAULT_NAMES.get,
                              index=LAB_FAULTS.index(current.fault) if current else 1)
         severity = st.slider("Fault severity", 0.1, 1.0, current.severity if current else 0.5, 0.05)
@@ -944,11 +948,12 @@ def health_figure(health: HealthTimeline) -> go.Figure:
                                  legendgroup="stage"), row=2, col=1)
     fig.update_yaxes(title="x threshold", range=[0, top], row=1, col=1)
     fig.update_yaxes(visible=False, row=2, col=1)
-    fig.update_xaxes(range=[0, duration], title="s", row=2, col=1)
-    fig.update_layout(height=380, bargap=0, margin={"t": 40, "b": 20},
+    # The unit sits on the ticks ("5 s"), so the legend below has no axis title to cover.
+    fig.update_xaxes(range=[0, duration], ticksuffix=" s", row=2, col=1)
+    fig.update_layout(height=470, bargap=0, margin={"t": 50, "b": 130},
                       title="Health timeline vs healthy baseline: deterioration demonstration "
                             "(simulated data)",
-                      legend={"orientation": "h", "y": -0.25})
+                      legend={"orientation": "h", "y": -0.2, "yanchor": "top", "x": 0})
     return fig
 
 
@@ -1140,14 +1145,6 @@ def live_view():
             lab_response(records, t_now)
 
     panels = [p for p in (alert_evidence(records, f) for f in active) if p]
-    with overview, st.container(key="evidence"):
-        if panels:
-            st.subheader("Evidence for active alerts")
-            for col, panel in zip(st.columns(len(panels)), panels, strict=True):
-                with col:
-                    render_evidence(panel,
-                                    (latest.get("localization") or {}).get(panel.fault))
-
     cards = telemetry_cards(t_now)
     view_col, diag_col = overview.columns([3, 2], gap="medium")
     with view_col, st.container(key="viewport"):
@@ -1161,6 +1158,16 @@ def live_view():
             truth=load_truth_cached(dataset, run_id) if show_truth else None))
     with diag_col:
         st.html(theme.status_card_html(explain.diagnose(latest, model, confirm)))
+
+    # Evidence below the engine view: the 3D view and diagnosis keep their place on screen
+    # when an alert appears, and the evidence reads as the detail behind them.
+    with overview, st.container(key="evidence"):
+        if panels:
+            st.subheader("Evidence for active alerts")
+            for col, panel in zip(st.columns(len(panels)), panels, strict=True):
+                with col:
+                    render_evidence(panel,
+                                    (latest.get("localization") or {}).get(panel.fault))
 
     telemetry_tab.html(theme.telemetry_cards_html(cards))
 

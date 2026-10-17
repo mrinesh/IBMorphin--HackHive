@@ -6,8 +6,8 @@
 //
 // 1. Knock scenario: plays ~12 s of replay and checks, from the page's window.__engine3d
 //    counters, that the Three.js scene was created once and kept receiving updates
-//    across Streamlit reruns (no remounts or disposals), that the view flew into the
-//    engine, and that the crank turned and fired.
+//    across Streamlit reruns (no remounts or disposals), that the engine view is
+//    shown, and that the crank turned and fired.
 // 2. Multi-fault preset 9 (knock on cylinder 1, misfire on cylinder 4), played to the
 //    end: whenever two ALERT banners show, the Decision tile names both faults; the 3D
 //    view marks both cylinders; after the replay ends the engine keeps running.
@@ -125,7 +125,7 @@ try {
   check('scene created exactly once across reruns', late && late.mounts === 1);
   check('scene never disposed', late && late.disposed === 0);
   check('updates kept arriving (>= 10 more)', late && early && late.updates - early.updates >= 10);
-  check('view moved into the engine on Play', late && late.view === 1);
+  check('engine view shown', late && late.view === 1);
   check('crank turned', late && late.crank > 5);
   check('combustion events fired', late && late.events?.fired > 0);
   await click('Pause');
