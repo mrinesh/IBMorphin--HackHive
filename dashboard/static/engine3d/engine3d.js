@@ -14,7 +14,8 @@
 //                  detections): {fault, status, cylinder, intensity, color}.
 //                  `cylinder` is the one the localizer names (sensor data + cam phase
 //                  reference): the fault's effect is confined to it and it is marked
-//                  with a red piston and a ring in the fault's color. A fault without
+//                  with its piston head glowing in that fault's color (blue misfire,
+//                  lavender knock, green valve-train impacts). A fault without
 //                  a cylinder shows on every cylinder. Several faults compose: a
 //                  misfire weakens or skips the firing, knock adds sparks and jolts,
 //                  valve-train impacts add seat ticks. `intensity` is the model's
@@ -68,7 +69,7 @@ const COLORS = {
   flameCore: 0xfff1b0, // white-hot core
   ember: 0xffa53d, // glowing particles thrown out by the burn
   plug: 0xe8f9ff, // spark-plug arc
-  alarm: 0xff2d2d, // localized faulty piston
+  alarm: 0xff2d2d, // fallback piston highlight
 };
 const EMBERS = 26; // ember particles per cylinder
 // Fire colors per model state: fireball, hot core, embers and spark-plug arc.
@@ -240,7 +241,8 @@ function createView(root) {
     plug: [0, 0, 0, 0], // spark-plug arc 0..1, just before the fireball
     embers: [0, 0, 0, 0], // ember life 0..1
     ticks: [0, 0, 0, 0],
-    alarm: [0, 0, 0, 0], // red highlight on the localized cylinder's piston, 0..1
+    alarm: [0, 0, 0, 0], // fault-colored highlight on the localized piston head, 0..1
+    alarmFault: [null, null, null, null], // fault whose color the highlight shows (kept while fading)
     egt: [null, null, null, null], // eased exhaust runner temperature 0..1 (null: no sensor)
     layout: layoutFaults([]), // reported faults per cylinder (set on each update)
     jolt: 0,
@@ -414,23 +416,23 @@ function createView(root) {
       material.color.copy(sim.edgeColor);
       material.opacity = material.userData.base * pulse;
     });
-    // Faulty-cylinder highlight: every piston the localizer names glows red and pulses,
-    // with a ring in its fault's color; each fades in when its cylinder is named and
-    // out when the fault is no longer reported.
+    // Faulty-cylinder highlight: every piston head the localizer names glows and pulses
+    // in its fault's color (the same colors as that fault's flame); each fades in when
+    // its cylinder is named and out when the fault is no longer reported.
     const beat = still ? 1 : 0.65 + 0.35 * Math.sin(timer.getElapsed() * 5);
     engine.cylinders.forEach((cyl, k) => {
       const goal = located[k] ? 1 : 0;
+      if (located[k]) sim.alarmFault[k] = located[k].fault;
+      const tint = FIRE[sim.alarmFault[k]]?.flame ?? COLORS.alarm;
+      cyl.piston.material.emissive.setHex(tint);
+      cyl.alarm.material.color.setHex(tint);
+      cyl.alarmLight.color.setHex(tint);
       sim.alarm[k] += (goal - sim.alarm[k]) * Math.min(1, dt * (still ? 60 : 4));
       const level = sim.alarm[k] * beat;
       cyl.piston.material.emissiveIntensity = 1.6 * level;
       cyl.alarm.material.opacity = 0.85 * level;
       cyl.alarmLight.position.y = cyl.piston.position.y + 0.35;
       cyl.alarmLight.intensity = 9 * level;
-      cyl.ring.visible = Boolean(located[k]);
-      if (located[k]) {
-        cyl.ring.material.color.set(located[k].color || '#f59e0b');
-        cyl.ring.material.opacity = 0.95 * pulse;
-      }
     });
     stats.modelCylinders = located.flatMap((f, k) => (f ? [k + 1] : [])); // browser checks
     // Exhaust runners glow with their measured exhaust gas temperature.
@@ -698,7 +700,8 @@ function fallbackView(root) {
         // Each cylinder glows in its own fault's color (else the state color); a
         // localized fault also turns that piston red.
         glow.setAttribute('fill', perCylinder[k][0]?.color || color);
-        piston.setAttribute('fill', located[k] ? '#ff2d2d' : '#9fb3c8');
+        piston.setAttribute('fill', located[k]
+          ? `#${FIRE[located[k].fault].flame.toString(16).padStart(6, '0')}` : '#9fb3c8');
         const egt = Array.isArray(data.egt) ? Number(data.egt[k]) : NaN;
         port.setAttribute('fill', Number.isFinite(egt)
           ? `#${inferno(egt, new THREE.Color()).getHexString()}` : 'rgba(148,163,184,0.25)');
@@ -919,20 +922,13 @@ function buildEngine() {
   const chamberLight = new THREE.PointLight(COLORS.flame, 0, 4, 2);
   shaker.add(chamberLight);
   // Per cylinder (several faults can be localized at once): a red light that follows
-  // the piston and tints the parts around it, and a localization ring above the head
-  // in the fault's color. Built once with zero intensity / hidden, so the light count
-  // never changes and no shader is recompiled when a fault appears.
-  const ringGeometry = new THREE.TorusGeometry(0.46, 0.03, 8, 64);
+  // the piston and tints the parts around it, in the fault's color. Built once with
+  // zero intensity, so the light count never changes and no shader is recompiled when a
+  // fault appears.
   cylinders.forEach((cyl) => {
     cyl.alarmLight = new THREE.PointLight(COLORS.alarm, 0, 1.4, 2);
     cyl.alarmLight.position.set(cyl.x, CHAMBER_Y, 0.45);
-    cyl.ring = new THREE.Mesh(ringGeometry, new THREE.MeshBasicMaterial({
-      color: COLORS.amber, transparent: true, opacity: 0.95,
-    }));
-    cyl.ring.rotation.x = Math.PI / 2;
-    cyl.ring.position.set(cyl.x, DECK_Y + 0.95, 0);
-    cyl.ring.visible = false;
-    shaker.add(cyl.alarmLight, cyl.ring);
+    shaker.add(cyl.alarmLight);
   });
 
   // Evaluation-truth marker (only shown when the overlay is on).
