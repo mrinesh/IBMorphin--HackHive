@@ -160,7 +160,7 @@ try {
     sawPlaying ||= view.playing;
     // Two banners and a tile naming fewer faults, twice in a row (not a rerun in flight).
     const mismatch = (v) => v.alerts >= 2
-      && !(v.decision.includes('Knock-like') && v.decision.includes('Misfire'));
+      && !(v.decision.includes('Knock') && v.decision.includes('Misfire'));
     if (view.alerts >= 2) twoAlertSamples += 1;
     if (mismatch(view)) {
       await sleep(250);

@@ -371,8 +371,12 @@ function createView(root) {
     const base = still ? 0 : Math.min(Math.max(ratio - 1, 0), 3) * 0.006;
     sim.jolt = Math.max(0, sim.jolt - dt * 9);
     const amp = still ? 0 : base + sim.jolt * 0.035;
-    engine.shaker.position.set((Math.random() - 0.5) * amp, (Math.random() - 0.5) * amp,
-                               (Math.random() - 0.5) * amp);
+    // Smooth quasi-random wobble (incommensurate sines): a new random offset every frame
+    // read as rendering jitter rather than engine vibration.
+    const w = timer.getElapsed() * 40;
+    engine.shaker.position.set(0.5 * amp * Math.sin(w * 1.3) * Math.cos(w * 0.37),
+                               0.5 * amp * Math.sin(w * 1.7 + 1.1),
+                               0.5 * amp * Math.sin(w * 1.1 + 2.3) * Math.cos(w * 0.53));
 
     // Block outline color follows the model state; an active alert pulses gently.
     tmpColor.set(t.edge_color || '#64d2ff');
@@ -540,21 +544,22 @@ function createView(root) {
   };
 }
 
+// Always three rows (engine, model status, extras) so the HUD height never changes.
 function renderHud(hud, data) {
   const rpm = Number.isFinite(data.rpm) ? `${Math.round(data.rpm).toLocaleString('en-US')} rpm`
                                         : 'rpm —';
   const order = (data.firing_order || [1, 3, 4, 2]).join('-');
-  const speed = `shown at ×1/${Math.round(1 / VISUAL_SPEED)} speed`;
+  const speed = `×1/${Math.round(1 / VISUAL_SPEED)} speed`;
+  const extras = [];
+  if (data.finished) extras.push(finishedText(data));
+  if (Array.isArray(data.egt_c)) extras.push(egtText(data));
+  const truth = Number.isInteger(data.truth_cylinder);
+  if (truth) extras.push(`Evaluation truth: cylinder ${data.truth_cylinder} (not used by the model)`);
   hud.replaceChildren(
-    line(`Inline-4 engine · firing order ${order} · ${rpm} · ${speed}`),
+    line(`Inline-4 · firing order ${order} · ${rpm} · ${speed}`),
     line(data.status_text || '', data.edge_color),
+    line(extras.join(' · '), truth ? '#fbbf24' : undefined),
   );
-  if (data.finished) hud.append(line(finishedText(data)));
-  if (Array.isArray(data.egt_c)) hud.append(line(egtText(data)));
-  if (Number.isInteger(data.truth_cylinder)) {
-    hud.append(line(`Evaluation truth overlay: fault in cylinder ${data.truth_cylinder} ` +
-                    '(not used by the model)', '#fbbf24'));
-  }
 }
 
 function finishedText(data) {
@@ -588,7 +593,8 @@ function describe(root, data) {
 
 function line(text, color) {
   const element = document.createElement('div');
-  element.textContent = text;
+  element.textContent = text || '\u00a0';
+  if (text) element.title = text; // full text when a row is cut off
   if (color) element.style.color = color;
   return element;
 }
@@ -1029,7 +1035,7 @@ function lift(angle, open, close) {
 }
 
 // Minimal orbit control: drag or arrow keys rotate, wheel or +/- zoom. The base
-// radius and look-at target come from the car/engine transition each frame.
+// radius and look-at target are passed in each frame (CAMERA).
 function createOrbit(root, camera, start) {
   const view = { ...start };
   let drag = null;

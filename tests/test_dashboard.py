@@ -120,7 +120,7 @@ def test_active_alert_shows_linked_evidence_panel():
     assert app.session_state["records"][-1]["alert"] == "misfire"
     assert any(s.value == "Evidence for active alerts" for s in app.subheader)
     text = " ".join(m.value for m in app.markdown)
-    assert "Possible misfire" in text
+    assert "Misfire evidence" in text
     for claim in ("irregular firing rhythm", "repeated abnormal pulses",
                   "accompanying fluctuation", "Assessment:"):
         assert claim in text
@@ -295,8 +295,8 @@ def test_decision_names_every_alerted_fault_when_one_drops_out_of_a_window():
     banners = [e.value for e in app.error if "ALERT" in e.value]
     assert len(banners) == 2
     decision = next(m for m in app.metric if m.label == "Decision")
-    assert decision.value == "Knock-like + Misfire"
-    assert decision.delta == "Knock-like held (not in this window)"
+    assert decision.value == "Knock + Misfire"
+    assert not decision.delta
     assert next(m for m in app.metric if m.label == "Detected this window").value == "1"
 
 

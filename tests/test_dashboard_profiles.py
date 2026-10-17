@@ -153,8 +153,8 @@ def test_diagnose_falls_back_without_a_key_and_on_429_and_saves_each_diagnosis(
     widget(app.button, "Diagnose").click().run()  # no key
     assert not app.exception
     assert any("No Gemini API key" in i.value for i in app.info)
-    assert any("Possible causes" in m.value for m in app.markdown)
-    assert any("Decision support only" in c.value for c in app.caption)
+    assert any("Causes" in m.value for m in app.markdown)
+    assert any("Decision support" in c.value for c in app.caption)
 
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     widget(app.button, "Diagnose").click().run()  # simulated 429

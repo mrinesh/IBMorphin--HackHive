@@ -31,8 +31,8 @@ FALLBACK_MODEL = "rule-based (basic)"
 KINDS = ("detected", "suggested")
 CONFIDENCES = ("high", "medium", "low")
 URGENCIES = ("stop_now", "soon", "monitor")
-DISCLAIMER = ("Decision support only: these are possible causes ranked from the recorded data, "
-              "not a substitute for a physical inspection by a qualified technician.")
+DISCLAIMER = ("Decision support: causes ranked from the recorded data. Confirm with a physical "
+              "inspection by a qualified technician before repair.")
 
 SYSTEM_PROMPT = """\
 You are an engine diagnostics assistant supporting a technician. You receive

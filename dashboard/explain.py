@@ -126,52 +126,8 @@ def reported_faults(record: dict[str, Any] | None) -> list[dict[str, str]]:
 
 
 def reported_names(reported: list[dict[str, str]]) -> str:
-    """'Knock-like + Misfire' for a reported_faults list."""
+    """'Knock + Misfire' for a reported_faults list."""
     return names("+".join(r["fault"] for r in reported))
-
-
-def status_note(reported: list[dict[str, str]]) -> str:
-    """Short note on reported faults that are not confirmed in this window ('' if none)."""
-    held = [r["fault"] for r in reported if r["status"] == "held"]
-    pending = [r["fault"] for r in reported if r["status"] == "unconfirmed"]
-    notes = []
-    if held:
-        notes.append(f"{names('+'.join(held))} held (not in this window)")
-    if pending:
-        notes.append(f"{names('+'.join(pending))} awaiting confirmation")
-    return " · ".join(notes)
-
-
-def uncertain_reason(record: dict[str, Any], model) -> str:
-    """Why the accepted decision is 'uncertain', from the same rules the model applies."""
-    predicted = record.get("predicted")
-    anomalous = bool(record.get("anomalous"))
-    if hasattr(model, "fault_classes"):  # v2: one detector and threshold per fault
-        if record.get("uncertain_faults"):
-            return ("probability is close to the detection threshold for "
-                    + names("+".join(record["uncertain_faults"])))
-        if anomalous:
-            return "no fault detector fired, but the anomaly score is above its threshold"
-        return "decision not accepted"
-    if "probability" in record:
-        if record["probability"] < model.probability_min:
-            return (f"classifier confidence {record['probability']:.2f} is below the "
-                    f"{model.probability_min:.2f} acceptance level")
-        if predicted == "normal" and anomalous:
-            return "classifier says normal, but the anomaly score is above its threshold"
-        if getattr(model, "gate_fault_with_anomaly", False) and not anomalous:
-            return f"classifier says {predicted}, but the anomaly score is not elevated"
-        return "decision not accepted"
-    if record.get("margin", 0.0) < getattr(model, "margin_threshold", 0.0):
-        return "decision margin is below the acceptance threshold"
-    if predicted == "normal" and anomalous:
-        return "classifier says normal, but the anomaly score is above its threshold"
-    if predicted != "normal" and not anomalous:
-        return f"classifier says {predicted}, but the anomaly score is not elevated"
-    return "decision not accepted"
-
-
-STRENGTH_LABELS = ("Weak", "Weak", "Elevated", "Confirmed")
 
 
 def evidence_strength(record: dict[str, Any], model) -> dict[str, Any] | None:
@@ -213,8 +169,7 @@ def evidence_strength(record: dict[str, Any], model) -> dict[str, Any] | None:
                      set(predicted.split("+"))
                      <= set(record.get("alerts") or [record.get("alert")]))]
     level = sum(ok for _, ok in criteria)
-    return {"for": name, "level": level, "label": STRENGTH_LABELS[level],
-            "criteria": criteria}
+    return {"for": name, "level": level, "criteria": criteria}
 
 
 def diagnose(record: dict[str, Any] | None, model, confirm_updates: int) -> dict[str, Any]:
@@ -224,7 +179,7 @@ def diagnose(record: dict[str, Any] | None, model, confirm_updates: int) -> dict
         return {"meta": CLASS_META["uncertain"] | {"label": "Warming up"},
                 "subtitle": "Waiting for the first full analysis window.",
                 "metrics": [], "alert": None, "model_version": version, "note": MODEL_NOTE,
-                "strength": None, "why": [], "about": None}
+                "why": [], "about": None}
 
     quality = record["quality"]
     accepted = record["accepted"]
@@ -237,12 +192,9 @@ def diagnose(record: dict[str, Any] | None, model, confirm_updates: int) -> dict
     if quality != "ok":
         subtitle = f"No prediction: {_quality_text(quality)}. Alert state is held."
     elif accepted == "uncertain":
-        subtitle = f"Not accepted: {uncertain_reason(record, model)}."
+        subtitle = "No fault above its detection threshold"
     else:
         subtitle = f"Classifier: {names(record['predicted'])}"
-    note = status_note(reported)
-    if note and quality == "ok":
-        subtitle += f" · {note}"
 
     metrics = []
     if hasattr(model, "fault_classes") and quality == "ok":
@@ -278,8 +230,6 @@ def diagnose(record: dict[str, Any] | None, model, confirm_updates: int) -> dict
         why = [evidence_sentence(row) for row in rows]
         why_ref = ("vs normal windows in the same RPM/load bin" if matched
                    else "vs all training normal windows")
-        if accepted == "normal":
-            why_ref += "; the model still judges this window normal"
     else:
         why_ref = None
     topic = record.get("predicted") if accepted == "uncertain" else accepted
@@ -293,6 +243,5 @@ def diagnose(record: dict[str, Any] | None, model, confirm_updates: int) -> dict
     return {"meta": meta, "subtitle": subtitle, "metrics": metrics,
             "alert": (f"{names(alert)} "
                       f"(confirmed by {confirm_updates} consistent updates)") if alert else None,
-            "model_version": version, "note": MODEL_NOTE,
-            "strength": evidence_strength(record, model), "why": why, "why_ref": why_ref,
+            "model_version": version, "note": MODEL_NOTE, "why": why, "why_ref": why_ref,
             "about": about}

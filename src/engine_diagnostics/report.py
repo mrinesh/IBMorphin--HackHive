@@ -25,8 +25,8 @@ from engine_diagnostics.diagnosis_context import FAULTS, SPEC_SOURCE_TEXT
 from engine_diagnostics.history import HistoryStore, Profile, RunEntry
 from engine_diagnostics.profiles import reliability_warning
 
-LABELS = {"normal": "Normal", "misfire": "Misfire", "knock_like": "Knock-like",
-          "valve_clearance_like": "Valve-train impacts", "uncertain": "Uncertain",
+LABELS = {"normal": "Normal", "misfire": "Misfire", "knock_like": "Knock",
+          "valve_clearance_like": "Valve-train impacts", "uncertain": "Monitoring",
           "no data": "No data"}
 FAULT_COLORS = {"misfire": "#d62728", "knock_like": "#ff7f0e",
                 "valve_clearance_like": "#9467bd", "normal": "#2ca02c"}
@@ -429,7 +429,7 @@ def render_pdf(report: EngineReport) -> bytes:
     diag = report.diagnosis
     if diag is None:
         para("No diagnosis saved for this engine yet. Use Diagnose in the dashboard to add "
-             "possible causes and recommended actions to this report.")
+             "ranked causes and recommended actions to this report.")
     else:
         out = diag["output"]
         para(f"{utc_text(diag['created_utc'])} · {diag['model']}"
@@ -437,7 +437,7 @@ def render_pdf(report: EngineReport) -> bytes:
                 else ""), 8, color=100)
         para(out["summary"], 9.5)
         pdf.ln(1)
-        para("Possible causes (most likely first)", 10, bold_text=True)
+        para("Causes (ranked by confidence)", 10, bold_text=True)
         if not out["causes"]:
             para("No cause is supported by the saved data.")
         for k, c in enumerate(out["causes"], 1):

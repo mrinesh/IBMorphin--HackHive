@@ -24,7 +24,7 @@ runs and model exist:
 |---|---|
 | `app.py` | Layout, replay loop (unchanged `ReplayEngine` path), charts |
 | `theme.py`, `hud.css` | Design tokens, soft-UI styles, Plotly template, HTML cards |
-| `explain.py` | Diagnosis card text: uncertain reasons, evidence, evidence strength |
+| `explain.py` | Diagnosis card text: decision, confidence, evidence |
 | `engine3d.py`, `static/engine3d/engine3d.js` | Three.js engine and car view (components v2) |
 
 ## Demo presets and scenario cards
@@ -66,23 +66,21 @@ from evaluation truth:
 For `core_v2` the v2 model reports each fault separately: one calibrated
 probability per fault, a "Detected this window" count, one alert banner per
 active fault (each confirmed and cleared on its own), and a per-fault decision
-timeline (dot detected, x uncertain, square active alert). The truth overlay
+timeline (dot detected, square active alert). The truth overlay
 shades each fault's own active intervals.
 
 The **Decision** tile, the diagnosis card title and the 3D view all name the
 same faults as the alert banners: every confirmed alert plus every fault
 detected in the current window (`explain.reported_faults`). Alerts are
-debounced (confirmed over several updates, held through brief dropouts), so a
-fault can stay alerted while it is missing from one 2 s window, or be detected
-before its alert is confirmed; a grey note under the tile says which ("Knock-like
-held (not in this window)", "Misfire awaiting confirmation"). "Best guess" and
-"Detected this window" stay per window.
+debounced (confirmed over several updates, held through brief dropouts).
+"Detected this window" stays per window. Labels carry no hedging: the model's
+calibrated confidence is the single measure of certainty shown.
 
 
 - Permanent "SYNTHETIC DATA — RECORDED REPLAY" banner; model/feature versions
-- 3D view (Three.js): a neon wireframe car that flies into a detailed inline-4
-  when playback starts or an alert is raised (Car / Engine / Reset view buttons,
-  drag or arrow keys to orbit). Pistons, rods, crankshaft, camshafts and valves
+- 3D view (Three.js): a detailed inline-4 (Reset view button, drag or arrow keys
+  to orbit; the status text above it has a fixed height so it never resizes the
+  canvas). Pistons, rods, crankshaft, camshafts and valves
   follow slider-crank kinematics at the run's RPM, shown slowed by 1/25, firing
   in the configured order. Effects follow the model only: every reported fault
   (alerts and this window's detections), each scaled by the model's confidence
@@ -111,10 +109,9 @@ held (not in this window)", "Misfire awaiting confirmation"). "Best guess" and
   trace returns. If the 3D context is still lost (GPU reset), the view waits for
   the browser to restore it, then rebuilds its renderer with the same scene,
   showing a notice only if the loss lasts
-- Diagnosis card: decision with icon and text, why a window is uncertain,
-  calibrated confidence or margin and anomaly score against their thresholds,
-  evidence strength (how many of the model's own criteria hold; not a fault
-  severity), the three largest deviations in plain language, and general
+- Diagnosis card: decision with icon and text ("Monitoring" when no fault clears
+  its threshold), calibrated confidence or margin and anomaly score against their
+  thresholds, the three largest deviations in plain language, and general
   background on the class, marked as not model output
 - Telemetry cards: last received RPM, load, throttle, coolant and fuel trims
   with freshness and a 10 s sparkline
@@ -141,7 +138,7 @@ held (not in this window)", "Misfire awaiting confirmation"). "Best guess" and
   cylinder 3"), and the evidence panel shows its confidence, how many decision
   windows support it, and the accumulated probability of each cylinder. Runs
   without the cam phase reference show a firing slot (A-D) instead, labelled as
-  such; until enough windows agree the panel says it is still locating.
+  such; until enough windows agree no cylinder is shown.
 
 ## Health timeline (deterioration demonstration)
 
@@ -174,7 +171,7 @@ and the v1 model). Judges set, then press **Apply and replay**:
 
 - Engine RPM: picks a clean healthy core_v1 recording (tuning, calibration, or test
   engine; never a classifier training engine) nearest the chosen RPM
-- Injected fault: none, misfire, or knock-like bursts, with severity, onset, and
+- Injected fault: none, misfire, or knock bursts, with severity, onset, and
   cylinder. Injection (`src/engine_diagnostics/lab.py`) reuses the generator's source
   model and settings on the base run's own combustion schedule: misfire removes
   85-97% of the rendered combustion transient on the chosen cylinder and adds the

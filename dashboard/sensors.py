@@ -17,8 +17,8 @@ from dashboard import theme
 CYLINDER_COLORS = ("#38bdf8", "#f472b6", "#fbbf24", "#a78bfa")
 CAMERA_RANGE_C = (100.0, 760.0)
 PATTERN_TEXT = {"cold": "runs cold (EGT and CHT low): not firing → misfire",
-                "head_hot": "head hot, exhaust not: detonation heat → knock-like",
-                "exhaust_hot": "exhaust hot, head not: hot gas past the valve → valve-like"}
+                "head_hot": "head hot, exhaust not: detonation heat → knock",
+                "exhaust_hot": "exhaust hot, head not: hot gas past the valve → valve"}
 
 
 def peak_decimate(t, y, max_points: int) -> tuple[np.ndarray, np.ndarray]:

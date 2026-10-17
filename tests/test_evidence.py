@@ -64,7 +64,7 @@ def test_misfire_marks_weak_pulses_and_accompanying_rpm_dip():
     assert not covers(sound.segments, firing_time(30))
     assert rpm.status == "supports" and covers(rpm.segments, firing_time(20))
     assert panel.supporting == 3 and panel.expected == 3
-    assert panel.assessment.startswith("Multiple signals support this alert")
+    assert panel.assessment.startswith("3 of 3 signals support this alert")
 
 
 def test_rpm_dip_without_abnormal_pulses_is_only_weak_support():
@@ -88,7 +88,7 @@ def test_knock_marks_burst_firings_and_does_not_expect_rpm_change():
     assert sound.status == "supports" and vibration.status == "weak"
     assert rpm.status == "not expected"
     assert panel.expected == 2 and panel.supporting == 1
-    assert "Only sound supports" in panel.assessment
+    assert panel.assessment == "1 of 2 signals support this alert (sound); partial: vibration."
 
 
 def test_healthy_window_has_no_segments_and_no_support():
@@ -97,7 +97,7 @@ def test_healthy_window_has_no_segments_and_no_support():
         panel = evidence(fault, signal, signal, z={})
         assert all(not i.segments for i in panel.indicators), fault
         assert panel.supporting == 0
-        assert "inspect manually" in panel.assessment
+        assert panel.assessment.startswith("0 of ")
 
 
 def test_falling_valve_signature_counts_but_falling_misfire_feature_does_not():

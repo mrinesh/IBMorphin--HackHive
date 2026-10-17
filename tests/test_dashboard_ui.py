@@ -27,27 +27,24 @@ def test_valve_class_is_named_as_valve_train_impacts_not_generic_vibration():
 def test_bad_quality_shows_no_decision_whatever_the_class():
     assert theme.class_meta("knock_like", "missing_waveform")["label"] == "No decision"
     assert theme.class_meta("misfire", "ok")["label"] == "Misfire"
-    assert theme.class_meta(None)["label"] == "Uncertain"
+    assert theme.class_meta(None)["label"] == "Monitoring"
 
 
 def test_diagnose_warm_up_and_accepted_fault():
     assert explain.diagnose(None, V1, 2)["meta"]["label"] == "Warming up"
     result = explain.diagnose(record(alert="knock_like"), V1, 2)
-    assert result["meta"]["label"] == "Knock-like"
-    assert result["alert"] == "Knock-like (confirmed by 2 consistent updates)"
+    assert result["meta"]["label"] == "Knock"
+    assert result["alert"] == "Knock (confirmed by 2 consistent updates)"
     labels = [m["label"] for m in result["metrics"]]
     assert labels[:2] == ["Calibrated confidence", "Anomaly score"]
     assert result["metrics"][0]["value"] == "0.82"  # the model's number, not a derived one
 
 
-def test_uncertain_reason_follows_the_model_acceptance_rules():
-    low = record(probability=0.55, accepted="uncertain")
-    assert "below the 0.70 acceptance level" in explain.diagnose(low, V1, 2)["subtitle"]
-    normal_but_anomalous = record(predicted="normal", accepted="uncertain")
-    assert "anomaly score is above" in explain.uncertain_reason(normal_but_anomalous, V1)
-    temp = {k: v for k, v in record(margin=0.1, accepted="uncertain").items()
-            if k != "probability"}
-    assert "margin is below" in explain.uncertain_reason(temp, TEMPORARY)
+def test_unaccepted_window_shows_monitoring_with_its_confidence():
+    result = explain.diagnose(record(probability=0.55, accepted="uncertain"), V1, 2)
+    assert result["meta"]["label"] == "Monitoring"
+    assert result["subtitle"] == "No fault above its detection threshold"
+    assert result["metrics"][0]["value"] == "0.55"
 
 
 def test_temporary_model_shows_margin_not_an_invented_confidence():
@@ -78,10 +75,10 @@ def test_cards_escape_text_and_format_values():
 
 def test_evidence_strength_is_a_checklist_of_model_criteria():
     confirmed = explain.evidence_strength(record(alert="knock_like"), V1)
-    assert (confirmed["level"], confirmed["label"]) == (3, "Confirmed")
+    assert confirmed["level"] == 3
     assert confirmed["criteria"][0] == ("Confidence 0.82 ≥ 0.70", True)
     unconfirmed = explain.evidence_strength(record(anomalous=False), V1)
-    assert (unconfirmed["level"], unconfirmed["label"]) == (1, "Weak")
+    assert unconfirmed["level"] == 1
     normal = explain.evidence_strength(record(predicted="normal", accepted="normal",
                                               anomalous=False), V1)
     assert normal["for"] == "Normal" and normal["level"] == 3
@@ -117,7 +114,7 @@ def test_background_text_is_marked_as_not_model_output():
     card = theme.status_card_html(explain.diagnose(record(), V1, 2))
     assert "general background, not model output" in card
     assert "Typical checks on a real engine" in card
-    assert "Evidence strength for Knock-like" in card
+    assert "Evidence strength" not in card  # the confidence score is shown instead
 
 
 V2 = SimpleNamespace(model_version="v2-test", anomaly_threshold=2.5,
@@ -136,15 +133,12 @@ def test_reported_faults_combine_alerts_and_this_windows_detections():
     held = explain.reported_faults(v2_record())
     assert held == [{"fault": "knock_like", "status": "held"},
                     {"fault": "misfire", "status": "confirmed"}]
-    assert explain.reported_names(held) == "Knock-like + Misfire"
-    assert explain.status_note(held) == "Knock-like held (not in this window)"
+    assert explain.reported_names(held) == "Knock + Misfire"
     pending = explain.reported_faults(v2_record(accepted="knock_like+misfire",
                                                 alerts=["misfire"], alert="misfire"))
     assert [r["status"] for r in pending] == ["unconfirmed", "confirmed"]
-    assert explain.status_note(pending) == "Knock-like awaiting confirmation"
     both = explain.reported_faults(v2_record(accepted="knock_like+misfire"))
     assert [r["status"] for r in both] == ["confirmed", "confirmed"]
-    assert explain.status_note(both) == ""
     # v1: one alert class; a data-quality window detects nothing, so alerts are held.
     assert explain.reported_faults(record(alert="knock_like")) == [
         {"fault": "knock_like", "status": "confirmed"}]
@@ -158,9 +152,9 @@ def test_reported_faults_combine_alerts_and_this_windows_detections():
 def test_status_card_names_every_reported_fault():
     result = explain.diagnose(v2_record(), V2, {"misfire": 2, "knock_like": 3,
                                                 "valve_clearance_like": 2})
-    assert result["meta"]["label"] == "Knock-like + Misfire"  # same faults as the banners
-    assert result["subtitle"] == "Classifier: Misfire · Knock-like held (not in this window)"
-    assert result["alert"] == "Knock-like + Misfire (confirmed by 3 consistent updates)"
+    assert result["meta"]["label"] == "Knock + Misfire"  # same faults as the banners
+    assert result["subtitle"] == "Classifier: Misfire"
+    assert result["alert"] == "Knock + Misfire (confirmed by 3 consistent updates)"
 
 
 def test_peak_decimate_keeps_short_spikes_within_the_point_budget():

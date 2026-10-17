@@ -12,7 +12,7 @@ from typing import Any
 from engine_diagnostics.diagnosis_context import FAULTS
 from engine_diagnostics.runtime.health import DEVELOPING, FAULT
 
-LABELS = {"misfire": "Misfire", "knock_like": "Knock-like combustion",
+LABELS = {"misfire": "Misfire", "knock_like": "Knock combustion",
           "valve_clearance_like": "Valve-train impacts (valve clearance)"}
 REPAIR_WORDS = ("replac", "repair", "fixed", "changed", "swapped", "new ", "installed",
                 "adjusted", "cleaned")

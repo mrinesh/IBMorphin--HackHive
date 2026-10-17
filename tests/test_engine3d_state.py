@@ -39,11 +39,11 @@ def test_effect_and_intensity_come_from_the_model():
     assert s["faults"] == [{"fault": "knock_like", "status": "confirmed", "cylinder": None,
                             "intensity": 0.82, "color": s["edge_color"]}]
     assert s["vibration_ratio"] == pytest.approx(2.0, rel=1e-3)  # 10 ** (1.30103 - 1.0)
-    assert "cylinder not identified (no localizer loaded)" in s["status_text"]
+    assert s["status_text"] == "Model: Knock, confidence 0.82"
     held = state(record(accepted="uncertain", probability=0.5))
     assert held["effect"] == "knock_like"
     assert pick(held["faults"][0], "status", "intensity") == ("held", 0.45)
-    assert "Knock-like, alert held" in held["status_text"]
+    assert held["status_text"] == "Model: Knock"
     assert "confidence" not in held["status_text"]  # nothing detected in this window
     normal = state(record(accepted="normal", predicted="normal", alert=None))
     assert normal["effect"] is None and normal["faults"] == []
@@ -62,15 +62,15 @@ def test_model_cylinder_comes_from_the_localizer():
                               "confidence": 0.93}}
     s = state(record(localization=located), truth=TRUTH)
     assert s["faults"][0]["cylinder"] == 4 and s["truth_cylinder"] == 3  # side by side
-    assert "Knock-like, confidence 0.82, cylinder 4 (location confidence 0.93)" in s["status_text"]
+    assert "Knock, confidence 0.82, cylinder 4 (location confidence 0.93)" in s["status_text"]
     locating = state(record(localization={}))
     assert locating["faults"][0]["cylinder"] is None
-    assert "locating cylinder" in locating["status_text"]
+    assert locating["status_text"] == "Model: Knock, confidence 0.82"
     slot = {"knock_like": {"status": "slot_only", "cylinder": None, "slot": "B",
                            "confidence": 0.9}}
     relative = state(record(localization=slot))
     assert relative["faults"][0]["cylinder"] is None
-    assert "firing slot B (no cam reference" in relative["status_text"]
+    assert relative["status_text"] == "Model: Knock, confidence 0.82, firing slot B"
 
 
 V2 = SimpleNamespace(**vars(MODEL), fault_classes=("misfire", "knock_like",
@@ -98,7 +98,7 @@ def test_every_reported_fault_is_shown_on_its_own_cylinder():
     assert s["effect"] == "knock_like" and s["alert"] == "knock_like+misfire"
     # Each fault is paired with its own cylinder (misfire was once labelled with knock's).
     assert s["status_text"] == (
-        "Model: Knock-like, alert held, cylinder 1 (location confidence 1.00); "
+        "Model: Knock, cylinder 1 (location confidence 1.00); "
         "Misfire, confidence 0.97, cylinder 4 (location confidence 0.98)")
     both = state(v2_record(accepted="knock_like+misfire", detected=["knock_like", "misfire"]),
                  model=V2)

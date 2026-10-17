@@ -13,7 +13,7 @@ import plotly.graph_objects as go
 import plotly.io as pio
 
 # Graphite surfaces with a system-blue accent. One color per decision, used in every
-# view (cards, charts, 3D): green normal, amber misfire, magenta knock-like, violet
+# view (cards, charts, 3D): green normal, amber misfire, magenta knock, violet
 # valve-train. Red is reserved for the synthetic-data banner and errors.
 TOKENS = {
     "bg": "#141416",
@@ -65,10 +65,10 @@ ICONS = {
 CLASS_META = {
     "normal": {"label": "Normal", "color": TOKENS["green"], "icon": "check"},
     "misfire": {"label": "Misfire", "color": TOKENS["amber"], "icon": "flame"},
-    "knock_like": {"label": "Knock-like", "color": TOKENS["magenta"], "icon": "zap"},
+    "knock_like": {"label": "Knock", "color": TOKENS["magenta"], "icon": "zap"},
     "valve_clearance_like": {"label": "Valve-train impacts", "color": TOKENS["violet"],
                              "icon": "activity"},
-    "uncertain": {"label": "Uncertain", "color": TOKENS["slate"], "icon": "help"},
+    "uncertain": {"label": "Monitoring", "color": TOKENS["slate"], "icon": "gauge"},
     "no_decision": {"label": "No decision", "color": TOKENS["slate"], "icon": "signal_off"},
 }
 
@@ -222,33 +222,11 @@ def status_card_html(diagnosis: dict) -> str:
         f"</div></div></div>"
         f"<div>{alert_pill}</div>"
         f'<div class="status-grid">{"".join(rows)}</div>'
-        f"{_strength_html(diagnosis.get('strength'))}"
         f"{_why_html(diagnosis.get('why'), diagnosis.get('why_ref'))}"
         f"{_about_html(diagnosis.get('about'))}"
         f'<div class="status-note">{escape(diagnosis["note"])}</div>'
         f"</section>"
     )
-
-
-def _strength_html(strength: dict | None) -> str:
-    """Three-segment meter plus the criteria behind it (each with icon and text)."""
-    if not strength:
-        return ""
-    level = strength["level"]
-    color = {3: TOKENS["rose"], 2: TOKENS["amber"]}.get(level, TOKENS["slate"])
-    if strength["for"] == "Normal":
-        color = TOKENS["green"] if level == 3 else color
-    segments = "".join(f'<i class="{"on" if k < level else ""}"></i>' for k in range(3))
-    items = "".join(
-        f'<li class="{"met" if ok else "unmet"}">{icon("check" if ok else "help", 13)}'
-        f'<span>{escape(text)}</span><span class="sr">{"met" if ok else "not met"}</span></li>'
-        for text, ok in strength["criteria"])
-    return (f'<div class="strength" style="--strength:{color}">'
-            f'<div class="strength-head"><span class="hud-label">Evidence strength for '
-            f'{escape(strength["for"])}</span><span class="strength-label">'
-            f'{escape(strength["label"])} · {level}/3</span></div>'
-            f'<div class="segments" role="img" aria-label="{level} of 3 criteria met">'
-            f"{segments}</div><ul>{items}</ul></div>")
 
 
 def _why_html(why: list[str] | None, reference: str | None) -> str:

@@ -5,15 +5,15 @@
     "dataset": "core_v1",
     "run_id": "run_00226",
     "start_s": 0,
-    "note": "Held-out engine_029. Healthy run with a load step at ~9.2 s: decisions are normal or occasionally uncertain, and no alert is raised."
+    "note": "Held-out engine_029. Healthy run with a load step at ~9.2 s: decisions are normal or monitoring, and no alert is raised."
   },
   {
-    "name": "2. Knock-like bursts, then a load change",
+    "name": "2. Knock bursts, then a load change",
     "scenario": "knock_like",
     "dataset": "core_v1",
     "run_id": "run_00237",
     "start_s": 6,
-    "note": "Held-out engine_030. Evaluation truth: knock-like onset 12.5 s (severity 0.71). Alert confirmed at 15.0 s; evidence shows high-band envelope deviations. A load step follows at ~20.4 s and the alert persists."
+    "note": "Held-out engine_030. Evaluation truth: knock onset 12.5 s (severity 0.71). Alert confirmed at 15.0 s; evidence shows high-band envelope deviations. A load step follows at ~20.4 s and the alert persists."
   },
   {
     "name": "3. Intermittent misfire",
@@ -60,21 +60,21 @@
     "dataset": "core_v2",
     "run_id": "run_00252",
     "start_s": 8,
-    "note": "Held-out engine_058. Valve-clearance-like on cylinder 4 from 10.4 s, then misfire on cylinder 3 from 20.6 s and knock-like on cylinder 1 from 21.6 s. Each fault has its own detector and alert: valve alerts at 13.0 s, misfire at 22.0 s, knock at 22.5 s, so all three alerts are active together from 22.5 s. The valve alert drops out briefly twice after 24 s while its probability dips to about 0.7."
+    "note": "Held-out engine_058. Valve-clearance fault on cylinder 4 from 10.4 s, then misfire on cylinder 3 from 20.6 s and knock on cylinder 1 from 21.6 s. Each fault has its own detector and alert: valve alerts at 13.0 s, misfire at 22.0 s, knock at 22.5 s, so all three alerts are active together from 22.5 s. The valve alert drops out briefly twice after 24 s while its probability dips to about 0.7."
   },
   {
     "name": "9. Misfire and knock starting together (multi-fault v2)",
     "dataset": "core_v2",
     "run_id": "run_00240",
     "start_s": 6,
-    "note": "Held-out engine_057. Knock-like on cylinder 1 from 8.2 s and mild misfire (severity 0.28) on cylinder 4 from 9.6 s, during an RPM ramp. Misfire alerts at 11.5 s and knock at 15.0 s; both alerts are active side by side to 22.0 s, when the knock alert clears; it is raised again at 30.0 s. Around 21.5-22.0 s the knock alert is held while knock drops out of single windows: the Decision tile marks it 'held'."
+    "note": "Held-out engine_057. Knock on cylinder 1 from 8.2 s and mild misfire (severity 0.28) on cylinder 4 from 9.6 s, during an RPM ramp. Misfire alerts at 11.5 s and knock at 15.0 s; both alerts are active side by side to 22.0 s, when the knock alert clears; it is raised again at 30.0 s. Around 21.5-22.0 s the knock alert is held while knock drops out of single windows."
   },
   {
     "name": "10. Limitation: valve fault missed next to knock (multi-fault v2)",
     "dataset": "core_v2",
     "run_id": "run_00251",
     "start_s": 9,
-    "note": "Held-out engine_058. Limitation. Knock-like from 10.8 s and a severe valve-clearance-like fault from 14.1 s, both on cylinder 4. Knock alerts at 12.5 s. The valve alert fires at 14.0 s, before the valve fault exists, so it was triggered by the knock on the same cylinder; scoring counts it as a false alert and the real valve fault as not separately detected. Valve is v2's weakest detector (window recall 0.62 on test engines)."
+    "note": "Held-out engine_058. Limitation. Knock from 10.8 s and a severe valve-clearance fault fault from 14.1 s, both on cylinder 4. Knock alerts at 12.5 s. The valve alert fires at 14.0 s, before the valve fault exists, so it was triggered by the knock on the same cylinder; scoring counts it as a false alert and the real valve fault as not separately detected. Valve is v2's weakest detector (window recall 0.62 on test engines)."
   },
   {
     "name": "11. Misfire vs the ECU's own monitor (crank wheel, EGT)",
@@ -88,13 +88,13 @@
     "dataset": "core_v3",
     "run_id": "run_00265",
     "start_s": 7,
-    "note": "Held-out engine_060. Evaluation truth: knock-like bursts on cylinder 1 from 10.6 s. Acoustic knock alert at 12.0 s; cylinder 1's head temperature rises while its exhaust does not, confirming knock on cylinder 1 at 14.5 s. The crank-speed ECU monitor has no knock capability."
+    "note": "Held-out engine_060. Evaluation truth: knock bursts on cylinder 1 from 10.6 s. Acoustic knock alert at 12.0 s; cylinder 1's head temperature rises while its exhaust does not, confirming knock on cylinder 1 at 14.5 s. The crank-speed ECU monitor has no knock capability."
   },
   {
     "name": "13. Three faults, three independent views",
     "dataset": "core_v3",
     "run_id": "run_00243",
     "start_s": 6,
-    "note": "Held-out engine_057. Evaluation truth: misfire on cylinder 1 from 8.9 s, valve-clearance-like on cylinder 2 from 17.5 s, knock-like on cylinder 2 from 21.5 s. Misfire: acoustic 10.0 s, crank 10.5 s, cylinder 1 cold 11.5 s, ECU P0301 11.2 s. Valve: cylinder 2's exhaust runs hot at 20.5 s, acoustic valve alert 21.0 s. Knock: acoustic 22.5 s."
+    "note": "Held-out engine_057. Evaluation truth: misfire on cylinder 1 from 8.9 s, valve-clearance fault on cylinder 2 from 17.5 s, knock on cylinder 2 from 21.5 s. Misfire: acoustic 10.0 s, crank 10.5 s, cylinder 1 cold 11.5 s, ECU P0301 11.2 s. Valve: cylinder 2's exhaust runs hot at 20.5 s, acoustic valve alert 21.0 s. Knock: acoustic 22.5 s."
   }
 ]

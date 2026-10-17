@@ -107,6 +107,7 @@ REPORT_PATH = ROOT / "reports/generated/temporary_model_report.json"
 DISPLAY_POINTS = 2000
 SPECTROGRAM_S = 10.0
 TICK_S = 0.5
+STATUS_SHOWN = {"weak": "partial"}  # evidence indicator status as displayed
 CONTEXT_SIGNALS = ("rpm", "load", "throttle")
 SLOW_SIGNALS = ("coolant_temp", "short_term_fuel_trim", "long_term_fuel_trim")
 CLASS_ORDER = ["normal", "misfire", "knock_like", "valve_clearance_like", "uncertain"]
@@ -139,7 +140,7 @@ WAVE_ROWS = {"sound": [1], "vibration": [2, 3]}  # rows of the waveform figure
 # Fault-injection lab: healthy core_v1 recordings modified on request, replayed unchanged.
 LAB_DATASET = "core_v1"
 LAB_COLOR = "#FF9F0A"
-LAB_FAULT_NAMES = {"none": "No fault", "misfire": "Misfire", "knock_like": "Knock-like bursts"}
+LAB_FAULT_NAMES = {"none": "No fault", "misfire": "Misfire", "knock_like": "Knock bursts"}
 LAB_NOISE = [1.0, 1.5, 2.0, 3.0, 5.0]  # x recorded noise; 2x is the challenge-run level
 LAB_SENSORS = {"audio": "Microphone (audio)", "vibration": "Accelerometer (vibration)",
                "rpm": "RPM telemetry"}
@@ -776,7 +777,7 @@ def render_evidence(panel: EvidencePanel, where: dict | None = None) -> None:
         for ind in panel.indicators:
             count = f" · {len(ind.segments)} highlighted" if ind.segments else ""
             st.markdown(f":{SIGNAL_TAGS[ind.signal]}[■ **{SIGNAL_NAMES[ind.signal]}:**] "
-                        f"{ind.claim} — **{ind.status}**{count}  \n"
+                        f"{ind.claim} — **{STATUS_SHOWN.get(ind.status, ind.status)}**{count}  \n"
                         f"<small>{ind.detail}</small>", unsafe_allow_html=True)
         st.markdown(f"**Assessment:** {panel.assessment}")
         st.plotly_chart(evidence_figure(panel), width="stretch", key=f"evidence_{panel.fault}")
@@ -989,25 +990,22 @@ def single_timeline(records) -> go.Figure:
 
 
 def multi_timeline(records) -> go.Figure:
-    """One row per fault: detections, borderline (uncertain) windows, and alerts."""
+    """One row per fault: detections and alerts."""
     timeline = go.Figure()
     faults = model.fault_classes
     for fault in faults:
         rows = [r for r in records if "fault_decisions" in r]
-        for kind, marker, name in (("fault", {"size": 8}, "detected"),
-                                   ("uncertain", {"symbol": "x", "size": 7}, "uncertain")):
-            hits = [r["t_end_s"] for r in rows if r["fault_decisions"][fault] == kind]
-            timeline.add_trace(go.Scatter(
-                x=hits, y=[fault] * len(hits), mode="markers", name=f"{fault} {name}",
-                marker={**marker, "color": FAULT_COLORS[fault]}, showlegend=False))
+        hits = [r["t_end_s"] for r in rows if r["fault_decisions"][fault] == "fault"]
+        timeline.add_trace(go.Scatter(
+            x=hits, y=[fault] * len(hits), mode="markers", name=f"{fault} detected",
+            marker={"size": 8, "color": FAULT_COLORS[fault]}, showlegend=False))
         alerted = [r["t_end_s"] for r in records if fault in r.get("alerts", [])]
         timeline.add_trace(go.Scatter(
             x=alerted, y=[fault] * len(alerted), mode="markers", showlegend=False,
             marker={"symbol": "square", "size": 14, "opacity": 0.3,
                     "color": FAULT_COLORS[fault]}, name=f"{fault} alert"))
     timeline.update_layout(height=260, margin={"t": 40, "b": 20},
-                           title="Per-fault timeline (dot detected, x uncertain, "
-                                 "square active alert)",
+                           title="Per-fault timeline (dot detected, square active alert)",
                            yaxis={"categoryorder": "array", "categoryarray": list(faults)})
     return timeline
 
@@ -1051,7 +1049,7 @@ def telemetry_cards(t_now: float) -> list[dict]:
 
 
 def label(class_name: str | None) -> str:
-    """Readable class name (e.g. knock_like -> Knock-like) for display only."""
+    """Readable class name (e.g. knock_like -> Knock) for display only."""
     return explain.names(class_name)
 
 
@@ -1089,7 +1087,7 @@ def live_view():
                          f"{sensors.confirmation_text(latest, fault)}",
                          icon=":material/warning:")
         else:
-            st.success("No active alert — the engine sounds normal so far",
+            st.success("No active alert",
                        icon=":material/check_circle:")
 
     # Segmented tabs below the alert: Overview holds the readout, the 3D view and the
@@ -1106,42 +1104,34 @@ def live_view():
     # window, or detected but not confirmed yet.
     reported = explain.reported_faults(latest)
     readout = overview.container(key="readout")
-    cols = readout.columns(4) + readout.columns(4)  # four per row, as in the design
+    cols = readout.columns(4) + readout.columns(3)  # four, then three per row
     cols[0].metric("Replay time", f"{t_now:.1f} s")
     cols[1].metric("Decision",
                    explain.reported_names(reported) if reported
                    else label(latest["accepted"]) if latest else "Warming up",
-                   delta=explain.status_note(reported) or None, delta_color="off",
-                   delta_arrow="off",
                    help="Faults the model reports now: confirmed alerts plus faults detected "
-                        "in this window. Alerts are confirmed over several updates and held "
-                        "through brief dropouts, so the note marks a fault that is held but "
-                        "not detected in this window, or detected but not confirmed yet. "
-                        "Without a fault: this window's class after the confidence and "
-                        "anomaly checks.")
-    cols[2].metric("Best guess", label(latest["predicted"]) if latest else "-",
-                   help="The classifier's top class for this window, before the acceptance "
-                        "checks.")
+                        "in this window. Without a fault: this window's class after the "
+                        "confidence and anomaly checks.")
     if multi:
-        cols[3].metric("Detected this window", len(latest["detected"]) if latest else "-",
+        cols[2].metric("Detected this window", len(latest["detected"]) if latest else "-",
                        help="Faults whose own calibrated detector fired in this "
                             f"{config['analysis']['window_s']:g} s window. "
                             "Each fault has its own detector and threshold, so several can "
                             "be detected together; an alert can stay active through a "
                             "window where its fault is not detected.")
     elif has_probability:
-        cols[3].metric("Calibrated confidence", f"{latest['probability']:.2f}",
+        cols[2].metric("Calibrated confidence", f"{latest['probability']:.2f}",
                        help=f"Accepted only if ≥ {model.probability_min:.2f}; calibrated on "
                             "separate calibration engines (synthetic).")
     else:
-        cols[3].metric("Decision margin", f"{latest['margin']:.2f}" if latest else "-")
-    cols[4].metric("Anomaly score", f"{latest['anomaly_score']:.2f}" if latest else "-",
+        cols[2].metric("Decision margin", f"{latest['margin']:.2f}" if latest else "-")
+    cols[3].metric("Anomaly score", f"{latest['anomaly_score']:.2f}" if latest else "-",
                    help=f"How unusual this window is compared with normal running. "
                         f"Threshold {model.anomaly_threshold:.2f}.")
-    cols[5].metric("Signal quality",
+    cols[4].metric("Signal quality",
                    ("Good" if latest["quality"] == "ok"
                     else latest["quality"].replace("_", " ").capitalize()) if latest else "-")
-    cols[6].metric("Response time",
+    cols[5].metric("Response time",
                    f"{latest['processing_ms']:.0f} / {state.get('render_ms', 0):.0f} ms"
                    if latest else "-",
                    help="Model processing per decision / dashboard update time (server).")
@@ -1313,11 +1303,10 @@ def live_view():
             "likelihood (warning bar 0.6, below the alert's 0.7). Developing anomaly = a line "
             "stays at or above 1 without a confirmed alert; persistent fault = the model's "
             "confirmed alert. Thresholds were set on tuning engines. On held-out test engines "
-            "about 9% of healthy windows still show as developing, and the developing stage "
-            "came before the alert in misfire 6/8, knock 3/8, and valve 3/8 runs (2 of 5 "
-            "degradation runs, 3.5-5 s ahead). All progression shown is simulated, so this is a "
-            "deterioration demonstration: it describes the current state and makes no forecast "
-            "or remaining-useful-life claim, which would need real run-to-failure data.")
+            "the developing stage came before the alert in misfire 6/8, knock 3/8 and valve "
+            "3/8 runs (2 of 5 degradation runs, 3.5-5 s ahead). Progression is simulated: a "
+            "deterioration demonstration of the current state, with no forecast or "
+            "remaining-useful-life claim.")
 
     lower_left, lower_right = timeline_tab.columns(2)
     if latest and latest["quality"] == "ok":
@@ -1327,7 +1316,7 @@ def live_view():
         lower_left.caption(
             ("Reference: training normal windows in the same RPM/load bin. " if matched else
              "Reference: all training normal windows. ")
-            + "A deviation shows what changed; it does not prove a fault.")
+            + "Each row shows how far this window is from normal.")
     if has_probability:
         valve = pd.Series([r.get("probabilities", {}).get(VALVE, np.nan) for r in records])
         indicator = valve.rolling(DEGRADATION_WINDOW, min_periods=1).mean()
@@ -1338,8 +1327,8 @@ def live_view():
                             yaxis={"range": [0, 1], "title": "rolling P(valve)"},
                             margin={"t": 40, "b": 20})
         lower_right.plotly_chart(trend, width="stretch")
-        lower_right.caption("5 s rolling mean of the calibrated valve-clearance probability. "
-                            "Accelerated simulation; not a remaining-life estimate.")
+        lower_right.caption("5 s rolling mean of the calibrated valve-clearance probability "
+                            "(accelerated simulation).")
     state.render_ms = 1000 * (time.perf_counter() - rendered)
 
 
@@ -1466,7 +1455,7 @@ def show_diagnosis(saved: Diagnosis) -> None:
     st.caption(f"{saved.created_utc[:16].replace('T', ' ')} UTC · {saved.model}"
                + (f" · saved runs up to #{saved.latest_run_id}" if saved.latest_run_id else ""))
     st.markdown(out["summary"])
-    st.markdown("**Possible causes** (most likely first)")
+    st.markdown("**Causes** (ranked by confidence)")
     if not out["causes"]:
         st.caption("No cause is supported by the saved data.")
     for k, cause in enumerate(out["causes"], 1):
@@ -1501,11 +1490,11 @@ def diagnosis_panel(engine: Profile) -> None:
     """Diagnose on demand from the engine's history; saved diagnoses can be reopened."""
     state = st.session_state
     key = f"diagnosis_pick_{engine.id}"
-    st.caption("Ranks possible causes and next steps from this engine's saved runs, notes and "
+    st.caption("Ranks causes and next steps from this engine's saved runs, notes and "
                "signal summaries. Save the current replay first to include it.")
     if st.button("Diagnose", type="primary", key=f"diagnose_{engine.id}",
                  icon=":material/troubleshoot:"):
-        with st.spinner("Looking for possible causes in this engine's history..."):
+        with st.spinner("Ranking causes from this engine's history..."):
             try:
                 state[f"diagnosis_new_{engine.id}"] = run_diagnosis(store, engine, config).id
             except Exception as error:  # noqa: BLE001 - never show a stack trace in the demo
@@ -1643,7 +1632,7 @@ def report_panel(engine: Profile) -> None:
     st.markdown("**3. Latest diagnosis**")
     d = rep.diagnosis
     if d is None:
-        st.info("No diagnosis saved yet. Use Diagnose above to add possible causes and "
+        st.info("No diagnosis saved yet. Use Diagnose above to add ranked causes and "
                 "actions to this report.", icon=":material/troubleshoot:")
     else:
         show_diagnosis(Diagnosis(d["id"], engine.id, d["latest_run_id"], d["created_utc"],
@@ -1665,7 +1654,7 @@ def report_panel(engine: Profile) -> None:
 
 def engine_tools_panel(engine: Profile) -> None:
     st.subheader(f"Diagnosis and report · {engine.label}")
-    causes_tab, report_tab = st.tabs([":material/troubleshoot: Possible causes",
+    causes_tab, report_tab = st.tabs([":material/troubleshoot: Causes",
                                       ":material/description: Report"])
     with causes_tab:
         diagnosis_panel(engine)

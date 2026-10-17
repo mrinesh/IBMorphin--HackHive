@@ -58,7 +58,7 @@ def scene_state(record: dict[str, Any] | None, model, *, t_now: float, playing: 
         meta = CLASS_META[effect] if effect else class_meta(accepted, quality)
         state.update(effect=effect, faults=faults, alert=record.get("alert"),
                      edge_color=meta["color"],
-                     status_text=status_text(record, faults, "localization" in record),
+                     status_text=status_text(record, faults),
                      vibration_ratio=_vibration_ratio(record, model))
         state.update(sensor_state(record))
     if truth is not None:
@@ -94,8 +94,8 @@ def fault_probability(entry: dict[str, str], record: dict[str, Any]) -> float | 
     return record.get("probability")  # v1: confidence of the accepted class
 
 
-def status_text(record: dict[str, Any], faults: list[dict[str, Any]], localizing: bool) -> str:
-    """HUD line naming each reported fault with its own confidence, status and cylinder."""
+def status_text(record: dict[str, Any], faults: list[dict[str, Any]]) -> str:
+    """HUD line naming each reported fault with its confidence and cylinder."""
     if not faults:
         if record["quality"] != "ok":
             return "Model: no decision (data quality)"
@@ -104,15 +104,11 @@ def status_text(record: dict[str, Any], faults: list[dict[str, Any]], localizing
     for f in faults:
         p = fault_probability(f, record)
         fields = [CLASS_META[f["fault"]]["label"],
-                  *([f"confidence {p:.2f}"] if p is not None else []),
-                  *([STATUS_TEXT[f["status"]]] if f["status"] in STATUS_TEXT else [])]
+                  *([f"confidence {p:.2f}"] if p is not None else [])]
         where = (record.get("localization") or {}).get(f["fault"])
-        parts.append(", ".join(fields) + location_text(where, localizing))
-    prefix = "Model (no decision this window): " if record["quality"] != "ok" else "Model: "
+        parts.append(", ".join(fields) + location_text(where))
+    prefix = "Model (last decision, data gap): " if record["quality"] != "ok" else "Model: "
     return prefix + "; ".join(parts)
-
-
-STATUS_TEXT = {"held": "alert held", "unconfirmed": "not confirmed yet"}
 
 
 def sensor_state(record: dict[str, Any]) -> dict[str, Any]:
@@ -134,17 +130,15 @@ def sensor_state(record: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def location_text(where: dict[str, Any] | None, localizing: bool) -> str:
-    """Suffix describing where the model places one reported fault."""
-    if not localizing:
-        return ", cylinder not identified (no localizer loaded)"
+def location_text(where: dict[str, Any] | None) -> str:
+    """Suffix naming where the model places one reported fault ('' until it is placed)."""
     if not where:
-        return ", locating cylinder…"
+        return ""
     if where.get("cylinder") is not None:
         return f", cylinder {where['cylinder']} (location confidence {where['confidence']:.2f})"
     if where.get("slot") is not None:
-        return f", firing slot {where['slot']} (no cam reference: cylinder unknown)"
-    return ", locating cylinder…"
+        return f", firing slot {where['slot']}"
+    return ""
 
 
 def _vibration_ratio(record: dict[str, Any], model) -> float:
@@ -180,11 +174,15 @@ _CSS = """
   display: block; width: 100%; flex: 1; min-height: 0; touch-action: none; border-radius: 14px;
   background: radial-gradient(120% 90% at 50% 15%, #1d1d21 0%, #0b0b0d 80%);
 }
+/* Fixed height (three one-line rows): text changes never resize the canvas, which
+   would change the camera aspect and make the engine jump between reruns. */
 .engine3d-hud {
-  order: -1; margin: 4px 8px 12px; pointer-events: none;
-  font: 500 13.5px/1.55 ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace; color: #a1a1a8;
+  order: -1; flex: none; height: calc(3 * 1.55em); margin: 4px 8px 12px; overflow: hidden;
+  font: 500 13.5px/1.55 ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  color: #a1a1a8;
 }
-.engine3d-hud div:nth-child(2) { font-weight: 600; margin-top: 2px; }
+.engine3d-hud div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.engine3d-hud div:nth-child(2) { font-weight: 600; }
 .engine3d-controls {
   position: absolute; right: 12px; bottom: 12px; display: flex; gap: 6px; flex-wrap: wrap;
   justify-content: flex-end;

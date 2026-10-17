@@ -35,14 +35,14 @@ RPM_MATCH_S = 0.15   # an RPM dip within this time of a pulse segment accompanie
 # direction ("up": increase supports; "both": any change supports).
 FAULT_EVIDENCE = {
     "misfire": {
-        "headline": "Possible misfire",
+        "headline": "Misfire evidence",
         "sound": ("irregular firing rhythm", ["audio_firing_peak_cv"], "up", "pulses"),
         "vibration": ("repeated abnormal pulses",
                       ["vibration_firing_peak_cv", "vibration_env_cv_mid"], "up", "pulses"),
         "rpm": "accompanying fluctuation",
     },
     "knock_like": {
-        "headline": "Possible knock",
+        "headline": "Knock evidence",
         "sound": ("sharp high-frequency bursts",
                   ["audio_env_kurtosis_high", "audio_env_cv_high"], "up", "bursts"),
         "vibration": ("high-frequency ringing after combustion",
@@ -50,7 +50,7 @@ FAULT_EVIDENCE = {
         "rpm": None,
     },
     "valve_clearance_like": {
-        "headline": "Possible valve-clearance fault",
+        "headline": "Valve-clearance evidence",
         "sound": ("changed valve-impact pattern", ["audio_env_cv_mid", "audio_crest"],
                   "both", "pulses"),
         "vibration": ("altered impact timing and shape",
@@ -231,16 +231,15 @@ def _rpm_indicator(claim: str | None, rpm_t: np.ndarray, rpm_values: np.ndarray,
 
 
 def _assessment(supporting: int, expected: int, indicators: list[Indicator]) -> str:
-    if supporting >= 2:
-        return f"Multiple signals support this alert ({supporting} of {expected})."
-    if supporting == 1:
-        which = next(i.signal for i in indicators if i.status == "supports")
-        return f"Only {which} supports this alert ({supporting} of {expected}); treat with caution."
-    weak = sum(i.status == "weak" for i in indicators)
-    if weak:
-        return (f"Evidence is weak ({weak} of {expected} signals show weak support); "
-                "inspect manually.")
-    return "These indicators do not clearly support the alert; inspect manually."
+    """Factual count of the signals behind the alert (the model's confidence is shown apart)."""
+    which = [i.signal for i in indicators if i.status == "supports"]
+    partial = [i.signal for i in indicators if i.status == "weak"]
+    text = f"{supporting} of {expected} signals support this alert"
+    if which:
+        text += f" ({', '.join(which)})"
+    if partial:
+        text += f"; partial: {', '.join(partial)}"
+    return text + "."
 
 
 def _clip(segments: list[tuple[float, float]], lo: float, hi: float) -> list[tuple[float, float]]:
