@@ -262,6 +262,12 @@ def lab_available() -> bool:
     return LAB_DATASET in available_datasets() and d["truth"].is_dir()
 
 
+def valid_telemetry(bundle) -> dict[str, pd.DataFrame]:
+    """Valid telemetry rows per signal, in time order (the run file is sorted by t_s)."""
+    tel = bundle.telemetry[bundle.telemetry["valid"] == 1]
+    return {signal: rows.reset_index(drop=True) for signal, rows in tel.groupby("signal")}
+
+
 def start_run(dataset: str, run_id: str, held_out: str | None = None,
               lab: LabSettings | None = None) -> None:
     config = load_config_cached()
@@ -275,6 +281,7 @@ def start_run(dataset: str, run_id: str, held_out: str | None = None,
     crank, thermal = load_crosschecks()
     st.session_state.update(dataset=dataset, run_id=run_id, held_out=held_out, model=model,
                             lab=lab, lab_log=lab_log, bundle=bundle, packets=run_packets,
+                            telemetry=valid_telemetry(bundle),
                             engine=ReplayEngine(model, config, bundle.metadata,
                                                 localizer=localizer, crank=crank,
                                                 thermal=thermal),
@@ -573,6 +580,8 @@ with st.sidebar:
     state = st.session_state
     dataset, run_id, held_out = state.dataset, state.run_id, state.held_out
     model, bundle, run_packets = state.model, state.bundle, state.packets
+    if "telemetry" not in state:  # session started before this key existed
+        state.telemetry = valid_telemetry(bundle)
     issues = [] if lab_mode else load_bundle(str(DATASETS[dataset]["raw"]), run_id)[1]
     duration = bundle.metadata["duration_s"]
 
@@ -662,9 +671,8 @@ def alert_evidence(records, fault: str) -> EvidencePanel | None:
     rates = {m: getattr(bundle, f"{m}_fs_hz") for m in MODALITIES}
     waves = {m: getattr(bundle, m)[window_slice(t_end, rates[m], getattr(bundle, f"{m}_t0_s"),
                                                 config)] for m in MODALITIES}
-    tel = bundle.telemetry
-    rpm = tel[(tel["signal"] == "rpm") & (tel["valid"] == 1)
-              & (tel["t_s"] >= t_end - window_s) & (tel["t_s"] < t_end)]
+    rpm = received_rows("rpm", t_end)
+    rpm = rpm.iloc[int(rpm["t_s"].searchsorted(t_end - window_s, side="left")):]
     firing_hz = _firing_rate_hz(record["context"]["rpm"], config["engine"])
     return build_evidence(fault, waves, rates, t_end, window_s, rpm["t_s"].to_numpy(),
                           rpm["value"].to_numpy(), firing_hz, feature_z(record))
@@ -1004,10 +1012,17 @@ def multi_timeline(records) -> go.Figure:
     return timeline
 
 
+def received_rows(signal: str, t_now: float) -> pd.DataFrame:
+    """Valid rows of one telemetry signal received before t_now (binary search, no scan)."""
+    rows = st.session_state.telemetry.get(signal)
+    if rows is None:
+        return bundle.telemetry.iloc[:0]
+    return rows.iloc[:int(rows["t_s"].searchsorted(t_now, side="left"))]
+
+
 def freshness_info(signal: str, t_now: float) -> tuple[str, float | None, pd.DataFrame]:
     """Status ('fresh', 'STALE', 'no data'), age in s, and the valid rows received so far."""
-    rows = bundle.telemetry[(bundle.telemetry["signal"] == signal)
-                            & (bundle.telemetry["valid"] == 1) & (bundle.telemetry["t_s"] < t_now)]
+    rows = received_rows(signal, t_now)
     if rows.empty:
         return "no data", None, rows
     runtime = config["runtime"]
@@ -1235,10 +1250,8 @@ def live_view():
               "Long-term trim (%)"]
     tele = make_subplots(rows=2, cols=3, subplot_titles=[
         f"{title} · {freshness(s, t_now)}" for title, s in zip(titles, signals, strict=True)])
-    received_tele = bundle.telemetry[(bundle.telemetry["t_s"] < t_now)
-                                     & (bundle.telemetry["valid"] == 1)]
     for k, signal in enumerate(signals):
-        rows = received_tele[received_tele["signal"] == signal]
+        rows = received_rows(signal, t_now)
         tele.add_trace(go.Scatter(x=rows["t_s"], y=rows["value"], name=signal,
                                   line={"width": 1.5, "color": theme.TOKENS["cyan"]}),
                        row=k // 3 + 1, col=k % 3 + 1)

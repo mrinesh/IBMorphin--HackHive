@@ -30,7 +30,6 @@ GAP_PERIODS = 1.5    # spacing above this many firing periods is a missing pulse
 RPM_DIP_NOISE = 4.0  # RPM residual dip of this many noise units counts as fluctuation
 RPM_NOISE_FLOOR = 1.0  # rpm; avoids treating quantized telemetry as noise-free
 RPM_MATCH_S = 0.15   # an RPM dip within this time of a pulse segment accompanies it
-SIGNALS = ("sound", "vibration", "rpm")
 
 # What each fault should look like per signal. Features are scored in the given
 # direction ("up": increase supports; "both": any change supports).

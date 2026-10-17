@@ -36,7 +36,6 @@ import numpy as np
 
 from engine_diagnostics.data.run_io import wheel_gaps
 
-CRANK_FEATURE_VERSION = "1.0.0"
 PHASE_CAM, PHASE_WHEEL, PHASE_NONE = "cam_sync", "wheel_only", "none"
 SEGMENT_DEG = 90.0
 DETREND_STROKES = 5

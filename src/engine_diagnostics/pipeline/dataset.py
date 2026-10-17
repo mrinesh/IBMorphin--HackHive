@@ -24,9 +24,6 @@ from engine_diagnostics.pipeline.labels import (
     window_labels,
 )
 
-BOOKKEEPING = ["run_id", "engine_id", "split", "subset", "t_end_s", "label", "quality",
-               *FAULT_COLUMNS]
-
 
 def engine_splits(batch_config_path: Path) -> dict[str, str]:
     """Map engine_id to its partition from the batch configuration."""

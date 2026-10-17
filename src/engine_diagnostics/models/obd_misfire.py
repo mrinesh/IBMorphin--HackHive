@@ -166,12 +166,6 @@ class ObdMisfireMonitor:
                 "cylinder": worst + 1 if single else None,
                 "misfires": count.tolist()}
 
-    def first_dtc(self, kind: str | None = None) -> dict[str, Any] | None:
-        for dtc in self.dtcs:
-            if kind is None or dtc["type"] == kind:
-                return dtc
-        return None
-
     def snapshot(self) -> dict[str, Any]:
         """Counters for display: current block progress and misfires so far."""
         return {

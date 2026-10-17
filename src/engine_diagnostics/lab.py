@@ -39,7 +39,6 @@ LAB_FAULTS = ("none", "misfire", "knock_like")
 SENSORS = ("audio", "vibration", "rpm", "crank", "thermal")
 SHAPE_PEAK = 0.10549  # peak of the normalized stroke energy shape (render_crank_teeth.m)
 THERMAL_GRID_HZ = 100.0
-CYLINDERS = (1, 2, 3, 4)
 
 
 @dataclass(frozen=True)

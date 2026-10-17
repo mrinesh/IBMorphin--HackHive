@@ -73,11 +73,6 @@ class CylinderLocalizer:
         """Calibrated P(position p carries the fault), summing to 1 over positions."""
         return softmax(self.scores(fault, contrast) / self.temperatures.get(fault, 1.0))
 
-    def cylinder_probabilities(self, fault: str, contrast: np.ndarray) -> dict[int, float]:
-        """position_probabilities keyed by cylinder number (cam-phased contrast)."""
-        p = self.position_probabilities(fault, contrast)
-        return {int(c): float(v) for c, v in zip(self.firing_order, p, strict=True)}
-
 
 def candidate_matrix(contrast: np.ndarray) -> np.ndarray:
     """(positions, 2 * positions * values) rotated candidate vectors of one window."""

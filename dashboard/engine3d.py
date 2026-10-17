@@ -201,18 +201,22 @@ _CSS = """
 .engine3d-controls button[aria-pressed="true"] {
   background: #0a84ff; color: #fff;
 }
-.engine3d-controls button:focus-visible { outline: 3px solid rgba(10, 132, 255, 0.65); outline-offset: 2px; }
+.engine3d-controls button:focus-visible {
+  outline: 3px solid rgba(10, 132, 255, 0.65); outline-offset: 2px;
+}
 @media (prefers-reduced-motion: reduce) {
   .engine3d-controls button { transition: none; }
 }
 .engine3d-fallback[hidden], .engine3d-controls[hidden] { display: none; }
 .engine3d-fallback-status {
-  font: 500 13px/1.5 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif; color: #a1a1a8;
+  font: 500 13px/1.5 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+  color: #a1a1a8;
 }
 .engine3d-fallback {
   position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
   justify-content: center; gap: 8px; padding: 16px; background: #0b0b0d;
-  color: #f5f5f7; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif; text-align: center;
+  color: #f5f5f7; text-align: center;
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
 }
 """
 

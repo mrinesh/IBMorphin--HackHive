@@ -1,0 +1,7 @@
+# Keep the knowledge graph to project code and docs (gitignore syntax).
+# Vendored libraries, fonts, build output and agent tooling only add noise nodes.
+.claude/
+dashboard/static/vendor/
+dashboard/static/fonts/
+frontend-mvp/index.html
+uv.lock
